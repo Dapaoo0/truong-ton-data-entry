@@ -136,6 +136,27 @@ def insert_to_db(table_name: str, data: dict) -> bool:
             st.error(f"❌ Lỗi khi lưu vào {table_name}: {e}")
         return False
 
+def check_quantity_limit(lot_id, new_sl, log_type, giai_doan=None, exclude_id=None):
+    res_lot = supabase.table("base_lots").select("so_luong").eq("lot_id", lot_id).execute()
+    if not res_lot.data: return False, "❌ Lỗi: Không tìm thấy thông tin Lô."
+    total_planted = int(res_lot.data[0]["so_luong"])
+
+    total_used = 0
+    if log_type == "stage":
+        res = supabase.table("stage_logs").select("id, so_luong").eq("lot_id", lot_id).eq("giai_doan", giai_doan).execute()
+        total_used = sum(int(r["so_luong"]) for r in res.data if r["id"] != exclude_id)
+    elif log_type == "destruction":
+        res = supabase.table("destruction_logs").select("id, so_luong").eq("lot_id", lot_id).execute()
+        total_used = sum(int(r["so_luong"]) for r in res.data if r["id"] != exclude_id)
+    elif log_type == "harvest":
+        res = supabase.table("harvest_logs").select("id, so_luong").eq("lot_id", lot_id).execute()
+        total_used = sum(int(r["so_luong"]) for r in res.data if r["id"] != exclude_id)
+
+    if total_used + int(new_sl) > total_planted:
+        return False, f"❌ Vượt quá số lượng trồng ({total_planted} cây). Đã nhập cho giai đoạn này: {total_used}. Còn lại tối đa: {total_planted - total_used}."
+    return True, ""
+
+
 @dialog_decorator("⚠️ Xác nhận")
 def confirm_action_dialog(action, table_name, rec_id_or_none, data_dict, success_msg):
     st.warning("Vui lòng kiểm tra kỹ trước khi thực hiện!")
@@ -252,13 +273,16 @@ def edit_stage_log_dialog(editing_row, available_lots):
             if sl <= 0: st.error("❌ Nhập số lượng > 0.")
             elif not mau_day: st.error("❌ Phải chọn màu dây định danh lứa.")
             else:
-                data = {
-                    "lot_id": lot_id, "giai_doan": giai_doan, 
-                    "ngay_thuc_hien": ngay_th.isoformat(), "so_luong": sl, "mau_day": mau_day
-                }
-                supabase.table("stage_logs").update(data).eq("id", editing_row["id"]).execute()
-                st.session_state["toast"] = f"✅ Cập nhật tiến độ: {lot_id}!"
-                st.rerun()
+                is_valid, msg = check_quantity_limit(lot_id, sl, "stage", giai_doan=giai_doan, exclude_id=editing_row["id"])
+                if not is_valid: st.error(msg)
+                else:
+                    data = {
+                        "lot_id": lot_id, "giai_doan": giai_doan, 
+                        "ngay_thuc_hien": ngay_th.isoformat(), "so_luong": sl, "mau_day": mau_day
+                    }
+                    supabase.table("stage_logs").update(data).eq("id", editing_row["id"]).execute()
+                    st.session_state["toast"] = f"✅ Cập nhật tiến độ: {lot_id}!"
+                    st.rerun()
 
 @dialog_decorator("✏️ Chỉnh sửa Báo cáo Xuất Hủy")
 def edit_destruction_log_dialog(editing_row, available_lots):
@@ -283,10 +307,13 @@ def edit_destruction_log_dialog(editing_row, available_lots):
             if sl <= 0: st.error("❌ Nhập số lượng > 0.")
             elif not ly_do.strip(): st.error("❌ Cần ghi rõ lý do.")
             else:
-                data = {"lot_id": lot_id, "ngay_xuat_huy": ngay.isoformat(), "giai_doan": gxh, "ly_do": ly_do.strip(), "so_luong": sl}
-                supabase.table("destruction_logs").update(data).eq("id", editing_row["id"]).execute()
-                st.session_state["toast"] = "✅ Đã cập nhật!"
-                st.rerun()
+                is_valid, msg = check_quantity_limit(lot_id, sl, "destruction", exclude_id=editing_row["id"])
+                if not is_valid: st.error(msg)
+                else:
+                    data = {"lot_id": lot_id, "ngay_xuat_huy": ngay.isoformat(), "giai_doan": gxh, "ly_do": ly_do.strip(), "so_luong": sl}
+                    supabase.table("destruction_logs").update(data).eq("id", editing_row["id"]).execute()
+                    st.session_state["toast"] = "✅ Đã cập nhật!"
+                    st.rerun()
 
 @dialog_decorator("✏️ Chỉnh sửa Nhật ký Thu Hoạch")
 def edit_harvest_log_dialog(editing_row, available_lots):
@@ -305,10 +332,13 @@ def edit_harvest_log_dialog(editing_row, available_lots):
         if st.form_submit_button("✅ Cập nhật", use_container_width=True, type="primary"):
             if sl <= 0: st.error("❌ Số lượng buồng phải > 0")
             else:
-                data = {"lot_id": lot_id, "ngay_thu_hoach": ngay.isoformat(), "so_luong": sl}
-                supabase.table("harvest_logs").update(data).eq("id", editing_row["id"]).execute()
-                st.session_state["toast"] = f"✅ Lưu thu hoạch {lot_id} thành công!"
-                st.rerun()
+                is_valid, msg = check_quantity_limit(lot_id, sl, "harvest", exclude_id=editing_row["id"])
+                if not is_valid: st.error(msg)
+                else:
+                    data = {"lot_id": lot_id, "ngay_thu_hoach": ngay.isoformat(), "so_luong": sl}
+                    supabase.table("harvest_logs").update(data).eq("id", editing_row["id"]).execute()
+                    st.session_state["toast"] = f"✅ Lưu thu hoạch {lot_id} thành công!"
+                    st.rerun()
 
 @dialog_decorator("✏️ Chỉnh sửa BSR")
 def edit_bsr_log_dialog(editing_row, available_lots):
@@ -485,12 +515,15 @@ def render_main_app():
                         if sl <= 0: st.error("❌ Nhập số lượng > 0.")
                         elif not mau_day: st.error("❌ Phải chọn màu dây định danh lứa.")
                         else:
-                            data = {
-                                "farm": c_farm, "team": c_team, "lot_id": lot_id,
-                                "giai_doan": giai_doan, "ngay_thuc_hien": ngay_th.isoformat(),
-                                "so_luong": sl, "mau_day": mau_day
-                            }
-                            confirm_action_dialog("INSERT", "stage_logs", None, data, f"✅ Lưu tiến độ {giai_doan} {lot_id}!")
+                            is_valid, msg = check_quantity_limit(lot_id, sl, "stage", giai_doan=giai_doan)
+                            if not is_valid: st.error(msg)
+                            else:
+                                data = {
+                                    "farm": c_farm, "team": c_team, "lot_id": lot_id,
+                                    "giai_doan": giai_doan, "ngay_thuc_hien": ngay_th.isoformat(),
+                                    "so_luong": sl, "mau_day": mau_day
+                                }
+                                confirm_action_dialog("INSERT", "stage_logs", None, data, f"✅ Lưu tiến độ {giai_doan} {lot_id}!")
 
                 st.markdown("---")
                 col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
@@ -534,12 +567,15 @@ def render_main_app():
                         if sl <= 0: st.error("❌ Nhập số lượng > 0.")
                         elif not ly_do.strip(): st.error("❌ Cần ghi rõ lý do.")
                         else:
-                            data = {
-                                "farm": c_farm, "team": c_team, "lot_id": lot_id,
-                                "ngay_xuat_huy": ngay.isoformat(), "giai_doan": giai_doan_xuat_huy,
-                                "ly_do": ly_do.strip(), "so_luong": sl
-                            }
-                            confirm_action_dialog("INSERT", "destruction_logs", None, data, f"✅ Lưu xuất hủy lô {lot_id} thành công!")
+                            is_valid, msg = check_quantity_limit(lot_id, sl, "destruction")
+                            if not is_valid: st.error(msg)
+                            else:
+                                data = {
+                                    "farm": c_farm, "team": c_team, "lot_id": lot_id,
+                                    "ngay_xuat_huy": ngay.isoformat(), "giai_doan": giai_doan_xuat_huy,
+                                    "ly_do": ly_do.strip(), "so_luong": sl
+                                }
+                                confirm_action_dialog("INSERT", "destruction_logs", None, data, f"✅ Lưu xuất hủy lô {lot_id} thành công!")
 
                 st.markdown("---")
                 col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
@@ -584,8 +620,11 @@ def render_main_app():
                 if st.form_submit_button("✅ Cập nhật Thu hoạch", use_container_width=True, type="primary"):
                     if sl <= 0: st.error("❌ Số lượng buồng phải > 0")
                     else:
-                        data = {"farm": c_farm, "team": c_team, "lot_id": lot_id, "ngay_thu_hoach": ngay.isoformat(), "so_luong": sl}
-                        confirm_action_dialog("INSERT", "harvest_logs", None, data, f"✅ Lưu thu hoạch lô {lot_id} thành công!")
+                        is_valid, msg = check_quantity_limit(lot_id, sl, "harvest")
+                        if not is_valid: st.error(msg)
+                        else:
+                            data = {"farm": c_farm, "team": c_team, "lot_id": lot_id, "ngay_thu_hoach": ngay.isoformat(), "so_luong": sl}
+                            confirm_action_dialog("INSERT", "harvest_logs", None, data, f"✅ Lưu thu hoạch lô {lot_id} thành công!")
             
             st.markdown("---")
             col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
