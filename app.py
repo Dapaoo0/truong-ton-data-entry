@@ -547,20 +547,6 @@ def render_main_app():
         )
 
     st.markdown("")  # Khoảng cách
-    
-    # ----- Bảng 3: Lịch sử try cập (Hiển thị cho tất cả Farm để Admin dễ nhìn, hoặc chỉ hiện ở 1 view riêng) -----
-    with st.expander("🕒 Lịch sử truy cập hệ thống (Access Logs)", expanded=False):
-        df_access = fetch_access_logs()
-        if df_access.empty:
-            st.info("Chưa có lịch sử truy cập.")
-        else:
-            display_access = df_access[["farm", "action", "created_at"]].copy()
-            display_access.columns = ["Farm", "Hành động", "Thời gian"]
-            st.dataframe(
-                display_access,
-                use_container_width=True,
-                hide_index=True,
-            )
 
 
 # =====================================================
