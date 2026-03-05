@@ -136,76 +136,61 @@ def insert_to_db(table_name: str, data: dict) -> bool:
             st.error(f"❌ Lỗi khi lưu vào {table_name}: {e}")
         return False
 
-@dialog_decorator("⚠️ Xác nhận lưu dữ liệu")
-def confirm_save_dialog(table_name, data_dict, success_msg):
-    st.warning("Vui lòng kiểm tra kỹ dữ liệu trước khi lưu")
-    st.json(data_dict)
+@dialog_decorator("⚠️ Xác nhận")
+def confirm_action_dialog(action, table_name, rec_id_or_none, data_dict, success_msg):
+    st.warning("Vui lòng kiểm tra kỹ trước khi thực hiện!")
+    if data_dict:
+        st.json(data_dict)
+    else:
+        st.error("Xóa dữ liệu vĩnh viễn?")
     
     col1, col2 = st.columns(2)
     with col1:
         if st.button("✅ Tôi đã kiểm tra kỹ", use_container_width=True):
-            if insert_to_db(table_name, data_dict):
+            success = False
+            if action == "INSERT":
+                success = insert_to_db(table_name, data_dict)
+            elif action == "UPDATE":
+                try:
+                    supabase.table(table_name).update(data_dict).eq("id", rec_id_or_none).execute()
+                    success = True
+                except Exception as e:
+                    st.error(f"❌ Lỗi cập nhật: {e}")
+            elif action == "DELETE":
+                try:
+                    supabase.table(table_name).delete().eq("id", rec_id_or_none).execute()
+                    success = True
+                except Exception as e:
+                    st.error(f"❌ Lỗi xóa: {e}")
+            
+            if success:
                 st.session_state["toast"] = success_msg
                 st.rerun()
     with col2:
         if st.button("❌ Quay lại", use_container_width=True):
             st.rerun()
 
-def render_editable_dataframe(table_name, df, disabled_cols, display_cols):
+def get_editing_row(table_name, df):
+    idx_list = st.session_state.get(f"sel_{table_name}", {}).get("selection", {}).get("rows", [])
+    if idx_list and len(idx_list) > 0 and idx_list[0] < len(df):
+        row = df.iloc[idx_list[0]].to_dict()
+        created_at = pd.to_datetime(row["created_at"], utc=True)
+        is_within_48h = created_at > (pd.Timestamp.utcnow() - pd.Timedelta(hours=48))
+        return row, is_within_48h
+    return None, False
+
+def render_team_dataframe(table_name, df, display_cols):
     if df.empty:
-        st.info("Chưa có bản ghi nào.")
+        st.info("Chưa có dữ liệu.")
         return
-
-    df["created_at_dt"] = pd.to_datetime(df["created_at"], utc=True)
-    now = pd.Timestamp.utcnow()
-    mask_48h = df["created_at_dt"] > (now - pd.Timedelta(hours=48))
-    
-    df_editable = df[mask_48h].copy().drop(columns=["created_at_dt"]).reset_index(drop=True)
-    df_readonly = df[~mask_48h].copy().drop(columns=["created_at_dt"]).reset_index(drop=True)
-    
-    if not df_editable.empty:
-        st.markdown("**✏️ Dữ liệu có thể chỉnh sửa / xóa (Trong vòng 48h):**")
-        editor_key = f"editor_{table_name}"
-        
-        with st.form(f"form_edit_{table_name}"):
-            st.caption("Sửa trực tiếp vào bảng hoặc chọn hàng và bấm biểu tượng thùng rác để xóa.")
-            edited_df = st.data_editor(
-                df_editable,
-                use_container_width=True,
-                num_rows="dynamic",
-                disabled=disabled_cols,
-                column_order=display_cols,
-                key=editor_key
-            )
-            
-            if st.form_submit_button("Lưu thay đổi", type="primary"):
-                changes = st.session_state[editor_key]
-                has_changes = False
-                
-                # Deletions
-                for row_idx in changes.get("deleted_rows", []):
-                    rec_id = df_editable.iloc[row_idx]["id"]
-                    supabase.table(table_name).delete().eq("id", int(rec_id)).execute()
-                    has_changes = True
-                    
-                # Edits
-                for row_idx, edits in changes.get("edited_rows", {}).items():
-                    rec_id = df_editable.iloc[row_idx]["id"]
-                    clean_edits = {}
-                    for k, v in edits.items():
-                        if pd.isna(v): clean_edits[k] = None
-                        elif hasattr(v, "item"): clean_edits[k] = v.item()
-                        else: clean_edits[k] = v
-                    supabase.table(table_name).update(clean_edits).eq("id", int(rec_id)).execute()
-                    has_changes = True
-
-                if has_changes:
-                    st.session_state["toast"] = "✅ Đã lưu thay đổi thành công!"
-                st.rerun()
-                
-    if not df_readonly.empty:
-        st.markdown("**🔒 Dữ liệu cũ (Chỉ xem):**")
-        st.dataframe(df_readonly[display_cols], use_container_width=True)
+    st.dataframe(
+        df[display_cols],
+        use_container_width=True,
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        key=f"sel_{table_name}"
+    )
 
 
 # =====================================================
@@ -292,34 +277,57 @@ def render_main_app():
         # TAB 1: KHỞI TẠO LÔ
         with t1:
             st.markdown("#### Đăng ký đợt xuống giống mới")
+            df_lots = fetch_table_data("base_lots", c_farm)
+            df_lots_team = df_lots[df_lots["team"] == c_team] if not df_lots.empty else pd.DataFrame()
+            editing_row, is_within_48h = get_editing_row("base_lots", df_lots_team)
+            is_editing = editing_row is not None
+            
             with st.form("form_nt_base", clear_on_submit=False):
+                def_vu = VU_OPTIONS.index(editing_row["vu"]) if is_editing and editing_row["vu"] in VU_OPTIONS else 0
+                def_lo = editing_row["lo"] if is_editing else ""
+                def_loai = LOAI_TRONG_OPTIONS.index(editing_row["loai_trong"]) if is_editing and editing_row["loai_trong"] in LOAI_TRONG_OPTIONS else 0
+                def_ngay = pd.to_datetime(editing_row["ngay_trong"]).date() if is_editing else date.today()
+                def_sl = int(editing_row["so_luong"]) if is_editing else 0
+
                 col_a, col_b = st.columns(2)
                 with col_a:
-                    vu = st.selectbox("📅 Vụ", options=VU_OPTIONS)
-                    lo = st.text_input("🏷️ Tên Lô (VD: A1, B3...)", placeholder="Nhập tên lô...")
-                    loai_trong = st.selectbox("🌱 Loại trồng", options=LOAI_TRONG_OPTIONS)
+                    vu = st.selectbox("📅 Vụ", options=VU_OPTIONS, index=def_vu)
+                    lo = st.text_input("🏷️ Tên Lô (VD: A1, B3...)", placeholder="Nhập tên lô...", value=def_lo)
+                    loai_trong = st.selectbox("🌱 Loại trồng", options=LOAI_TRONG_OPTIONS, index=def_loai)
                 with col_b:
-                    ngay_trong = st.date_input("📆 Ngày trồng", value=date.today())
-                    so_luong = st.number_input("🔢 Số lượng trồng (cây)", min_value=0, step=100)
+                    ngay_trong = st.date_input("📆 Ngày trồng", value=def_ngay)
+                    so_luong = st.number_input("🔢 Số lượng trồng (cây)", min_value=0, step=100, value=def_sl)
 
-                if st.form_submit_button("✅ Tạo Lô Trồng", use_container_width=True, type="primary"):
-                    if not lo.strip(): st.error("❌ Nhập tên lô.")
+                col_b1, col_b2, col_b3 = st.columns(3)
+                if is_editing:
+                    btn_main = col_b1.form_submit_button("💾 Cập nhật", type="primary")
+                    btn_del = col_b2.form_submit_button("🗑️ Xóa", type="secondary")
+                else:
+                    btn_main = col_b1.form_submit_button("✅ Tạo Lô Trồng", type="primary")
+                    btn_del = False
+                
+                if btn_main or btn_del:
+                    if (btn_main or btn_del) and is_editing and not is_within_48h:
+                        st.error("❌ Dữ liệu quá 48h, không thể sửa/xóa.")
+                    elif btn_del:
+                        confirm_action_dialog("DELETE", "base_lots", editing_row["id"], None, f"✅ Đã xóa thành công lô {editing_row.get('lot_id')}!")
+                    elif not lo.strip(): st.error("❌ Nhập tên lô.")
                     elif so_luong <= 0: st.error("❌ Cần nhập số lượng.")
                     else:
-                        # Auto-generate lot_id: F1-A1-M (Mới) hoặc F1-A1-D (Dặm)
                         suffix = "M" if loai_trong == "Trồng mới" else "D"
-                        lot_id = f"{vu}-{lo.strip()}-{suffix}"
-                        
+                        lot_id = f"{vu}-{lo.strip()}-{suffix}".upper()
                         data = {
                             "farm": c_farm, "team": c_team, "vu": vu, "lo": lo.strip(),
-                            "loai_trong": loai_trong, "lot_id": lot_id.upper(),
+                            "loai_trong": loai_trong, "lot_id": lot_id,
                             "ngay_trong": ngay_trong.isoformat(), "so_luong": so_luong
                         }
-                        confirm_save_dialog("base_lots", data, f"✅ Tạo Lô: {lot_id.upper()} thành công!")
+                        if is_editing:
+                            confirm_action_dialog("UPDATE", "base_lots", editing_row["id"], data, f"✅ Cập nhật {lot_id} thành công!")
+                        else:
+                            confirm_action_dialog("INSERT", "base_lots", None, data, f"✅ Tạo Lô {lot_id} thành công!")
 
-            st.markdown('<p class="dataframe-header">Dữ liệu hiện tại: Các Lô trồng</p>', unsafe_allow_html=True)
-            df_lots = fetch_table_data("base_lots", c_farm)
-            render_editable_dataframe("base_lots", df_lots, ["id", "created_at", "team", "farm", "lot_id", "vu", "lo"], ["lot_id", "loai_trong", "ngay_trong", "so_luong", "team", "created_at"])
+            st.markdown('<p class="dataframe-header">Dữ liệu CỦA ĐỘI BẠN (Click 1 dòng để sửa/xóa)</p>', unsafe_allow_html=True)
+            render_team_dataframe("base_lots", df_lots_team, ["lot_id", "loai_trong", "ngay_trong", "so_luong", "created_at"])
 
         # TAB 2: CẬP NHẬT TIẾN ĐỘ NT
         with t2:
@@ -328,18 +336,42 @@ def render_main_app():
             if not available_lots:
                 st.warning("⚠️ Chưa có Lô trồng nào. Hãy tạo ở Tab 1.")
             else:
+                df_stg = fetch_table_data("stage_logs", c_farm)
+                df_stg_team = df_stg[df_stg["team"] == c_team] if not df_stg.empty else pd.DataFrame()
+                editing_row, is_within_48h = get_editing_row("stage_logs", df_stg_team)
+                is_editing = editing_row is not None
+                
                 with st.form("form_nt_stage", clear_on_submit=False):
+                    def_lot = available_lots.index(editing_row["lot_id"]) if is_editing and editing_row["lot_id"] in available_lots else 0
+                    def_gd = STAGE_NT_OPTIONS.index(editing_row["giai_doan"]) if is_editing and editing_row["giai_doan"] in STAGE_NT_OPTIONS else 0
+                    def_mau_list = [""] + MAU_DAY_OPTIONS
+                    def_mau = def_mau_list.index(editing_row["mau_day"]) if is_editing and editing_row["mau_day"] in def_mau_list else 0
+                    def_ngay = pd.to_datetime(editing_row["ngay_thuc_hien"]).date() if is_editing else date.today()
+                    def_sl = int(editing_row["so_luong"]) if is_editing else 0
+                    
                     col_a, col_b = st.columns(2)
                     with col_a:
-                        lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots)
-                        giai_doan = st.radio("📌 Giai đoạn", options=STAGE_NT_OPTIONS, horizontal=True)
-                        mau_day = st.selectbox("🎨 Màu dây", options=[""] + MAU_DAY_OPTIONS)
+                        lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, index=def_lot)
+                        giai_doan = st.radio("📌 Giai đoạn", options=STAGE_NT_OPTIONS, index=def_gd, horizontal=True)
+                        mau_day = st.selectbox("🎨 Màu dây", options=def_mau_list, index=def_mau)
                     with col_b:
-                        ngay_th = st.date_input("📆 Ngày thực hiện", value=date.today())
-                        sl = st.number_input("🔢 Số lượng cây", min_value=0, step=100)
+                        ngay_th = st.date_input("📆 Ngày thực hiện", value=def_ngay)
+                        sl = st.number_input("🔢 Số lượng cây", min_value=0, step=100, value=def_sl)
 
-                    if st.form_submit_button("✅ Cập nhật Tiến độ", use_container_width=True, type="primary"):
-                        if sl <= 0: st.error("❌ Nhập số lượng > 0.")
+                    col_b1, col_b2, col_b3 = st.columns(3)
+                    if is_editing:
+                        btn_main = col_b1.form_submit_button("💾 Cập nhật", type="primary")
+                        btn_del = col_b2.form_submit_button("🗑️ Xóa", type="secondary")
+                    else:
+                        btn_main = col_b1.form_submit_button("✅ Cập nhật Tiến độ", type="primary")
+                        btn_del = False
+                        
+                    if btn_main or btn_del:
+                        if (btn_main or btn_del) and is_editing and not is_within_48h:
+                            st.error("❌ Dữ liệu quá 48h, không thể sửa/xóa.")
+                        elif btn_del:
+                            confirm_action_dialog("DELETE", "stage_logs", editing_row["id"], None, "✅ Đã xóa thành công!")
+                        elif sl <= 0: st.error("❌ Nhập số lượng > 0.")
                         elif not mau_day: st.error("❌ Phải chọn màu dây định danh lứa.")
                         else:
                             data = {
@@ -347,11 +379,13 @@ def render_main_app():
                                 "giai_doan": giai_doan, "ngay_thuc_hien": ngay_th.isoformat(),
                                 "so_luong": sl, "mau_day": mau_day
                             }
-                            confirm_save_dialog("stage_logs", data, f"✅ Lưu tiến độ {giai_doan} lô {lot_id} thành công!")
+                            if is_editing:
+                                confirm_action_dialog("UPDATE", "stage_logs", editing_row["id"], data, f"✅ Cập nhật tiến độ: {lot_id}!")
+                            else:
+                                confirm_action_dialog("INSERT", "stage_logs", None, data, f"✅ Lưu tiến độ {giai_doan} {lot_id}!")
 
-                st.markdown('<p class="dataframe-header">Dữ liệu hiện tại: Tiến độ Nông trường</p>', unsafe_allow_html=True)
-                df_stg = fetch_table_data("stage_logs", c_farm)
-                render_editable_dataframe("stage_logs", df_stg, ["id", "created_at", "team", "farm", "lot_id", "giai_doan"], ["lot_id", "giai_doan", "ngay_thuc_hien", "so_luong", "mau_day", "team"])
+                st.markdown('<p class="dataframe-header">Dữ liệu CỦA ĐỘI BẠN (Click 1 dòng để sửa/xóa)</p>', unsafe_allow_html=True)
+                render_team_dataframe("stage_logs", df_stg_team, ["lot_id", "giai_doan", "ngay_thuc_hien", "so_luong", "mau_day"])
 
         # TAB 3: XUẤT HỦY
         with t3:
@@ -360,18 +394,41 @@ def render_main_app():
             if not available_lots:
                 st.warning("⚠️ Chưa có Lô trồng nào.")
             else:
+                df_des = fetch_table_data("destruction_logs", c_farm)
+                df_des_team = df_des[df_des["team"] == c_team] if not df_des.empty else pd.DataFrame()
+                editing_row, is_within_48h = get_editing_row("destruction_logs", df_des_team)
+                is_editing = editing_row is not None
+                
                 with st.form("form_nt_destroy", clear_on_submit=False):
+                    def_lot = available_lots.index(editing_row["lot_id"]) if is_editing and editing_row["lot_id"] in available_lots else 0
+                    def_gd = DESTRUCTION_STAGE_OPTIONS.index(editing_row["giai_doan"]) if is_editing and editing_row["giai_doan"] in DESTRUCTION_STAGE_OPTIONS else 0
+                    def_ly_do = str(editing_row["ly_do"]) if is_editing else ""
+                    def_ngay = pd.to_datetime(editing_row["ngay_xuat_huy"]).date() if is_editing else date.today()
+                    def_sl = int(editing_row["so_luong"]) if is_editing else 0
+                    
                     col_a, col_b = st.columns(2)
                     with col_a:
-                        lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, key="destry_lot")
-                        giai_doan_xuat_huy = st.selectbox("⏱️ Giai đoạn xuất hủy", options=DESTRUCTION_STAGE_OPTIONS)
-                        ly_do = st.text_area("📝 Lý do (Gió, bệnh...)", height=100)
+                        lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, index=def_lot)
+                        giai_doan_xuat_huy = st.selectbox("⏱️ Giai đoạn xuất hủy", options=DESTRUCTION_STAGE_OPTIONS, index=def_gd)
+                        ly_do = st.text_area("📝 Lý do (Gió, bệnh...)", height=100, value=def_ly_do)
                     with col_b:
-                        ngay = st.date_input("📆 Ngày xuất hủy", value=date.today(), key="destroy_d")
-                        sl = st.number_input("🔢 Số lượng cây xuất hủy", min_value=0, step=10)
+                        ngay = st.date_input("📆 Ngày xuất hủy", value=def_ngay)
+                        sl = st.number_input("🔢 Số lượng cây xuất hủy", min_value=0, step=10, value=def_sl)
 
-                    if st.form_submit_button("🗑️ Ghi nhận Xuất hủy", use_container_width=True, type="primary"):
-                        if sl <= 0: st.error("❌ Nhập số lượng xuất hủy > 0.")
+                    col_b1, col_b2, col_b3 = st.columns(3)
+                    if is_editing:
+                        btn_main = col_b1.form_submit_button("� Cập nhật", type="primary")
+                        btn_del = col_b2.form_submit_button("�🗑️ Xóa", type="secondary")
+                    else:
+                        btn_main = col_b1.form_submit_button("🗑️ Ghi nhận Xuất hủy", type="primary")
+                        btn_del = False
+                        
+                    if btn_main or btn_del:
+                        if (btn_main or btn_del) and is_editing and not is_within_48h:
+                            st.error("❌ Dữ liệu quá 48h, không thể sửa/xóa.")
+                        elif btn_del:
+                            confirm_action_dialog("DELETE", "destruction_logs", editing_row["id"], None, "✅ Đã xóa xuất hủy!")
+                        elif sl <= 0: st.error("❌ Nhập số lượng > 0.")
                         elif not ly_do.strip(): st.error("❌ Cần ghi rõ lý do.")
                         else:
                             data = {
@@ -379,11 +436,13 @@ def render_main_app():
                                 "ngay_xuat_huy": ngay.isoformat(), "giai_doan": giai_doan_xuat_huy,
                                 "ly_do": ly_do.strip(), "so_luong": sl
                             }
-                            confirm_save_dialog("destruction_logs", data, f"✅ Lưu xuất hủy lô {lot_id} thành công!")
+                            if is_editing:
+                                confirm_action_dialog("UPDATE", "destruction_logs", editing_row["id"], data, f"✅ Đã cập nhật!")
+                            else:
+                                confirm_action_dialog("INSERT", "destruction_logs", None, data, f"✅ Lưu xuất hủy lô {lot_id} thành công!")
 
-                st.markdown('<p class="dataframe-header">Dữ liệu hiện tại: Số lượng Xuất hủy</p>', unsafe_allow_html=True)
-                df_des = fetch_table_data("destruction_logs", c_farm)
-                render_editable_dataframe("destruction_logs", df_des, ["id", "created_at", "team", "farm", "lot_id"], ["lot_id", "ngay_xuat_huy", "giai_doan", "so_luong", "ly_do", "team"])
+                st.markdown('<p class="dataframe-header">Dữ liệu CỦA ĐỘI BẠN (Click 1 dòng để sửa/xóa)</p>', unsafe_allow_html=True)
+                render_team_dataframe("destruction_logs", df_des_team, ["lot_id", "ngay_xuat_huy", "giai_doan", "so_luong", "ly_do"])
 
 
     # =================================================
@@ -395,24 +454,47 @@ def render_main_app():
         if not available_lots:
             st.warning("⚠️ Chưa có Lô trồng nào trên hệ thống.")
         else:
+            df_har = fetch_table_data("harvest_logs", c_farm)
+            df_har_team = df_har[df_har["team"] == c_team] if not df_har.empty else pd.DataFrame()
+            editing_row, is_within_48h = get_editing_row("harvest_logs", df_har_team)
+            is_editing = editing_row is not None
+            
             with st.form("form_harvest", clear_on_submit=False):
+                def_lot = available_lots.index(editing_row["lot_id"]) if is_editing and editing_row["lot_id"] in available_lots else 0
+                def_ngay = pd.to_datetime(editing_row["ngay_thu_hoach"]).date() if is_editing else date.today()
+                def_sl = int(editing_row["so_luong"]) if is_editing else 0
+                
                 col_a, col_b = st.columns(2)
                 with col_a:
-                    lot_id = st.selectbox("🏷️ Chọn Lô thu hoạch", options=available_lots)
-                    ngay = st.date_input("📆 Ngày thu hoạch", value=date.today())
+                    lot_id = st.selectbox("🏷️ Chọn Lô thu hoạch", options=available_lots, index=def_lot)
+                    ngay = st.date_input("📆 Ngày thu hoạch", value=def_ngay)
                 with col_b:
-                    sl = st.number_input("🍌 Số lượng buồng thu hoạch", min_value=0, step=50)
+                    sl = st.number_input("🍌 Số lượng buồng thu hoạch", min_value=0, step=50, value=def_sl)
 
                 st.markdown("")
-                if st.form_submit_button("✅ Cập nhật Thu hoạch", use_container_width=True, type="primary"):
-                    if sl <= 0: st.error("❌ Số lượng buồng phải > 0")
+                col_b1, col_b2, col_b3 = st.columns(3)
+                if is_editing:
+                    btn_main = col_b1.form_submit_button("💾 Cập nhật Thu hoạch", type="primary")
+                    btn_del = col_b2.form_submit_button("🗑️ Xóa", type="secondary")
+                else:
+                    btn_main = col_b1.form_submit_button("✅ Cập nhật Thu hoạch", type="primary")
+                    btn_del = False
+                    
+                if btn_main or btn_del:
+                    if (btn_main or btn_del) and is_editing and not is_within_48h:
+                        st.error("❌ Dữ liệu quá 48h.")
+                    elif btn_del:
+                        confirm_action_dialog("DELETE", "harvest_logs", editing_row["id"], None, "✅ Xóa thành công!")
+                    elif sl <= 0: st.error("❌ Số lượng buồng phải > 0")
                     else:
                         data = {"farm": c_farm, "team": c_team, "lot_id": lot_id, "ngay_thu_hoach": ngay.isoformat(), "so_luong": sl}
-                        confirm_save_dialog("harvest_logs", data, f"✅ Lưu lịch sử thu hoạch lô {lot_id} thành công!")
+                        if is_editing:
+                            confirm_action_dialog("UPDATE", "harvest_logs", editing_row["id"], data, f"✅ Lưu thu hoạch lô {lot_id} thành công!")
+                        else:
+                            confirm_action_dialog("INSERT", "harvest_logs", None, data, f"✅ Lưu thu hoạch lô {lot_id} thành công!")
             
-            st.markdown('<p class="dataframe-header">Dữ liệu hiện tại: Nhập liệu Thu hoạch</p>', unsafe_allow_html=True)
-            df_har = fetch_table_data("harvest_logs", c_farm)
-            render_editable_dataframe("harvest_logs", df_har, ["id", "created_at", "team", "farm", "lot_id"], ["lot_id", "ngay_thu_hoach", "so_luong", "created_at"])
+            st.markdown('<p class="dataframe-header">Dữ liệu CỦA ĐỘI BẠN (Click 1 dòng để sửa/xóa)</p>', unsafe_allow_html=True)
+            render_team_dataframe("harvest_logs", df_har_team, ["lot_id", "ngay_thu_hoach", "so_luong", "created_at"])
 
 
     # =================================================
@@ -424,24 +506,47 @@ def render_main_app():
         if not available_lots:
             st.warning("⚠️ Chưa có Lô trồng nào trên hệ thống.")
         else:
+            df_bsr = fetch_table_data("bsr_logs", c_farm)
+            df_bsr_team = df_bsr[df_bsr["team"] == c_team] if not df_bsr.empty else pd.DataFrame()
+            editing_row, is_within_48h = get_editing_row("bsr_logs", df_bsr_team)
+            is_editing = editing_row is not None
+            
             with st.form("form_bsr", clear_on_submit=False):
+                def_lot = available_lots.index(editing_row["lot_id"]) if is_editing and editing_row["lot_id"] in available_lots else 0
+                def_ngay = pd.to_datetime(editing_row["ngay_nhap"]).date() if is_editing else date.today()
+                def_bsr = float(editing_row["bsr"]) if is_editing else 0.0
+                
                 col_a, col_b = st.columns(2)
                 with col_a:
-                    lot_id = st.selectbox("🏷️ Chọn Lô đóng gói", options=available_lots)
-                    ngay = st.date_input("📆 Ngày đóng gói", value=date.today())
+                    lot_id = st.selectbox("🏷️ Chọn Lô đóng gói", options=available_lots, index=def_lot)
+                    ngay = st.date_input("📆 Ngày đóng gói", value=def_ngay)
                 with col_b:
-                    bsr_val = st.number_input("📐 Nhập tỷ lệ BSR (Buồng / Sản Rạ)", min_value=0.0, value=0.0, step=0.1, format="%.2f")
+                    bsr_val = st.number_input("📐 Nhập tỷ lệ BSR (Buồng / Sản Rạ)", min_value=0.0, value=def_bsr, step=0.1, format="%.2f")
 
                 st.markdown("")
-                if st.form_submit_button("✅ Cập nhật BSR", use_container_width=True, type="primary"):
-                    if bsr_val <= 0: st.error("❌ Tỷ lệ BSR phải > 0")
+                col_b1, col_b2, col_b3 = st.columns(3)
+                if is_editing:
+                    btn_main = col_b1.form_submit_button("💾 Cập nhật BSR", type="primary")
+                    btn_del = col_b2.form_submit_button("🗑️ Xóa", type="secondary")
+                else:
+                    btn_main = col_b1.form_submit_button("✅ Cập nhật BSR", type="primary")
+                    btn_del = False
+                    
+                if btn_main or btn_del:
+                    if (btn_main or btn_del) and is_editing and not is_within_48h:
+                        st.error("❌ Dữ liệu quá 48h.")
+                    elif btn_del:
+                        confirm_action_dialog("DELETE", "bsr_logs", editing_row["id"], None, "✅ Xóa thành công!")
+                    elif bsr_val <= 0: st.error("❌ Tỷ lệ BSR phải > 0")
                     else:
                         data = {"farm": c_farm, "team": c_team, "lot_id": lot_id, "ngay_nhap": ngay.isoformat(), "bsr": bsr_val}
-                        confirm_save_dialog("bsr_logs", data, f"✅ Ghi nhận BSR lô {lot_id} thành công!")
+                        if is_editing:
+                            confirm_action_dialog("UPDATE", "bsr_logs", editing_row["id"], data, f"✅ Ghi nhận BSR lô {lot_id} thành công!")
+                        else:
+                            confirm_action_dialog("INSERT", "bsr_logs", None, data, f"✅ Ghi nhận BSR lô {lot_id} thành công!")
             
-            st.markdown('<p class="dataframe-header">Dữ liệu hiện tại: Nhập liệu BSR</p>', unsafe_allow_html=True)
-            df_bsr = fetch_table_data("bsr_logs", c_farm)
-            render_editable_dataframe("bsr_logs", df_bsr, ["id", "created_at", "team", "farm", "lot_id"], ["lot_id", "ngay_nhap", "bsr", "created_at"])
+            st.markdown('<p class="dataframe-header">Dữ liệu CỦA ĐỘI BẠN (Click 1 dòng để sửa/xóa)</p>', unsafe_allow_html=True)
+            render_team_dataframe("bsr_logs", df_bsr_team, ["lot_id", "ngay_nhap", "bsr", "created_at"])
 
 
     st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
