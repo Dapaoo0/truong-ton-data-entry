@@ -7,10 +7,21 @@
 
 import streamlit as st
 import pandas as pd
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 import os
 from dotenv import load_dotenv
 from supabase import create_client, Client
+
+if hasattr(st, "dialog"):
+    dialog_decorator = st.dialog
+elif hasattr(st, "experimental_dialog"):
+    dialog_decorator = st.experimental_dialog
+else:
+    # Fallback to function if strictly not supported
+    def dialog_decorator(title):
+        def decorator(func):
+            return func
+        return decorator
 
 # =====================================================
 # CẤU HÌNH BAN ĐẦU
@@ -125,6 +136,77 @@ def insert_to_db(table_name: str, data: dict) -> bool:
             st.error(f"❌ Lỗi khi lưu vào {table_name}: {e}")
         return False
 
+@dialog_decorator("⚠️ Xác nhận lưu dữ liệu")
+def confirm_save_dialog(table_name, data_dict, success_msg):
+    st.warning("Vui lòng kiểm tra kỹ dữ liệu trước khi lưu")
+    st.json(data_dict)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("✅ Tôi đã kiểm tra kỹ", use_container_width=True):
+            if insert_to_db(table_name, data_dict):
+                st.session_state["toast"] = success_msg
+                st.rerun()
+    with col2:
+        if st.button("❌ Quay lại", use_container_width=True):
+            st.rerun()
+
+def render_editable_dataframe(table_name, df, disabled_cols, display_cols):
+    if df.empty:
+        st.info("Chưa có bản ghi nào.")
+        return
+
+    df["created_at_dt"] = pd.to_datetime(df["created_at"], utc=True)
+    now = pd.Timestamp.utcnow()
+    mask_48h = df["created_at_dt"] > (now - pd.Timedelta(hours=48))
+    
+    df_editable = df[mask_48h].copy().drop(columns=["created_at_dt"]).reset_index(drop=True)
+    df_readonly = df[~mask_48h].copy().drop(columns=["created_at_dt"]).reset_index(drop=True)
+    
+    if not df_editable.empty:
+        st.markdown("**✏️ Dữ liệu có thể chỉnh sửa / xóa (Trong vòng 48h):**")
+        editor_key = f"editor_{table_name}"
+        
+        with st.form(f"form_edit_{table_name}"):
+            st.caption("Sửa trực tiếp vào bảng hoặc chọn hàng và bấm biểu tượng thùng rác để xóa.")
+            edited_df = st.data_editor(
+                df_editable,
+                use_container_width=True,
+                num_rows="dynamic",
+                disabled=disabled_cols,
+                column_order=display_cols,
+                key=editor_key
+            )
+            
+            if st.form_submit_button("Lưu thay đổi", type="primary"):
+                changes = st.session_state[editor_key]
+                has_changes = False
+                
+                # Deletions
+                for row_idx in changes.get("deleted_rows", []):
+                    rec_id = df_editable.iloc[row_idx]["id"]
+                    supabase.table(table_name).delete().eq("id", int(rec_id)).execute()
+                    has_changes = True
+                    
+                # Edits
+                for row_idx, edits in changes.get("edited_rows", {}).items():
+                    rec_id = df_editable.iloc[row_idx]["id"]
+                    clean_edits = {}
+                    for k, v in edits.items():
+                        if pd.isna(v): clean_edits[k] = None
+                        elif hasattr(v, "item"): clean_edits[k] = v.item()
+                        else: clean_edits[k] = v
+                    supabase.table(table_name).update(clean_edits).eq("id", int(rec_id)).execute()
+                    has_changes = True
+
+                if has_changes:
+                    st.session_state["toast"] = "✅ Đã lưu thay đổi thành công!"
+                st.rerun()
+                
+    if not df_readonly.empty:
+        st.markdown("**🔒 Dữ liệu cũ (Chỉ xem):**")
+        st.dataframe(df_readonly[display_cols], use_container_width=True)
+
 
 # =====================================================
 # MÀN HÌNH ĐĂNG NHẬP
@@ -196,6 +278,9 @@ def render_main_app():
         st.info("📌 Dữ liệu được lưu trên đám mây Supabase.")
 
     # --- HEADER ---
+    if "toast" in st.session_state:
+        st.success(st.session_state.pop("toast"))
+        
     st.markdown(f'<p class="main-title">Hệ thống {c_team} - {c_farm}</p>', unsafe_allow_html=True)
 
     # =================================================
@@ -230,14 +315,11 @@ def render_main_app():
                             "loai_trong": loai_trong, "lot_id": lot_id.upper(),
                             "ngay_trong": ngay_trong.isoformat(), "so_luong": so_luong
                         }
-                        if insert_to_db("base_lots", data):
-                            st.success(f"✅ Tạo Lô: {lot_id.upper()} thành công!")
-                            st.balloons()
+                        confirm_save_dialog("base_lots", data, f"✅ Tạo Lô: {lot_id.upper()} thành công!")
 
-            st.markdown('<p class="dataframe-header">Bảng dữ liệu: Các Lô trồng</p>', unsafe_allow_html=True)
+            st.markdown('<p class="dataframe-header">Dữ liệu hiện tại: Các Lô trồng</p>', unsafe_allow_html=True)
             df_lots = fetch_table_data("base_lots", c_farm)
-            if not df_lots.empty:
-                st.dataframe(df_lots[["lot_id", "loai_trong", "ngay_trong", "so_luong", "team", "created_at"]], use_container_width=True, hide_index=True)
+            render_editable_dataframe("base_lots", df_lots, ["id", "created_at", "team", "farm", "lot_id", "vu", "lo"], ["lot_id", "loai_trong", "ngay_trong", "so_luong", "team", "created_at"])
 
         # TAB 2: CẬP NHẬT TIẾN ĐỘ NT
         with t2:
@@ -251,7 +333,7 @@ def render_main_app():
                     with col_a:
                         lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots)
                         giai_doan = st.radio("📌 Giai đoạn", options=STAGE_NT_OPTIONS, horizontal=True)
-                        mau_day = st.selectbox("🎨 Màu dây (Bắt buộc)", options=[""] + MAU_DAY_OPTIONS)
+                        mau_day = st.selectbox("🎨 Màu dây", options=[""] + MAU_DAY_OPTIONS)
                     with col_b:
                         ngay_th = st.date_input("📆 Ngày thực hiện", value=date.today())
                         sl = st.number_input("🔢 Số lượng cây", min_value=0, step=100)
@@ -265,13 +347,11 @@ def render_main_app():
                                 "giai_doan": giai_doan, "ngay_thuc_hien": ngay_th.isoformat(),
                                 "so_luong": sl, "mau_day": mau_day
                             }
-                            if insert_to_db("stage_logs", data):
-                                st.success(f"✅ Lưu tiến độ {giai_doan} lô {lot_id} thành công!")
+                            confirm_save_dialog("stage_logs", data, f"✅ Lưu tiến độ {giai_doan} lô {lot_id} thành công!")
 
-                st.markdown('<p class="dataframe-header">Bảng dữ liệu: Tiến độ Nông trường</p>', unsafe_allow_html=True)
+                st.markdown('<p class="dataframe-header">Dữ liệu hiện tại: Tiến độ Nông trường</p>', unsafe_allow_html=True)
                 df_stg = fetch_table_data("stage_logs", c_farm)
-                if not df_stg.empty:
-                    st.dataframe(df_stg[["lot_id", "giai_doan", "ngay_thuc_hien", "so_luong", "mau_day", "team"]], use_container_width=True, hide_index=True)
+                render_editable_dataframe("stage_logs", df_stg, ["id", "created_at", "team", "farm", "lot_id", "giai_doan"], ["lot_id", "giai_doan", "ngay_thuc_hien", "so_luong", "mau_day", "team"])
 
         # TAB 3: XUẤT HỦY
         with t3:
@@ -299,13 +379,11 @@ def render_main_app():
                                 "ngay_xuat_huy": ngay.isoformat(), "giai_doan": giai_doan_xuat_huy,
                                 "ly_do": ly_do.strip(), "so_luong": sl
                             }
-                            if insert_to_db("destruction_logs", data):
-                                st.success(f"✅ Lưu xuất hủy lô {lot_id} thành công!")
+                            confirm_save_dialog("destruction_logs", data, f"✅ Lưu xuất hủy lô {lot_id} thành công!")
 
-                st.markdown('<p class="dataframe-header">Bảng dữ liệu: Số lượng Xuất hủy</p>', unsafe_allow_html=True)
+                st.markdown('<p class="dataframe-header">Dữ liệu hiện tại: Số lượng Xuất hủy</p>', unsafe_allow_html=True)
                 df_des = fetch_table_data("destruction_logs", c_farm)
-                if not df_des.empty:
-                    st.dataframe(df_des[["lot_id", "ngay_xuat_huy", "giai_doan", "so_luong", "ly_do", "team"]], use_container_width=True, hide_index=True)
+                render_editable_dataframe("destruction_logs", df_des, ["id", "created_at", "team", "farm", "lot_id"], ["lot_id", "ngay_xuat_huy", "giai_doan", "so_luong", "ly_do", "team"])
 
 
     # =================================================
@@ -330,13 +408,11 @@ def render_main_app():
                     if sl <= 0: st.error("❌ Số lượng buồng phải > 0")
                     else:
                         data = {"farm": c_farm, "team": c_team, "lot_id": lot_id, "ngay_thu_hoach": ngay.isoformat(), "so_luong": sl}
-                        if insert_to_db("harvest_logs", data):
-                            st.success(f"✅ Lưu lịch sử thu hoạch lô {lot_id} thành công!")
+                        confirm_save_dialog("harvest_logs", data, f"✅ Lưu lịch sử thu hoạch lô {lot_id} thành công!")
             
-            st.markdown('<p class="dataframe-header">Lịch sử Nhập liệu Thu hoạch</p>', unsafe_allow_html=True)
+            st.markdown('<p class="dataframe-header">Dữ liệu hiện tại: Nhập liệu Thu hoạch</p>', unsafe_allow_html=True)
             df_har = fetch_table_data("harvest_logs", c_farm)
-            if not df_har.empty:
-                st.dataframe(df_har[["lot_id", "ngay_thu_hoach", "so_luong", "created_at"]], use_container_width=True, hide_index=True)
+            render_editable_dataframe("harvest_logs", df_har, ["id", "created_at", "team", "farm", "lot_id"], ["lot_id", "ngay_thu_hoach", "so_luong", "created_at"])
 
 
     # =================================================
@@ -361,25 +437,20 @@ def render_main_app():
                     if bsr_val <= 0: st.error("❌ Tỷ lệ BSR phải > 0")
                     else:
                         data = {"farm": c_farm, "team": c_team, "lot_id": lot_id, "ngay_nhap": ngay.isoformat(), "bsr": bsr_val}
-                        if insert_to_db("bsr_logs", data):
-                            st.success(f"✅ Ghi nhận BSR lô {lot_id} thành công!")
+                        confirm_save_dialog("bsr_logs", data, f"✅ Ghi nhận BSR lô {lot_id} thành công!")
             
-            st.markdown('<p class="dataframe-header">Lịch sử Nhập liệu BSR</p>', unsafe_allow_html=True)
+            st.markdown('<p class="dataframe-header">Dữ liệu hiện tại: Nhập liệu BSR</p>', unsafe_allow_html=True)
             df_bsr = fetch_table_data("bsr_logs", c_farm)
-            if not df_bsr.empty:
-                st.dataframe(df_bsr[["lot_id", "ngay_nhap", "bsr", "created_at"]], use_container_width=True, hide_index=True)
+            render_editable_dataframe("bsr_logs", df_bsr, ["id", "created_at", "team", "farm", "lot_id"], ["lot_id", "ngay_nhap", "bsr", "created_at"])
 
 
-    # =================================================
-    # KHU VỰC HIỂN THỊ DỮ LIỆU TỔNG QUAN (CHO MỌI ĐỘI)
-    # =================================================
     st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
     st.markdown("### 🌐 Bảng dữ liệu Toàn cục Farm")
     st.caption("Cho phép tra cứu chéo Lô trồng và Tiến độ sinh trưởng từ các Đội khác.")
     
     col_t1, col_t2 = st.columns(2)
     with col_t1:
-        st.markdown('<p class="dataframe-header">🌱 Lô Trồng (Base Lots)</p>', unsafe_allow_html=True)
+        st.markdown('<p class="dataframe-header">🌱 Lô Trồng</p>', unsafe_allow_html=True)
         df_lots_all = fetch_table_data("base_lots", c_farm)
         if not df_lots_all.empty:
              st.dataframe(df_lots_all[["lot_id", "loai_trong", "ngay_trong", "so_luong", "team"]], use_container_width=True, hide_index=True)
@@ -387,7 +458,7 @@ def render_main_app():
              st.info("Chưa có dữ liệu.")
              
     with col_t2:
-        st.markdown('<p class="dataframe-header">📈 Sinh Trưởng (Stage Logs)</p>', unsafe_allow_html=True)
+        st.markdown('<p class="dataframe-header">📈 Sinh Trưởng</p>', unsafe_allow_html=True)
         df_stg_all = fetch_table_data("stage_logs", c_farm)
         if not df_stg_all.empty:
              st.dataframe(df_stg_all[["lot_id", "giai_doan", "ngay_thuc_hien", "so_luong", "mau_day", "team"]], use_container_width=True, hide_index=True)
