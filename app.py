@@ -37,9 +37,9 @@ st.set_page_config(
 # MẢNG MẬT KHẨU CỨNG (CHỈ ĐỂ TEST)
 # =====================================================
 FARM_PASSWORDS = {
-    "Farm 1": "123",
-    "Farm 2": "456",
-    "Farm 3": "789",
+    "Farm 126": "123",
+    "Farm 157": "456",
+    "Farm 195": "789",
 }
 
 # Danh sách vụ và màu dây
