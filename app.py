@@ -1,7 +1,7 @@
 """
 =======================================================================
   ỨNG DỤNG NHẬP LIỆU QUẢN LÝ TIẾN ĐỘ SINH TRƯỞNG CHUỐI XUẤT KHẨU
-  Công ty Trường Tồn  |  Streamlit + Supabase
+  Công ty Trường Tồn  |  Streamlit + Supabase (RBAC Version 2.0)
 =======================================================================
 """
 
@@ -16,16 +16,12 @@ from supabase import create_client, Client
 # CẤU HÌNH BAN ĐẦU
 # =====================================================
 
-# Load biến môi trường từ file .env
 load_dotenv()
-
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-# Khởi tạo Supabase client
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Cấu hình trang Streamlit
 st.set_page_config(
     page_title="Trường Tồn - Quản lý Tiến độ Chuối",
     page_icon="🍌",
@@ -34,537 +30,352 @@ st.set_page_config(
 )
 
 # =====================================================
-# MẢNG MẬT KHẨU CỨNG (CHỈ ĐỂ TEST)
+# MẢNG MẬT KHẨU CỨNG & QUYỀN (RBAC)
 # =====================================================
-FARM_PASSWORDS = {
-    "Farm 126": "123",
-    "Farm 157": "456",
-    "Farm 195": "789",
+# Cấu trúc: RBAC_DB[Farm][Team] = Password
+RBAC_DB = {
+    "Farm 126": {
+        "NT1": "123",
+        "NT2": "123",
+        "Đội Thu Hoạch": "123",
+        "Xưởng Đóng Gói": "123"
+    },
+    "Farm 157": {
+        "NT1": "456",
+        "NT2": "456",
+        "Đội Thu Hoạch": "456",
+        "Xưởng Đóng Gói": "456"
+    },
+    "Farm 195": {
+        "NT1": "789",
+        "NT2": "789",
+        "Đội Thu Hoạch": "789",
+        "Xưởng Đóng Gói": "789"
+    }
 }
 
-# Danh sách vụ và màu dây
+FARMS = list(RBAC_DB.keys())
+TEAMS = ["NT1", "NT2", "Đội Thu Hoạch", "Xưởng Đóng Gói"]
+
+# =====================================================
+# CONFIG OPTIONS
+# =====================================================
 VU_OPTIONS = ["F0", "F1", "F2", "F3", "F4", "F5"]
 MAU_DAY_OPTIONS = ["Đỏ", "Xanh lá", "Vàng", "Xanh dương", "Trắng", "Cam"]
-GIAI_DOAN_OPTIONS = ["Chích bắp", "Cắt bắp", "Thu hoạch"]
+LOAI_TRONG_OPTIONS = ["Trồng mới", "Trồng dặm"]
+STAGE_NT_OPTIONS = ["Chích bắp", "Cắt bắp"]  # Không còn Thu Hoạch ở đây
+DESTRUCTION_STAGE_OPTIONS = ["Trước trồng", "Trước chích bắp", "Trước cắt bắp"]
+
 
 # =====================================================
 # STYLE TÙY CHỈNH (CSS)
 # =====================================================
 st.markdown("""
 <style>
-    /* Tiêu đề chính */
-    .main-title {
-        text-align: center;
-        color: #2E7D32;
-        font-size: 2rem;
-        font-weight: 700;
-        margin-bottom: 0.2rem;
-    }
-    .sub-title {
-        text-align: center;
-        color: #6D6D6D;
-        font-size: 1rem;
-        margin-bottom: 1.5rem;
-    }
-    /* Card cho login */
-    .login-card {
-        max-width: 420px;
-        margin: 4rem auto;
-        padding: 2.5rem;
-        border-radius: 16px;
-        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
-    }
-    /* Badge farm */
-    .farm-badge {
-        display: inline-block;
-        padding: 4px 14px;
-        border-radius: 20px;
-        background: #2E7D32;
-        color: white;
-        font-weight: 600;
-        font-size: 0.9rem;
-    }
-    /* Khu vực bảng */
-    .dataframe-header {
-        font-size: 1.1rem;
-        font-weight: 600;
-        color: #1B5E20;
-        margin: 1rem 0 0.5rem 0;
-        padding-left: 0.5rem;
-        border-left: 4px solid #2E7D32;
-    }
-    /* Divider */
-    .section-divider {
-        border: none;
-        border-top: 2px solid #E8F5E9;
-        margin: 2rem 0;
-    }
+    .main-title { text-align: center; color: #2E7D32; font-size: 2rem; font-weight: 700; margin-bottom: 0.2rem; }
+    .sub-title { text-align: center; color: #6D6D6D; font-size: 1rem; margin-bottom: 1.5rem; }
+    .farm-badge { display: inline-block; padding: 4px 14px; border-radius: 20px; background: #2E7D32; color: white; font-weight: 600; font-size: 0.9rem; }
+    .team-badge { display: inline-block; padding: 4px 14px; border-radius: 20px; background: #FF9800; color: white; font-weight: 600; font-size: 0.9rem; margin-top: 5px; }
+    .dataframe-header { font-size: 1.1rem; font-weight: 600; color: #1B5E20; margin: 1rem 0 0.5rem 0; padding-left: 0.5rem; border-left: 4px solid #2E7D32; }
+    .section-divider { border: none; border-top: 2px solid #E8F5E9; margin: 2rem 0; }
 </style>
 """, unsafe_allow_html=True)
 
 
 # =====================================================
-# HÀM TIỆN ÍCH
+# HÀM TIỆN ÍCH (SESSION & LOG)
 # =====================================================
-
 def init_session_state():
-    """Khởi tạo các giá trị mặc định trong session_state."""
-    if "logged_in" not in st.session_state:
-        st.session_state["logged_in"] = False
-    if "current_farm" not in st.session_state:
-        st.session_state["current_farm"] = None
-
+    if "logged_in" not in st.session_state: st.session_state["logged_in"] = False
+    if "current_farm" not in st.session_state: st.session_state["current_farm"] = None
+    if "current_team" not in st.session_state: st.session_state["current_team"] = None
 
 def logout():
-    """Đăng xuất: reset session state."""
     st.session_state["logged_in"] = False
     st.session_state["current_farm"] = None
+    st.session_state["current_team"] = None
 
-
-def fetch_base_lots(farm: str) -> pd.DataFrame:
-    """Lấy danh sách lô trồng gốc từ Supabase, lọc theo Farm."""
-    response = (
-        supabase.table("base_lots")
-        .select("*")
-        .eq("farm", farm)
-        .order("created_at", desc=True)
-        .execute()
-    )
-    if response.data:
-        return pd.DataFrame(response.data)
-    return pd.DataFrame()
-
-
-def fetch_stage_logs(farm: str) -> pd.DataFrame:
-    """Lấy nhật ký tiến độ từ Supabase, lọc theo Farm."""
-    response = (
-        supabase.table("stage_logs")
-        .select("*")
-        .eq("farm", farm)
-        .order("created_at", desc=True)
-        .execute()
-    )
-    if response.data:
-        return pd.DataFrame(response.data)
-    return pd.DataFrame()
-
-
-def get_lot_ids_for_farm(farm: str) -> list:
-    """Lấy danh sách lot_id thuộc Farm đang đăng nhập."""
-    response = (
-        supabase.table("base_lots")
-        .select("lot_id")
-        .eq("farm", farm)
-        .order("lot_id")
-        .execute()
-    )
-    if response.data:
-        return [row["lot_id"] for row in response.data]
-    return []
-
-
-def insert_base_lot(data: dict) -> bool:
-    """Thêm lô trồng mới vào Supabase. Trả về True nếu thành công."""
+def insert_access_log(farm: str, team: str, action: str):
     try:
-        supabase.table("base_lots").insert(data).execute()
+        supabase.table("access_logs").insert({"farm": farm, "team": team, "action": action}).execute()
+    except Exception as e:
+        print(f"Lỗi log: {e}")
+
+# =====================================================
+# HÀM TƯƠNG TÁC DB (SUPABASE DATA FETCHERS)
+# =====================================================
+def get_lots_by_farm(farm: str) -> list:
+    """Lấy danh sách lot_id gốc của nguyen Farm (chọn Lô trồng)."""
+    res = supabase.table("base_lots").select("lot_id").eq("farm", farm).order("created_at").execute()
+    return [row["lot_id"] for row in res.data] if res.data else []
+
+def fetch_table_data(table_name: str, farm: str) -> pd.DataFrame:
+    """Hàm chung lấy dữ liệu từ bảng bất kỳ theo farm."""
+    res = supabase.table(table_name).select("*").eq("farm", farm).order("created_at", desc=True).execute()
+    return pd.DataFrame(res.data) if res.data else pd.DataFrame()
+
+def insert_to_db(table_name: str, data: dict) -> bool:
+    try:
+        supabase.table(table_name).insert(data).execute()
         return True
     except Exception as e:
-        st.error(f"❌ Lỗi khi lưu lô trồng: {e}")
+        if 'duplicate key value violates unique constraint' in str(e):
+            st.error(f"❌ Mã Lô '{data.get('lot_id')}' đã tồn tại trong hệ thống. Vui lòng kiểm tra lại!")
+        else:
+            st.error(f"❌ Lỗi khi lưu vào {table_name}: {e}")
         return False
-
-
-def insert_stage_log(data: dict) -> bool:
-    """Thêm bản ghi tiến độ mới vào Supabase. Trả về True nếu thành công."""
-    try:
-        supabase.table("stage_logs").insert(data).execute()
-        return True
-    except Exception as e:
-        st.error(f"❌ Lỗi khi lưu tiến độ: {e}")
-        return False
-
-def insert_access_log(farm: str, action: str) -> bool:
-    """Thêm bản ghi lịch sử truy cập (Login). Trả về True nếu thành công."""
-    try:
-        supabase.table("access_logs").insert({"farm": farm, "action": action}).execute()
-        return True
-    except Exception as e:
-        print(f"❌ Lỗi khi lưu log truy cập: {e}")
-        return False
-
-def fetch_access_logs() -> pd.DataFrame:
-    """Lấy danh sách lịch sử truy cập từ Supabase (Load toàn bộ cho mọi Farm để tiện kiểm tra, hoặc có thể lọc tùy ý)."""
-    response = (
-        supabase.table("access_logs")
-        .select("*")
-        .order("created_at", desc=True)
-        .limit(100) # Chỉ lấy 100 bản ghi gần nhất cho nhẹ
-        .execute()
-    )
-    if response.data:
-        return pd.DataFrame(response.data)
-    return pd.DataFrame()
 
 
 # =====================================================
-# MÀN HÌNH ĐĂNG NHẬP (LOGIN)
+# MÀN HÌNH ĐĂNG NHẬP
 # =====================================================
-
 def render_login():
-    """Hiển thị màn hình đăng nhập."""
-    
-    # Khu vực chứa logo (nếu có)
     col_logo1, col_logo2, col_logo3 = st.columns([1, 1, 1])
     with col_logo2:
-        if os.path.exists("logo.png"):
-            st.image("logo.png", use_container_width=True)
-            
-    st.markdown('<p class="main-title">🍌 Trường Tồn Banana Tracker</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-title">Hệ thống quản lý tiến độ sinh trưởng chuối xuất khẩu</p>', unsafe_allow_html=True)
+        if os.path.exists("logo.png"): st.image("logo.png", use_container_width=True)
 
-    # Card đăng nhập
+    st.markdown('<p class="main-title">🍌 Trường Tồn Banana Tracker</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-title">Hệ thống quản lý Phân quyền Đa cấp</p>', unsafe_allow_html=True)
+
     col1, col2, col3 = st.columns([1, 1.2, 1])
     with col2:
         st.markdown("<h3 style='text-align: center;'>🔐 Đăng nhập hệ thống</h3>", unsafe_allow_html=True)
         st.divider()
 
         # Chọn Farm
-        selected_farm = st.selectbox(
-            "🏗️ Chọn Farm",
-            options=list(FARM_PASSWORDS.keys()),
-            index=0,
-            key="login_farm",
-        )
+        selected_farm = st.selectbox("🏗️ Chọn Farm", options=FARMS, key="login_farm")
+        # Chọn Team thuộc Farm
+        selected_team = st.selectbox("👥 Chọn Đội / Vai trò", options=TEAMS, key="login_team")
 
-        # Nhập mật khẩu
-        password = st.text_input(
-            "🔑 Mật khẩu",
-            type="password",
-            key="login_password",
-            placeholder="Nhập mật khẩu Farm...",
-        )
+        # Nhập MK
+        password = st.text_input("🔑 Mật khẩu", type="password", key="login_pass", placeholder="Nhập mật khẩu...")
 
-        st.markdown("")  # Khoảng trống nhỏ
-
-        # Nút đăng nhập
+        st.markdown("")
         if st.button("🚀 Đăng nhập", use_container_width=True, type="primary"):
             if not password:
                 st.warning("⚠️ Vui lòng nhập mật khẩu.")
-            elif password == FARM_PASSWORDS.get(selected_farm):
-                st.session_state["logged_in"] = True
-                st.session_state["current_farm"] = selected_farm
-                
-                # Ghi log đăng nhập vào DB
-                insert_access_log(selected_farm, "Đăng nhập thành công")
-                
-                st.success(f"✅ Đăng nhập thành công! Chào mừng đến {selected_farm}.")
-                st.rerun()
             else:
-                # Ghi log đăng nhập sai (tùy chọn)
-                insert_access_log(selected_farm, "Đăng nhập sai mật khẩu")
-                st.error("❌ Mật khẩu không đúng. Vui lòng thử lại.")
+                correct_pass = RBAC_DB.get(selected_farm, {}).get(selected_team)
+                if password == correct_pass:
+                    st.session_state["logged_in"] = True
+                    st.session_state["current_farm"] = selected_farm
+                    st.session_state["current_team"] = selected_team
+                    insert_access_log(selected_farm, selected_team, "Đăng nhập thành công")
+                    st.success(f"✅ Đăng nhập {selected_team} - {selected_farm}!")
+                    st.rerun()
+                else:
+                    insert_access_log(selected_farm, selected_team, "Sai mật khẩu")
+                    st.error("❌ Mật khẩu không đúng.")
 
         st.divider()
-        st.markdown("<p style='text-align: center; color: #888888; font-size: 0.85rem;'>💡 Mỗi Farm có mật khẩu riêng. Liên hệ quản lý nếu quên.</p>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #888888; font-size: 0.85rem;'>💡 Vui lòng chọn đúng vai trò của mình để thao tác đúng nghiệp vụ.</p>", unsafe_allow_html=True)
 
 
 # =====================================================
-# GIAO DIỆN CHÍNH (SAU KHI ĐĂNG NHẬP)
+# GIAO DIỆN CHÍNH (MAIN APP) - ROLE BASED 
 # =====================================================
-
 def render_main_app():
-    """Hiển thị giao diện chính sau khi đăng nhập thành công."""
-    current_farm = st.session_state["current_farm"]
+    c_farm = st.session_state["current_farm"]
+    c_team = st.session_state["current_team"]
 
-    # ----- SIDEBAR: Thông tin Farm + Đăng xuất -----
+    # --- SIDEBAR ---
     with st.sidebar:
-        if os.path.exists("logo.png"):
-            st.image("logo.png", use_container_width=True)
-        else:
-            st.markdown("### 🍌 Trường Tồn")
-            
+        if os.path.exists("logo.png"): st.image("logo.png", use_container_width=True)
+        else: st.markdown("### 🍌 Trường Tồn")
+        
         st.divider()
-        st.markdown(f'<span class="farm-badge">{current_farm}</span>', unsafe_allow_html=True)
+        st.markdown(f'<span class="farm-badge">🏭 {c_farm}</span>', unsafe_allow_html=True)
+        st.markdown(f'<span class="team-badge">👥 {c_team}</span>', unsafe_allow_html=True)
         st.caption(f"Đăng nhập lúc: {datetime.now().strftime('%H:%M - %d/%m/%Y')}")
         st.divider()
 
         if st.button("🚪 Đăng xuất", use_container_width=True, type="secondary"):
             logout()
             st.rerun()
-
         st.divider()
-        
-        # Hướng dẫn sử dụng (Collapsible Expander)
-        with st.expander("📖 Hướng dẫn sử dụng chi tiết", expanded=False):
-            st.markdown("""
-            Chào mừng bạn đến với hệ thống Quản lý Tiến độ Sinh trưởng Chuối Xuất khẩu của công ty Trường Tồn.
-            Hệ thống gồm 2 bước chính để Đăng ký và Theo dõi một Lô trồng.
-            
-            ---
-            
-            **BƯỚC 1: KHỞI TẠO LÔ TRỒNG MỚI**
-            *(Làm 1 lần duy nhất ngay khi xuống giống mới)*
-            
-            1. Bấm vào Tab **"📋 Khởi tạo Lô Trồng"** ở màn hình chính.
-            2. Chọn **Vụ** trồng (Ví dụ: F1, F2...).
-            3. Nhập tên **Lô** (Ví dụ: A1, B3...). *App sẽ tự ghép thành mã lô như F1-A1.*
-            4. Chọn **Ngày trồng** (mặc định là hôm nay).
-            5. Nhập **Số lượng trồng** (tổng số lượng cây của lô này).
-            6. Bấm nút màu đỏ **"✅ Tạo Lô Trồng Mới"**.
-            👉 Sau khi tạo, lô sẽ ngay lập tức được thêm vào **Bảng 1 (Danh sách Lô trồng)** ở dưới cùng.
-            
-            ---
-            
-            **BƯỚC 2: CẬP NHẬT TIẾN ĐỘ**
-            *(Ghi nhận sinh trưởng theo thời gian thực tế)*
-            
-            1. Bấm vào Tab **"📈 Cập nhật Tiến độ"** ở màn hình chính.
-            2. **Chọn Lô**: Bấm vào danh sách thả xuống, hệ thống sẽ tự liệt kê các Lô mà Farm bạn đã Khởi tạo ở Bước 1.
-            3. **Chọn Giai đoạn** cần cập nhật (Chích bắp / Cắt bắp / Thu hoạch).
-            4. Chọn **Ngày thực hiện** công việc.
-            5. Ghi **Số lượng** cây thực tế đã thực hiện trong ngày hôm đó.
-            6. **Trường hợp Đặc Biệt**:
-               - Nếu chọn **Chính bắp**: Bắt buộc phải chọn **Màu Dây** (Đỏ, Xanh lá, Vàng...) để đánh dấu lứa chích.
-               - Nếu chọn **Thu hoạch**: Bắt buộc phải nhập tỷ lệ **BSR** (Buồng/Sản Rạ) đạt được (Ví dụ: 0.95, 1.1...).
-            7. Bấm nút màu đỏ **"✅ Lưu Tiến Độ"**.
-            👉 Bản ghi này sẽ được thêm ngay vào **Bảng 2 (Nhật ký cập nhật tiến độ)**.
-            
-            ---
-            
-            **LƯU Ý:**
-            - 🔒 **Bảo Mật**: Dữ liệu hoàn toàn độc lập. Tài khoản Farm nào chỉ cập nhật và nhìn thấy báo cáo của đúng Farm đó.
-            - 💾 **Lưu Trữ**: App kết nối trực tiếp lên Cloud (Supabase). Do đó dữ liệu sẽ không bao giờ mất khi bạn tắt máy ngang.
-            - ✏️ **Chỉ Nhập Thêm**: Hiện tại Hệ thống chỉ hỗ trợ **Nhập mới**, không cho tự ý Xóa/Sửa để hạn chế sai sót. Nếu lỡ tay nhập nhầm, hãy ghi chú lại và báo cho Quản lý / IT để điều chỉnh trên hệ thống gốc.
-            """)
-            
-        st.divider()
-        st.info("📌 Dữ liệu được lưu trên Supabase Cloud.")
+        st.info("📌 Dữ liệu được lưu trên đám mây Supabase.")
 
-    # ----- TIÊU ĐỀ CHÍNH -----
-    st.markdown(f'<p class="main-title">🍌 Quản lý Tiến độ - {current_farm}</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-title">Nhập liệu và theo dõi tiến độ sinh trưởng chuối xuất khẩu</p>', unsafe_allow_html=True)
+    # --- HEADER ---
+    st.markdown(f'<p class="main-title">Hệ thống {c_team} - {c_farm}</p>', unsafe_allow_html=True)
 
-    # ----- TABS CHÍNH -----
-    tab1, tab2 = st.tabs([
-        "📋 Khởi tạo Lô Trồng (Base Info)", 
-        "📈 Cập nhật Tiến độ (Stage Tracking)"
-    ])
+    # Lấy danh sách lô chung cho các form
+    available_lots = get_lots_by_farm(c_farm)
 
-    # =====================================================
-    # TAB 1: KHỞI TẠO LÔ TRỒNG
-    # =====================================================
-    with tab1:
-        st.markdown("#### 🌱 Đăng ký đợt xuống giống mới")
-        st.caption("Nhập đầy đủ thông tin bên dưới để tạo Lô trồng mới.")
+    # =================================================
+    # MODULE 1: ĐỘI NÔNG TRƯỜNG (NT1, NT2)
+    # =================================================
+    if c_team in ["NT1", "NT2"]:
+        t1, t2, t3 = st.tabs(["🌱 Khởi tạo Lô trồng", "📈 Cập nhật Tiến độ", "🗑️ Cập nhật Xuất hủy"])
 
-        with st.form("form_base_info", clear_on_submit=True):
-            col_a, col_b = st.columns(2)
+        # TAB 1: KHỞI TẠO LÔ
+        with t1:
+            st.markdown("#### Đăng ký đợt xuống giống mới")
+            with st.form("form_nt_base", clear_on_submit=False):
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    vu = st.selectbox("📅 Vụ", options=VU_OPTIONS)
+                    lo = st.text_input("🏷️ Tên Lô (VD: A1, B3...)", placeholder="Nhập tên lô...")
+                    loai_trong = st.selectbox("🌱 Loại trồng", options=LOAI_TRONG_OPTIONS)
+                with col_b:
+                    ngay_trong = st.date_input("📆 Ngày trồng", value=date.today())
+                    so_luong = st.number_input("🔢 Số lượng trồng (cây)", min_value=0, step=100)
 
-            with col_a:
-                vu = st.selectbox("📅 Vụ", options=VU_OPTIONS, index=0)
-                ngay_trong = st.date_input("📆 Ngày trồng", value=date.today())
-
-            with col_b:
-                lo = st.text_input("🏷️ Lô (VD: A1, B3, C2...)", placeholder="Nhập tên lô...")
-                so_luong_trong = st.number_input(
-                    "🔢 Số lượng trồng (cây)",
-                    min_value=0,
-                    value=0,
-                    step=100,
-                )
-
-            submitted_base = st.form_submit_button(
-                "✅ Tạo Lô Trồng Mới",
-                use_container_width=True,
-                type="primary",
-            )
-
-            if submitted_base:
-                # --- Validate ---
-                if not lo or not lo.strip():
-                    st.error("❌ Vui lòng nhập tên Lô.")
-                elif so_luong_trong <= 0:
-                    st.error("❌ Số lượng trồng phải lớn hơn 0.")
-                else:
-                    # Tạo ID ghép: VD "F1-A2"
-                    lot_id = f"{vu}-{lo.strip()}"
-
-                    # Chuẩn bị dữ liệu để INSERT
-                    new_lot = {
-                        "farm": current_farm,
-                        "lot_id": lot_id,
-                        "vu": vu,
-                        "lo": lo.strip(),
-                        "ngay_trong": ngay_trong.isoformat(),
-                        "so_luong": so_luong_trong,
-                        "trang_thai": "Đã trồng",
-                    }
-
-                    # Lưu vào Supabase
-                    if insert_base_lot(new_lot):
-                        st.success(f"✅ Tạo thành công Lô **{lot_id}** ({current_farm})")
-                        st.balloons()
-
-    # =====================================================
-    # TAB 2: CẬP NHẬT TIẾN ĐỘ
-    # =====================================================
-    with tab2:
-        st.markdown("#### 📊 Cập nhật giai đoạn sinh trưởng")
-        st.caption("Chọn Lô và ghi nhận tiến độ: Chích bắp → Cắt bắp → Thu hoạch.")
-
-        # Lấy danh sách lô thuộc Farm hiện tại
-        available_lots = get_lot_ids_for_farm(current_farm)
-
-        if not available_lots:
-            st.warning("⚠️ Chưa có Lô trồng nào được khởi tạo. Vui lòng tạo ở Tab 1 trước.")
-        else:
-            with st.form("form_stage_tracking", clear_on_submit=True):
-                col_c, col_d = st.columns(2)
-
-                with col_c:
-                    selected_lot = st.selectbox(
-                        "🏷️ Chọn Lô cần cập nhật",
-                        options=available_lots,
-                    )
-                    giai_doan = st.radio(
-                        "📌 Giai đoạn",
-                        options=GIAI_DOAN_OPTIONS,
-                        horizontal=True,
-                    )
-
-                with col_d:
-                    ngay_thuc_hien = st.date_input(
-                        "📆 Ngày thực hiện",
-                        value=date.today(),
-                    )
-                    so_luong_thuc_hien = st.number_input(
-                        "🔢 Số lượng thực hiện",
-                        min_value=0,
-                        value=0,
-                        step=100,
-                    )
-
-                # --- Trường điều kiện: BSR (chỉ khi Thu hoạch) ---
-                bsr_value = None
-                if giai_doan == "Thu hoạch":
-                    bsr_value = st.number_input(
-                        "📐 BSR (Buồng/Sản Rạ)",
-                        min_value=0.0,
-                        value=0.0,
-                        step=0.1,
-                        format="%.2f",
-                        help="Chỉ số BSR - chỉ áp dụng cho giai đoạn Thu hoạch",
-                    )
-
-                # --- Trường điều kiện: Màu dây (bắt buộc khi Chích bắp) ---
-                mau_day_value = None
-                if giai_doan == "Chích bắp":
-                    mau_day_value = st.selectbox(
-                        "🎨 Màu dây (Bắt buộc)",
-                        options=MAU_DAY_OPTIONS,
-                    )
-
-                submitted_stage = st.form_submit_button(
-                    "✅ Lưu Tiến Độ",
-                    use_container_width=True,
-                    type="primary",
-                )
-
-                if submitted_stage:
-                    # --- Validate ---
-                    if so_luong_thuc_hien <= 0:
-                        st.error("❌ Số lượng thực hiện phải lớn hơn 0.")
-                    elif giai_doan == "Chích bắp" and not mau_day_value:
-                        st.error("❌ Vui lòng chọn Màu dây cho giai đoạn Chích bắp.")
-                    elif giai_doan == "Thu hoạch" and (bsr_value is None or bsr_value <= 0):
-                        st.error("❌ Vui lòng nhập BSR cho giai đoạn Thu hoạch.")
+                if st.form_submit_button("✅ Tạo Lô Trồng", use_container_width=True, type="primary"):
+                    if not lo.strip(): st.error("❌ Nhập tên lô.")
+                    elif so_luong <= 0: st.error("❌ Cần nhập số lượng.")
                     else:
-                        # Chuẩn bị dữ liệu
-                        new_log = {
-                            "farm": current_farm,
-                            "lot_id": selected_lot,
-                            "giai_doan": giai_doan,
-                            "ngay_thuc_hien": ngay_thuc_hien.isoformat(),
-                            "so_luong": so_luong_thuc_hien,
-                            "bsr": bsr_value,
-                            "mau_day": mau_day_value,
+                        # Auto-generate lot_id: F1-A1-M (Mới) hoặc F1-A1-D (Dặm)
+                        suffix = "M" if loai_trong == "Trồng mới" else "D"
+                        lot_id = f"{vu}-{lo.strip()}-{suffix}"
+                        
+                        data = {
+                            "farm": c_farm, "team": c_team, "vu": vu, "lo": lo.strip(),
+                            "loai_trong": loai_trong, "lot_id": lot_id.upper(),
+                            "ngay_trong": ngay_trong.isoformat(), "so_luong": so_luong
                         }
+                        if insert_to_db("base_lots", data):
+                            st.success(f"✅ Tạo Lô: {lot_id.upper()} thành công!")
+                            st.balloons()
 
-                        # Lưu vào Supabase
-                        if insert_stage_log(new_log):
-                            st.success(
-                                f"✅ Đã ghi nhận **{giai_doan}** cho Lô **{selected_lot}** "
-                                f"({so_luong_thuc_hien} cây - {ngay_thuc_hien.strftime('%d/%m/%Y')})"
-                            )
+            st.markdown('<p class="dataframe-header">Bảng dữ liệu: Các Lô trồng</p>', unsafe_allow_html=True)
+            df_lots = fetch_table_data("base_lots", c_farm)
+            if not df_lots.empty:
+                st.dataframe(df_lots[["lot_id", "loai_trong", "ngay_trong", "so_luong", "team", "created_at"]], use_container_width=True, hide_index=True)
 
-    # =====================================================
-    # HIỂN THỊ DỮ LIỆU BẢNG (LỌC THEO FARM)
-    # =====================================================
-    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
-    st.markdown(f"### 📊 Dữ liệu của {current_farm}")
-    st.caption("Chỉ hiển thị dữ liệu thuộc Farm bạn đang đăng nhập.")
+        # TAB 2: CẬP NHẬT TIẾN ĐỘ NT
+        with t2:
+            st.markdown("#### Ghi nhận: Chích bắp / Cắt bắp")
+            if not available_lots:
+                st.warning("⚠️ Chưa có Lô trồng nào. Hãy tạo ở Tab 1.")
+            else:
+                with st.form("form_nt_stage", clear_on_submit=False):
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots)
+                        giai_doan = st.radio("📌 Giai đoạn", options=STAGE_NT_OPTIONS, horizontal=True)
+                        mau_day = st.selectbox("🎨 Màu dây (Bắt buộc nếu Chích bắp)", options=[""] + MAU_DAY_OPTIONS)
+                    with col_b:
+                        ngay_th = st.date_input("📆 Ngày thực hiện", value=date.today())
+                        sl = st.number_input("🔢 Số lượng cây", min_value=0, step=100)
 
-    # ----- Bảng 1: Danh sách Lô gốc -----
-    st.markdown('<p class="dataframe-header">🌱 Bảng 1: Danh sách Lô trồng đã khởi tạo</p>', unsafe_allow_html=True)
-    df_lots = fetch_base_lots(current_farm)
+                    if st.form_submit_button("✅ Cập nhật Tiến độ", use_container_width=True, type="primary"):
+                        if sl <= 0: st.error("❌ Nhập số lượng > 0.")
+                        elif giai_doan == "Chích bắp" and not mau_day: st.error("❌ Chọn màu dây cho Chích bắp.")
+                        else:
+                            data = {
+                                "farm": c_farm, "team": c_team, "lot_id": lot_id,
+                                "giai_doan": giai_doan, "ngay_thuc_hien": ngay_th.isoformat(),
+                                "so_luong": sl, "mau_day": mau_day if giai_doan == "Chích bắp" else None
+                            }
+                            if insert_to_db("stage_logs", data):
+                                st.success(f"✅ Lưu tiến độ {giai_doan} lô {lot_id} thành công!")
 
-    if df_lots.empty:
-        st.info("📭 Chưa có lô trồng nào. Hãy tạo mới ở Tab 1.")
-    else:
-        # Chọn và đổi tên cột để hiển thị đẹp
-        display_lots = df_lots[["lot_id", "vu", "lo", "ngay_trong", "so_luong", "trang_thai", "created_at"]].copy()
-        display_lots.columns = ["Mã Lô", "Vụ", "Lô", "Ngày Trồng", "Số Lượng", "Trạng Thái", "Ngày Tạo"]
-        st.dataframe(
-            display_lots,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Số Lượng": st.column_config.NumberColumn(format="%d 🌱"),
-                "Ngày Trồng": st.column_config.DateColumn(format="DD/MM/YYYY"),
-            },
-        )
+                st.markdown('<p class="dataframe-header">Bảng dữ liệu: Tiến độ Nông trường</p>', unsafe_allow_html=True)
+                df_stg = fetch_table_data("stage_logs", c_farm)
+                if not df_stg.empty:
+                    st.dataframe(df_stg[["lot_id", "giai_doan", "ngay_thuc_hien", "so_luong", "mau_day", "team"]], use_container_width=True, hide_index=True)
 
-    st.markdown("")  # Khoảng cách
+        # TAB 3: XUẤT HỦY
+        with t3:
+            st.markdown("#### Ghi nhận số lượng cây chết / hư hỏng")
+            if not available_lots:
+                st.warning("⚠️ Chưa có Lô trồng nào.")
+            else:
+                with st.form("form_nt_destroy", clear_on_submit=False):
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, key="destry_lot")
+                        giai_doan_xuat_huy = st.selectbox("⏱️ Giai đoạn xuất hủy", options=DESTRUCTION_STAGE_OPTIONS)
+                        ly_do = st.text_area("📝 Lý do (Gió, bệnh...)", height=100)
+                    with col_b:
+                        ngay = st.date_input("📆 Ngày xuất hủy", value=date.today(), key="destroy_d")
+                        sl = st.number_input("🔢 Số lượng cây xuất hủy", min_value=0, step=10)
 
-    # ----- Bảng 2: Nhật ký tiến độ -----
-    st.markdown('<p class="dataframe-header">📈 Bảng 2: Nhật ký cập nhật tiến độ</p>', unsafe_allow_html=True)
-    df_logs = fetch_stage_logs(current_farm)
+                    if st.form_submit_button("🗑️ Ghi nhận Xuất hủy", use_container_width=True, type="primary"):
+                        if sl <= 0: st.error("❌ Nhập số lượng xuất hủy > 0.")
+                        elif not ly_do.strip(): st.error("❌ Cần ghi rõ lý do.")
+                        else:
+                            data = {
+                                "farm": c_farm, "team": c_team, "lot_id": lot_id,
+                                "ngay_xuat_huy": ngay.isoformat(), "giai_doan": giai_doan_xuat_huy,
+                                "ly_do": ly_do.strip(), "so_luong": sl
+                            }
+                            if insert_to_db("destruction_logs", data):
+                                st.success(f"✅ Lưu xuất hủy lô {lot_id} thành công!")
 
-    if df_logs.empty:
-        st.info("📭 Chưa có bản ghi tiến độ nào. Hãy cập nhật ở Tab 2.")
-    else:
-        display_logs = df_logs[["lot_id", "giai_doan", "ngay_thuc_hien", "so_luong", "bsr", "mau_day", "created_at"]].copy()
-        display_logs.columns = ["Mã Lô", "Giai Đoạn", "Ngày Thực Hiện", "Số Lượng", "BSR", "Màu Dây", "Ngày Ghi Nhận"]
-        st.dataframe(
-            display_logs,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Số Lượng": st.column_config.NumberColumn(format="%d 🌿"),
-                "Ngày Thực Hiện": st.column_config.DateColumn(format="DD/MM/YYYY"),
-                "BSR": st.column_config.NumberColumn(format="%.2f"),
-            },
-        )
+                st.markdown('<p class="dataframe-header">Bảng dữ liệu: Số lượng Xuất hủy</p>', unsafe_allow_html=True)
+                df_des = fetch_table_data("destruction_logs", c_farm)
+                if not df_des.empty:
+                    st.dataframe(df_des[["lot_id", "ngay_xuat_huy", "giai_doan", "so_luong", "ly_do", "team"]], use_container_width=True, hide_index=True)
 
-    st.markdown("")  # Khoảng cách
+
+    # =================================================
+    # MODULE 2: ĐỘI THU HOẠCH
+    # =================================================
+    elif c_team == "Đội Thu Hoạch":
+        st.markdown("#### Ghi nhận Sản lượng Thu hoạch hàng ngày")
+        if not available_lots:
+            st.warning("⚠️ Chưa có Lô trồng nào trên hệ thống.")
+        else:
+            with st.form("form_harvest", clear_on_submit=False):
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    lot_id = st.selectbox("🏷️ Chọn Lô thu hoạch", options=available_lots)
+                    ngay = st.date_input("📆 Ngày thu hoạch", value=date.today())
+                with col_b:
+                    sl = st.number_input("🍌 Số lượng buồng thu hoạch", min_value=0, step=50)
+
+                st.markdown("")
+                if st.form_submit_button("✅ Cập nhật Thu hoạch", use_container_width=True, type="primary"):
+                    if sl <= 0: st.error("❌ Số lượng buồng phải > 0")
+                    else:
+                        data = {"farm": c_farm, "team": c_team, "lot_id": lot_id, "ngay_thu_hoach": ngay.isoformat(), "so_luong": sl}
+                        if insert_to_db("harvest_logs", data):
+                            st.success(f"✅ Lưu lịch sử thu hoạch lô {lot_id} thành công!")
+            
+            st.markdown('<p class="dataframe-header">Lịch sử Nhập liệu Thu hoạch</p>', unsafe_allow_html=True)
+            df_har = fetch_table_data("harvest_logs", c_farm)
+            if not df_har.empty:
+                st.dataframe(df_har[["lot_id", "ngay_thu_hoach", "so_luong", "created_at"]], use_container_width=True, hide_index=True)
+
+
+    # =================================================
+    # MODULE 3: XƯỞNG ĐÓNG GÓI
+    # =================================================
+    elif c_team == "Xưởng Đóng Gói":
+        st.markdown("#### Ghi nhận Tỷ lệ BSR thành phẩm")
+        if not available_lots:
+            st.warning("⚠️ Chưa có Lô trồng nào trên hệ thống.")
+        else:
+            with st.form("form_bsr", clear_on_submit=False):
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    lot_id = st.selectbox("🏷️ Chọn Lô đóng gói", options=available_lots)
+                    ngay = st.date_input("📆 Ngày đóng gói", value=date.today())
+                with col_b:
+                    bsr_val = st.number_input("📐 Nhập tỷ lệ BSR (Buồng / Sản Rạ)", min_value=0.0, value=0.0, step=0.1, format="%.2f")
+
+                st.markdown("")
+                if st.form_submit_button("✅ Cập nhật BSR", use_container_width=True, type="primary"):
+                    if bsr_val <= 0: st.error("❌ Tỷ lệ BSR phải > 0")
+                    else:
+                        data = {"farm": c_farm, "team": c_team, "lot_id": lot_id, "ngay_nhap": ngay.isoformat(), "bsr": bsr_val}
+                        if insert_to_db("bsr_logs", data):
+                            st.success(f"✅ Ghi nhận BSR lô {lot_id} thành công!")
+            
+            st.markdown('<p class="dataframe-header">Lịch sử Nhập liệu BSR</p>', unsafe_allow_html=True)
+            df_bsr = fetch_table_data("bsr_logs", c_farm)
+            if not df_bsr.empty:
+                st.dataframe(df_bsr[["lot_id", "ngay_nhap", "bsr", "created_at"]], use_container_width=True, hide_index=True)
 
 
 # =====================================================
-# MAIN: ĐIỀU KHIỂN LUỒNG APP
+# MAIN ROUTING
 # =====================================================
-
-def main():
-    """Hàm chính điều khiển toàn bộ ứng dụng."""
-    # Khởi tạo session state
+if __name__ == "__main__":
     init_session_state()
-
-    # Phân luồng: Login hay Main App
     if not st.session_state["logged_in"]:
         render_login()
     else:
         render_main_app()
 
-
-# Chạy app
-if __name__ == "__main__":
-    main()
