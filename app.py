@@ -141,6 +141,21 @@ def check_quantity_limit(lot_id, new_sl, log_type, giai_doan=None, exclude_id=No
     if not res_lot.data: return False, "❌ Lỗi: Không tìm thấy thông tin Lô."
     total_planted = int(res_lot.data[0]["so_luong"])
 
+    max_allowed = total_planted
+    max_label = f"số lượng trồng ({total_planted} cây)"
+
+    if log_type == "stage" and giai_doan == "Cắt bắp":
+        res_cb = supabase.table("stage_logs").select("so_luong").eq("lot_id", lot_id).eq("giai_doan", "Chích bắp").execute()
+        total_chich_bap = sum(int(r["so_luong"]) for r in res_cb.data)
+        max_allowed = total_chich_bap
+        max_label = f"số lượng đã chích bắp ({total_chich_bap} cây)"
+        
+    elif log_type == "harvest":
+        res_cut = supabase.table("stage_logs").select("so_luong").eq("lot_id", lot_id).eq("giai_doan", "Cắt bắp").execute()
+        total_cat_bap = sum(int(r["so_luong"]) for r in res_cut.data)
+        max_allowed = total_cat_bap
+        max_label = f"số lượng đã cắt bắp ({total_cat_bap} buồng)"
+
     total_used = 0
     if log_type == "stage":
         res = supabase.table("stage_logs").select("id, so_luong").eq("lot_id", lot_id).eq("giai_doan", giai_doan).execute()
@@ -152,8 +167,8 @@ def check_quantity_limit(lot_id, new_sl, log_type, giai_doan=None, exclude_id=No
         res = supabase.table("harvest_logs").select("id, so_luong").eq("lot_id", lot_id).execute()
         total_used = sum(int(r["so_luong"]) for r in res.data if r["id"] != exclude_id)
 
-    if total_used + int(new_sl) > total_planted:
-        return False, f"❌ Vượt quá số lượng trồng ({total_planted} cây). Đã nhập cho giai đoạn này: {total_used}. Còn lại tối đa: {total_planted - total_used}."
+    if total_used + int(new_sl) > max_allowed:
+        return False, f"❌ Vượt quá {max_label}. Đã nhập: {total_used}. Còn lại tối đa: {max_allowed - total_used}."
     return True, ""
 
 
