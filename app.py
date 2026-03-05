@@ -183,6 +183,28 @@ def insert_stage_log(data: dict) -> bool:
         st.error(f"❌ Lỗi khi lưu tiến độ: {e}")
         return False
 
+def insert_access_log(farm: str, action: str) -> bool:
+    """Thêm bản ghi lịch sử truy cập (Login). Trả về True nếu thành công."""
+    try:
+        supabase.table("access_logs").insert({"farm": farm, "action": action}).execute()
+        return True
+    except Exception as e:
+        print(f"❌ Lỗi khi lưu log truy cập: {e}")
+        return False
+
+def fetch_access_logs() -> pd.DataFrame:
+    """Lấy danh sách lịch sử truy cập từ Supabase (Load toàn bộ cho mọi Farm để tiện kiểm tra, hoặc có thể lọc tùy ý)."""
+    response = (
+        supabase.table("access_logs")
+        .select("*")
+        .order("created_at", desc=True)
+        .limit(100) # Chỉ lấy 100 bản ghi gần nhất cho nhẹ
+        .execute()
+    )
+    if response.data:
+        return pd.DataFrame(response.data)
+    return pd.DataFrame()
+
 
 # =====================================================
 # MÀN HÌNH ĐĂNG NHẬP (LOGIN)
@@ -231,9 +253,15 @@ def render_login():
             elif password == FARM_PASSWORDS.get(selected_farm):
                 st.session_state["logged_in"] = True
                 st.session_state["current_farm"] = selected_farm
+                
+                # Ghi log đăng nhập vào DB
+                insert_access_log(selected_farm, "Đăng nhập thành công")
+                
                 st.success(f"✅ Đăng nhập thành công! Chào mừng đến {selected_farm}.")
                 st.rerun()
             else:
+                # Ghi log đăng nhập sai (tùy chọn)
+                insert_access_log(selected_farm, "Đăng nhập sai mật khẩu")
                 st.error("❌ Mật khẩu không đúng. Vui lòng thử lại.")
 
         st.divider()
@@ -517,6 +545,22 @@ def render_main_app():
                 "BSR": st.column_config.NumberColumn(format="%.2f"),
             },
         )
+
+    st.markdown("")  # Khoảng cách
+    
+    # ----- Bảng 3: Lịch sử try cập (Hiển thị cho tất cả Farm để Admin dễ nhìn, hoặc chỉ hiện ở 1 view riêng) -----
+    with st.expander("🕒 Lịch sử truy cập hệ thống (Access Logs)", expanded=False):
+        df_access = fetch_access_logs()
+        if df_access.empty:
+            st.info("Chưa có lịch sử truy cập.")
+        else:
+            display_access = df_access[["farm", "action", "created_at"]].copy()
+            display_access.columns = ["Farm", "Hành động", "Thời gian"]
+            st.dataframe(
+                display_access,
+                use_container_width=True,
+                hide_index=True,
+            )
 
 
 # =====================================================
