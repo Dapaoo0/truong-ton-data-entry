@@ -64,7 +64,7 @@ VU_OPTIONS = ["F0", "F1", "F2", "F3", "F4", "F5"]
 MAU_DAY_OPTIONS = ["Đỏ", "Xanh lá", "Vàng", "Xanh dương", "Trắng", "Cam"]
 LOAI_TRONG_OPTIONS = ["Trồng mới", "Trồng dặm"]
 STAGE_NT_OPTIONS = ["Chích bắp", "Cắt bắp"]  # Không còn Thu Hoạch ở đây
-DESTRUCTION_STAGE_OPTIONS = ["Trước trồng", "Trước chích bắp", "Trước cắt bắp"]
+DESTRUCTION_STAGE_OPTIONS = ["Trước chích bắp", "Trước cắt bắp"]
 
 
 # =====================================================
@@ -251,19 +251,19 @@ def render_main_app():
                     with col_a:
                         lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots)
                         giai_doan = st.radio("📌 Giai đoạn", options=STAGE_NT_OPTIONS, horizontal=True)
-                        mau_day = st.selectbox("🎨 Màu dây (Bắt buộc nếu Chích bắp)", options=[""] + MAU_DAY_OPTIONS)
+                        mau_day = st.selectbox("🎨 Màu dây (Bắt buộc)", options=[""] + MAU_DAY_OPTIONS)
                     with col_b:
                         ngay_th = st.date_input("📆 Ngày thực hiện", value=date.today())
                         sl = st.number_input("🔢 Số lượng cây", min_value=0, step=100)
 
                     if st.form_submit_button("✅ Cập nhật Tiến độ", use_container_width=True, type="primary"):
                         if sl <= 0: st.error("❌ Nhập số lượng > 0.")
-                        elif giai_doan == "Chích bắp" and not mau_day: st.error("❌ Chọn màu dây cho Chích bắp.")
+                        elif not mau_day: st.error("❌ Phải chọn màu dây định danh lứa.")
                         else:
                             data = {
                                 "farm": c_farm, "team": c_team, "lot_id": lot_id,
                                 "giai_doan": giai_doan, "ngay_thuc_hien": ngay_th.isoformat(),
-                                "so_luong": sl, "mau_day": mau_day if giai_doan == "Chích bắp" else None
+                                "so_luong": sl, "mau_day": mau_day
                             }
                             if insert_to_db("stage_logs", data):
                                 st.success(f"✅ Lưu tiến độ {giai_doan} lô {lot_id} thành công!")
@@ -368,6 +368,31 @@ def render_main_app():
             df_bsr = fetch_table_data("bsr_logs", c_farm)
             if not df_bsr.empty:
                 st.dataframe(df_bsr[["lot_id", "ngay_nhap", "bsr", "created_at"]], use_container_width=True, hide_index=True)
+
+
+    # =================================================
+    # KHU VỰC HIỂN THỊ DỮ LIỆU TỔNG QUAN (CHO MỌI ĐỘI)
+    # =================================================
+    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+    st.markdown("### 🌐 Bảng dữ liệu Toàn cục Farm")
+    st.caption("Cho phép tra cứu chéo Lô trồng và Tiến độ sinh trưởng từ các Đội khác.")
+    
+    col_t1, col_t2 = st.columns(2)
+    with col_t1:
+        st.markdown('<p class="dataframe-header">🌱 Lô Trồng (Base Lots)</p>', unsafe_allow_html=True)
+        df_lots_all = fetch_table_data("base_lots", c_farm)
+        if not df_lots_all.empty:
+             st.dataframe(df_lots_all[["lot_id", "loai_trong", "ngay_trong", "so_luong", "team"]], use_container_width=True, hide_index=True)
+        else:
+             st.info("Chưa có dữ liệu.")
+             
+    with col_t2:
+        st.markdown('<p class="dataframe-header">📈 Sinh Trưởng (Stage Logs)</p>', unsafe_allow_html=True)
+        df_stg_all = fetch_table_data("stage_logs", c_farm)
+        if not df_stg_all.empty:
+             st.dataframe(df_stg_all[["lot_id", "giai_doan", "ngay_thuc_hien", "so_luong", "mau_day", "team"]], use_container_width=True, hide_index=True)
+        else:
+             st.info("Chưa có dữ liệu.")
 
 
 # =====================================================
