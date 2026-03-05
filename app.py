@@ -198,9 +198,6 @@ def render_main_app():
     # --- HEADER ---
     st.markdown(f'<p class="main-title">Hệ thống {c_team} - {c_farm}</p>', unsafe_allow_html=True)
 
-    # Lấy danh sách lô chung cho các form
-    available_lots = get_lots_by_farm(c_farm)
-
     # =================================================
     # MODULE 1: ĐỘI NÔNG TRƯỜNG (NT1, NT2)
     # =================================================
@@ -245,6 +242,7 @@ def render_main_app():
         # TAB 2: CẬP NHẬT TIẾN ĐỘ NT
         with t2:
             st.markdown("#### Ghi nhận: Chích bắp / Cắt bắp")
+            available_lots = get_lots_by_farm(c_farm)
             if not available_lots:
                 st.warning("⚠️ Chưa có Lô trồng nào. Hãy tạo ở Tab 1.")
             else:
@@ -278,6 +276,7 @@ def render_main_app():
         # TAB 3: XUẤT HỦY
         with t3:
             st.markdown("#### Ghi nhận số lượng cây chết / hư hỏng")
+            available_lots = get_lots_by_farm(c_farm)
             if not available_lots:
                 st.warning("⚠️ Chưa có Lô trồng nào.")
             else:
@@ -314,6 +313,7 @@ def render_main_app():
     # =================================================
     elif c_team == "Đội Thu Hoạch":
         st.markdown("#### Ghi nhận Sản lượng Thu hoạch hàng ngày")
+        available_lots = get_lots_by_farm(c_farm)
         if not available_lots:
             st.warning("⚠️ Chưa có Lô trồng nào trên hệ thống.")
         else:
@@ -344,6 +344,7 @@ def render_main_app():
     # =================================================
     elif c_team == "Xưởng Đóng Gói":
         st.markdown("#### Ghi nhận Tỷ lệ BSR thành phẩm")
+        available_lots = get_lots_by_farm(c_farm)
         if not available_lots:
             st.warning("⚠️ Chưa có Lô trồng nào trên hệ thống.")
         else:
