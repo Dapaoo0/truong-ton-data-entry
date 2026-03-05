@@ -225,7 +225,7 @@ def render_login():
     # Card đăng nhập
     col1, col2, col3 = st.columns([1, 1.2, 1])
     with col2:
-        st.markdown("### 🔐 Đăng nhập hệ thống")
+        st.markdown("<h3 style='text-align: center;'>🔐 Đăng nhập hệ thống</h3>", unsafe_allow_html=True)
         st.divider()
 
         # Chọn Farm
@@ -265,7 +265,7 @@ def render_login():
                 st.error("❌ Mật khẩu không đúng. Vui lòng thử lại.")
 
         st.divider()
-        st.caption("💡 Mỗi Farm có mật khẩu riêng. Liên hệ quản lý nếu quên.")
+        st.markdown("<p style='text-align: center; color: #888888; font-size: 0.85rem;'>💡 Mỗi Farm có mật khẩu riêng. Liên hệ quản lý nếu quên.</p>", unsafe_allow_html=True)
 
 
 # =====================================================
