@@ -488,8 +488,9 @@ def render_global_data_tab(c_farm):
         if not df_lots_all.empty and "tuan" in df_lots_all.columns:
             plot_data = df_lots_all.groupby(["tuan", "loai_trong"])["so_luong"].sum().unstack().fillna(0)
             if not plot_data.empty: 
-                # Grouped bar chart is default in Streamlit when passing a dataframe with multiple columns
-                st.bar_chart(plot_data, color=["#4CAF50", "#2196F3"]) 
+                cmap = {"Trồng mới": "#4CAF50", "Trồng dặm": "#2196F3"}
+                c_list = [cmap.get(c, "#9E9E9E") for c in plot_data.columns]
+                st.bar_chart(plot_data, color=c_list) 
             else: st.info("Không đủ dữ liệu.")
         else: st.info("Chưa có dữ liệu.")
 
@@ -498,7 +499,9 @@ def render_global_data_tab(c_farm):
         if not df_stg_all.empty and "tuan" in df_stg_all.columns:
             plot_data = df_stg_all.groupby(["tuan", "giai_doan"])["so_luong"].sum().unstack().fillna(0)
             if not plot_data.empty: 
-                st.bar_chart(plot_data, color=["#FF9800", "#E91E63"])
+                cmap = {"Chích bắp": "#FF9800", "Cắt bắp": "#E91E63"}
+                c_list = [cmap.get(c, "#9E9E9E") for c in plot_data.columns]
+                st.bar_chart(plot_data, color=c_list)
             else: st.info("Không đủ dữ liệu.")
         else: st.info("Chưa có dữ liệu.")
 
