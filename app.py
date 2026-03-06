@@ -11,6 +11,7 @@ from datetime import date, datetime, timezone
 import os
 from dotenv import load_dotenv
 from supabase import create_client, Client
+import plotly.express as px
 
 if hasattr(st, "dialog"):
     dialog_decorator = st.dialog
@@ -486,22 +487,24 @@ def render_global_data_tab(c_farm):
     with col_c1:
         st.markdown("**🌱 Trồng mới & Trồng dặm (Cây)**")
         if not df_lots_all.empty and "tuan" in df_lots_all.columns:
-            plot_data = df_lots_all.groupby(["tuan", "loai_trong"])["so_luong"].sum().unstack().fillna(0)
+            plot_data = df_lots_all.groupby(["tuan", "loai_trong"], as_index=False)["so_luong"].sum()
             if not plot_data.empty: 
-                cmap = {"Trồng mới": "#4CAF50", "Trồng dặm": "#2196F3"}
-                c_list = [cmap.get(c, "#9E9E9E") for c in plot_data.columns]
-                st.bar_chart(plot_data, color=c_list) 
+                fig = px.bar(plot_data, x="tuan", y="so_luong", color="loai_trong", barmode="group",
+                             color_discrete_map={"Trồng mới": "#4CAF50", "Trồng dặm": "#2196F3"},
+                             labels={"tuan": "Tuần", "so_luong": "Số lượng (Cây)", "loai_trong": "Phân loại"})
+                st.plotly_chart(fig, use_container_width=True) 
             else: st.info("Không đủ dữ liệu.")
         else: st.info("Chưa có dữ liệu.")
 
     with col_c2:
         st.markdown("**📈 Tiến độ Chích bắp & Cắt bắp (Cây)**")
         if not df_stg_all.empty and "tuan" in df_stg_all.columns:
-            plot_data = df_stg_all.groupby(["tuan", "giai_doan"])["so_luong"].sum().unstack().fillna(0)
+            plot_data = df_stg_all.groupby(["tuan", "giai_doan"], as_index=False)["so_luong"].sum()
             if not plot_data.empty: 
-                cmap = {"Chích bắp": "#FF9800", "Cắt bắp": "#E91E63"}
-                c_list = [cmap.get(c, "#9E9E9E") for c in plot_data.columns]
-                st.bar_chart(plot_data, color=c_list)
+                fig = px.bar(plot_data, x="tuan", y="so_luong", color="giai_doan", barmode="group",
+                             color_discrete_map={"Chích bắp": "#FF9800", "Cắt bắp": "#E91E63"},
+                             labels={"tuan": "Tuần", "so_luong": "Số lượng (Cây)", "giai_doan": "Tiến độ"})
+                st.plotly_chart(fig, use_container_width=True)
             else: st.info("Không đủ dữ liệu.")
         else: st.info("Chưa có dữ liệu.")
 
