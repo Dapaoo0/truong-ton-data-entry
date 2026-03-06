@@ -498,7 +498,9 @@ def render_global_data_tab(c_farm):
         st.markdown("**🍌 Sản lượng Thu hoạch (Buồng)**")
         if not df_har_all.empty and "tuan" in df_har_all.columns:
             plot_data = df_har_all.groupby("tuan")["so_luong"].sum()
-            if not plot_data.empty: st.bar_chart(plot_data)
+            if not plot_data.empty: 
+                # Chuyển sang dạng line_chart / area_chart cho trực quan và sinh động hơn
+                st.area_chart(plot_data, color="#FFD700") 
             else: st.info("Không đủ dữ liệu.")
         else: st.info("Chưa có dữ liệu.")
 
