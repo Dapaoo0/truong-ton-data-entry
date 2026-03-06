@@ -240,7 +240,7 @@ def edit_base_lot_dialog(editing_row):
     def_ngay = pd.to_datetime(editing_row["ngay_trong"]).date()
     def_sl = int(editing_row["so_luong"])
 
-    with st.form("edit_form_base_lots"):
+    with st.container(border=True):
         col_a, col_b = st.columns(2)
         with col_a:
             vu = st.selectbox("📅 Vụ", options=vu_ops, index=def_vu)
@@ -254,7 +254,7 @@ def edit_base_lot_dialog(editing_row):
                 st.text_input("📍 Tuần", value=str(ngay_trong.isocalendar()[1]), disabled=True)
             so_luong = st.number_input("🔢 Số lượng", min_value=0, step=100, value=def_sl)
 
-        if st.form_submit_button("✅ Cập nhật", use_container_width=True, type="primary"):
+        if st.button("✅ Cập nhật", key="btn_edit_base", use_container_width=True, type="primary"):
             if not lo.strip(): st.error("❌ Nhập tên lô.")
             elif so_luong <= 0: st.error("❌ Cần nhập số lượng.")
             else:
@@ -280,7 +280,7 @@ def edit_stage_log_dialog(editing_row, available_lots):
     def_ngay = pd.to_datetime(editing_row["ngay_thuc_hien"]).date()
     def_sl = int(editing_row["so_luong"])
 
-    with st.form("edit_form_stage"):
+    with st.container(border=True):
         col_a, col_b = st.columns(2)
         with col_a:
             lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, index=def_lot)
@@ -294,7 +294,7 @@ def edit_stage_log_dialog(editing_row, available_lots):
                 st.text_input("📍 Tuần", value=str(ngay_th.isocalendar()[1]), disabled=True)
             sl = st.number_input("🔢 Số lượng cây", min_value=0, step=100, value=def_sl)
         
-        if st.form_submit_button("✅ Cập nhật", use_container_width=True, type="primary"):
+        if st.button("✅ Cập nhật", key="btn_edit_stg", use_container_width=True, type="primary"):
             if sl <= 0: st.error("❌ Cần nhập số lượng.")
             elif not mau_day: st.error("❌ Phải chọn màu dây định danh lứa.")
             else:
@@ -319,7 +319,7 @@ def edit_destruction_log_dialog(editing_row, available_lots):
     def_ngay = pd.to_datetime(editing_row["ngay_xuat_huy"]).date()
     def_sl = int(editing_row["so_luong"])
     
-    with st.form("edit_form_destroy"):
+    with st.container(border=True):
         col_a, col_b = st.columns(2)
         with col_a:
             lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, index=def_lot)
@@ -333,7 +333,7 @@ def edit_destruction_log_dialog(editing_row, available_lots):
                 st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True)
             sl = st.number_input("🔢 Số lượng xuất hủy", min_value=0, step=10, value=def_sl)
 
-        if st.form_submit_button("✅ Cập nhật", use_container_width=True, type="primary"):
+        if st.button("✅ Cập nhật", key="btn_edit_des", use_container_width=True, type="primary"):
             if sl <= 0: st.error("❌ Cần nhập số lượng.")
             elif not ly_do.strip(): st.error("❌ Cần ghi rõ lý do.")
             else:
@@ -351,15 +351,19 @@ def edit_harvest_log_dialog(editing_row, available_lots):
     def_ngay = pd.to_datetime(editing_row["ngay_thu_hoach"]).date()
     def_sl = int(editing_row["so_luong"])
 
-    with st.form("edit_form_harvest"):
+    with st.container(border=True):
         col_a, col_b = st.columns(2)
         with col_a:
             lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, index=def_lot)
-            ngay = st.date_input("📆 Ngày thu hoạch", value=def_ngay)
         with col_b:
+            col_b1, col_b2 = st.columns([2, 1])
+            with col_b1:
+                ngay = st.date_input("📆 Ngày thu hoạch", value=def_ngay)
+            with col_b2:
+                st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True)
             sl = st.number_input("🍌 Số lượng buồng", min_value=0, step=50, value=def_sl)
 
-        if st.form_submit_button("✅ Cập nhật", use_container_width=True, type="primary"):
+        if st.button("✅ Cập nhật", key="btn_edit_har", use_container_width=True, type="primary"):
             if sl <= 0: st.error("❌ Số lượng buồng phải > 0")
             else:
                 is_valid, msg = check_quantity_limit(lot_id, sl, "harvest", exclude_id=editing_row["id"])
@@ -376,15 +380,19 @@ def edit_bsr_log_dialog(editing_row, available_lots):
     def_ngay = pd.to_datetime(editing_row["ngay_nhap"]).date()
     def_bsr = float(editing_row["bsr"])
     
-    with st.form("edit_form_bsr"):
+    with st.container(border=True):
         col_a, col_b = st.columns(2)
         with col_a:
             lot_id = st.selectbox("🏷️ Chọn Lô đóng gói", options=available_lots, index=def_lot)
-            ngay = st.date_input("📆 Ngày đóng gói", value=def_ngay)
         with col_b:
+            col_b1, col_b2 = st.columns([2, 1])
+            with col_b1:
+                ngay = st.date_input("📆 Ngày đóng gói", value=def_ngay)
+            with col_b2:
+                st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True)
             bsr_val = st.number_input("📐 Tỷ lệ BSR", min_value=0.0, step=0.1, value=def_bsr, format="%.2f")
 
-        if st.form_submit_button("✅ Cập nhật", use_container_width=True, type="primary"):
+        if st.button("✅ Cập nhật", key="btn_edit_bsr", use_container_width=True, type="primary"):
             if bsr_val <= 0: st.error("❌ Tỷ lệ BSR phải > 0")
             else:
                 data = {"lot_id": lot_id, "ngay_nhap": ngay.isoformat(), "bsr": bsr_val, "tuan": ngay.isocalendar()[1]}
@@ -556,7 +564,7 @@ def render_main_app():
             editing_row, is_within_48h = get_editing_row("base_lots", df_lots_team)
             is_editing = editing_row is not None
             
-            with st.form("form_nt_base", clear_on_submit=True):
+            with st.container(border=True):
                 col_a, col_b = st.columns(2)
                 with col_a:
                     vu = st.selectbox("📅 Vụ", options=VU_OPTIONS)
@@ -570,7 +578,7 @@ def render_main_app():
                         st.text_input("📍 Tuần", value=str(ngay_trong.isocalendar()[1]), disabled=True)
                     so_luong = st.number_input("🔢 Số lượng trồng (cây)", min_value=0, step=100)
 
-                if st.form_submit_button("✅ Tạo Lô Trồng", use_container_width=True, type="primary"):
+                if st.button("✅ Tạo Lô Trồng", key="btn_add_base", use_container_width=True, type="primary"):
                     if not lo.strip(): st.error("❌ Nhập tên lô.")
                     elif so_luong <= 0: st.error("❌ Cần nhập số lượng.")
                     else:
@@ -612,7 +620,7 @@ def render_main_app():
                 editing_row, is_within_48h = get_editing_row("stage_logs", df_stg_team)
                 is_editing = editing_row is not None
                 
-                with st.form("form_nt_stage", clear_on_submit=True):
+                with st.container(border=True):
                     col_a, col_b = st.columns(2)
                     with col_a:
                         lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots)
@@ -626,7 +634,7 @@ def render_main_app():
                             st.text_input("📍 Tuần", value=str(ngay_th.isocalendar()[1]), disabled=True)
                         sl = st.number_input("🔢 Số lượng cây", min_value=0, step=100)
 
-                    if st.form_submit_button("✅ Cập nhật Tiến độ", use_container_width=True, type="primary"):
+                    if st.button("✅ Cập nhật Tiến độ", key="btn_add_stg", use_container_width=True, type="primary"):
                         if sl <= 0: st.error("❌ Nhập số lượng > 0.")
                         elif not mau_day: st.error("❌ Phải chọn màu dây định danh lứa.")
                         else:
@@ -668,7 +676,7 @@ def render_main_app():
                 editing_row, is_within_48h = get_editing_row("destruction_logs", df_des_team)
                 is_editing = editing_row is not None
                 
-                with st.form("form_nt_destroy", clear_on_submit=True):
+                with st.container(border=True):
                     col_a, col_b = st.columns(2)
                     with col_a:
                         lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots)
@@ -682,7 +690,7 @@ def render_main_app():
                             st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True)
                         sl = st.number_input("🔢 Số lượng cây xuất hủy", min_value=0, step=10)
 
-                    if st.form_submit_button("🗑️ Ghi nhận Xuất hủy", use_container_width=True, type="primary"):
+                    if st.button("🗑️ Ghi nhận Xuất hủy", key="btn_add_des", use_container_width=True, type="primary"):
                         if sl <= 0: st.error("❌ Nhập số lượng > 0.")
                         elif not ly_do.strip(): st.error("❌ Cần ghi rõ lý do.")
                         else:
@@ -734,7 +742,7 @@ def render_main_app():
                 editing_row, is_within_48h = get_editing_row("harvest_logs", df_har_team)
                 is_editing = editing_row is not None
                 
-                with st.form("form_harvest", clear_on_submit=True):
+                with st.container(border=True):
                     col_a, col_b = st.columns(2)
                     with col_a:
                         lot_id = st.selectbox("🏷️ Chọn Lô thu hoạch", options=available_lots)
@@ -747,7 +755,7 @@ def render_main_app():
                         sl = st.number_input("🍌 Số lượng buồng thu hoạch", min_value=0, step=50)
     
                     st.markdown("")
-                    if st.form_submit_button("✅ Cập nhật Thu hoạch", use_container_width=True, type="primary"):
+                    if st.button("✅ Cập nhật Thu hoạch", key="btn_add_har", use_container_width=True, type="primary"):
                         if sl <= 0: st.error("❌ Số lượng buồng phải > 0")
                         else:
                             is_valid, msg = check_quantity_limit(lot_id, sl, "harvest")
@@ -795,7 +803,7 @@ def render_main_app():
                 editing_row, is_within_48h = get_editing_row("bsr_logs", df_bsr_team)
                 is_editing = editing_row is not None
                 
-                with st.form("form_bsr", clear_on_submit=True):
+                with st.container(border=True):
                     col_a, col_b = st.columns(2)
                     with col_a:
                         lot_id = st.selectbox("🏷️ Chọn Lô đóng gói", options=available_lots)
@@ -808,7 +816,7 @@ def render_main_app():
                         bsr_val = st.number_input("📐 Nhập tỷ lệ BSR (Buồng / Sản Rạ)", min_value=0.0, value=0.0, step=0.1, format="%.2f")
     
                     st.markdown("")
-                    if st.form_submit_button("✅ Cập nhật BSR", use_container_width=True, type="primary"):
+                    if st.button("✅ Cập nhật BSR", key="btn_add_bsr", use_container_width=True, type="primary"):
                         if bsr_val <= 0: st.error("❌ Tỷ lệ BSR phải > 0")
                         else:
                             data = {
