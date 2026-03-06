@@ -12,6 +12,7 @@ import os
 from dotenv import load_dotenv
 from supabase import create_client, Client
 import plotly.express as px
+import io
 
 if hasattr(st, "dialog"):
     dialog_decorator = st.dialog
@@ -118,12 +119,12 @@ def insert_access_log(farm: str, team: str, action: str):
 # =====================================================
 def get_lots_by_farm(farm: str) -> list:
     """Lấy danh sách lot_id gốc của nguyen Farm (chọn Lô trồng)."""
-    res = supabase.table("base_lots").select("lot_id").eq("farm", farm).order("created_at").execute()
+    res = supabase.table("base_lots").select("lot_id").eq("farm", farm).eq("is_deleted", False).order("created_at").execute()
     return [row["lot_id"] for row in res.data] if res.data else []
 
 def fetch_table_data(table_name: str, farm: str) -> pd.DataFrame:
     """Hàm chung lấy dữ liệu từ bảng bất kỳ theo farm."""
-    res = supabase.table(table_name).select("*").eq("farm", farm).order("created_at", desc=True).execute()
+    res = supabase.table(table_name).select("*").eq("farm", farm).eq("is_deleted", False).order("created_at", desc=True).execute()
     return pd.DataFrame(res.data) if res.data else pd.DataFrame()
 
 def insert_to_db(table_name: str, data: dict) -> bool:
@@ -138,34 +139,40 @@ def insert_to_db(table_name: str, data: dict) -> bool:
         return False
 
 def check_quantity_limit(lot_id, new_sl, log_type, giai_doan=None, exclude_id=None):
-    res_lot = supabase.table("base_lots").select("so_luong").eq("lot_id", lot_id).execute()
-    if not res_lot.data: return False, "❌ Lỗi: Không tìm thấy thông tin Lô."
-    total_planted = int(res_lot.data[0]["so_luong"])
+    res_lot = supabase.table("base_lots").select("so_luong_con_lai").eq("lot_id", lot_id).eq("is_deleted", False).execute()
+    if not res_lot.data: return False, "❌ Lỗi: Không tìm thấy Lô hoặc Lô đã bị xóa."
+    total_planted = int(res_lot.data[0].get("so_luong_con_lai", 0))
 
     max_allowed = total_planted
     action_name = giai_doan.lower() if log_type == "stage" else ("xuất hủy" if log_type == "destruction" else "thu hoạch")
-    base_name = "trồng"
+    base_name = "trồng (còn sống)"
     unit = "buồng" if log_type == "harvest" else "cây"
 
     if log_type == "stage" and giai_doan == "Cắt bắp":
-        res_cb = supabase.table("stage_logs").select("so_luong").eq("lot_id", lot_id).eq("giai_doan", "Chích bắp").execute()
+        res_cb = supabase.table("stage_logs").select("so_luong").eq("lot_id", lot_id).eq("giai_doan", "Chích bắp").eq("is_deleted", False).execute()
         max_allowed = sum(int(r["so_luong"]) for r in res_cb.data)
         base_name = "chích bắp"
         
     elif log_type == "harvest":
-        res_cut = supabase.table("stage_logs").select("so_luong").eq("lot_id", lot_id).eq("giai_doan", "Cắt bắp").execute()
+        res_cut = supabase.table("stage_logs").select("so_luong").eq("lot_id", lot_id).eq("giai_doan", "Cắt bắp").eq("is_deleted", False).execute()
         max_allowed = sum(int(r["so_luong"]) for r in res_cut.data)
         base_name = "cắt bắp"
 
     total_used = 0
     if log_type == "stage":
-        res = supabase.table("stage_logs").select("id, so_luong").eq("lot_id", lot_id).eq("giai_doan", giai_doan).execute()
+        res = supabase.table("stage_logs").select("id, so_luong").eq("lot_id", lot_id).eq("giai_doan", giai_doan).eq("is_deleted", False).execute()
         total_used = sum(int(r["so_luong"]) for r in res.data if r["id"] != exclude_id)
     elif log_type == "destruction":
-        res = supabase.table("destruction_logs").select("id, so_luong").eq("lot_id", lot_id).execute()
-        total_used = sum(int(r["so_luong"]) for r in res.data if r["id"] != exclude_id)
+        old_sl = 0
+        if exclude_id:
+            res_old = supabase.table("destruction_logs").select("so_luong").eq("id", exclude_id).execute()
+            if res_old.data: old_sl = int(res_old.data[0]["so_luong"])
+            
+        if int(new_sl) > (max_allowed + old_sl):
+            return False, f"❌ Lô này chỉ còn {max_allowed + old_sl} cây sống, không thể xuất hủy {new_sl} cây."
+        return True, ""
     elif log_type == "harvest":
-        res = supabase.table("harvest_logs").select("id, so_luong").eq("lot_id", lot_id).execute()
+        res = supabase.table("harvest_logs").select("id, so_luong").eq("lot_id", lot_id).eq("is_deleted", False).execute()
         total_used = sum(int(r["so_luong"]) for r in res.data if r["id"] != exclude_id)
 
     if total_used + int(new_sl) > max_allowed:
@@ -194,12 +201,13 @@ def confirm_action_dialog(action, table_name, rec_id_or_none, data_dict, success
                     st.error(f"❌ Lỗi cập nhật: {e}")
             elif action == "DELETE":
                 try:
-                    supabase.table(table_name).delete().eq("id", rec_id_or_none).execute()
+                    supabase.table(table_name).update({"is_deleted": True}).eq("id", rec_id_or_none).execute()
                     success = True
                 except Exception as e:
                     st.error(f"❌ Lỗi xóa: {e}")
             
             if success:
+                st.cache_data.clear()
                 st.session_state["toast"] = success_msg
                 st.rerun()
     with col2:
@@ -454,6 +462,28 @@ def render_global_data_tab(c_farm):
     df_des_all = fetch_table_data("destruction_logs", c_farm)
     df_har_all = fetch_table_data("harvest_logs", c_farm)
     df_bsr_all = fetch_table_data("bsr_logs", c_farm)
+
+    # Nút Xuất Báo cáo Excel (Chứa toàn bộ dữ liệu thô)
+    col_t1, col_t2 = st.columns([4, 1])
+    with col_t2:
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df_lots_all.to_excel(writer, sheet_name='Base Lots (Lô trồng)', index=False)
+            df_stg_all.to_excel(writer, sheet_name='Stage Logs (Tiến độ)', index=False)
+            df_des_all.to_excel(writer, sheet_name='Destruction Logs', index=False)
+            df_har_all.to_excel(writer, sheet_name='Harvest Logs (Thu Hoạch)', index=False)
+            df_bsr_all.to_excel(writer, sheet_name='BSR Logs (Tỷ lệ)', index=False)
+        output.seek(0)
+        st.download_button(
+            label="📥 Xuất Báo Cáo Excel",
+            data=output.getvalue(),
+            file_name=f"Bao_cao_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            type="secondary"
+        )
+        
+    st.divider()
 
     # Filter section
     st.markdown("##### 🔍 Bộ lọc Dữ liệu")
