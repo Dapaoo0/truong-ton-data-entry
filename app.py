@@ -251,7 +251,7 @@ def edit_base_lot_dialog(editing_row):
             with col_b1:
                 ngay_trong = st.date_input("📆 Ngày trồng", value=def_ngay, key="dlg_dt_base")
             with col_b2:
-                st.text_input("📍 Tuần", value=str(ngay_trong.isocalendar()[1]), disabled=True, key="dlg_w_base")
+                st.text_input("📍 Tuần", value=str(ngay_trong.isocalendar()[1]), disabled=True, key=f"dlg_w_base_{ngay_trong}")
             so_luong = st.number_input("🔢 Số lượng", min_value=0, step=100, value=def_sl, key="dlg_sl_base")
 
         if st.button("✅ Cập nhật", key="btn_edit_base", use_container_width=True, type="primary"):
@@ -291,7 +291,7 @@ def edit_stage_log_dialog(editing_row, available_lots):
             with col_b1:
                 ngay_th = st.date_input("📆 Ngày thực hiện", value=def_ngay, key="dlg_dt_stg")
             with col_b2:
-                st.text_input("📍 Tuần", value=str(ngay_th.isocalendar()[1]), disabled=True, key="dlg_w_stg")
+                st.text_input("📍 Tuần", value=str(ngay_th.isocalendar()[1]), disabled=True, key=f"dlg_w_stg_{ngay_th}")
             sl = st.number_input("🔢 Số lượng cây", min_value=0, step=100, value=def_sl, key="dlg_sl_stg")
         
         if st.button("✅ Cập nhật", key="btn_edit_stg", use_container_width=True, type="primary"):
@@ -330,7 +330,7 @@ def edit_destruction_log_dialog(editing_row, available_lots):
             with col_b1:
                 ngay = st.date_input("📆 Ngày xuất hủy", value=def_ngay, key="dlg_dt_des")
             with col_b2:
-                st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key="dlg_w_des")
+                st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key=f"dlg_w_des_{ngay}")
             sl = st.number_input("🔢 Số lượng xuất hủy", min_value=0, step=10, value=def_sl, key="dlg_sl_des")
 
         if st.button("✅ Cập nhật", key="btn_edit_des", use_container_width=True, type="primary"):
@@ -360,7 +360,7 @@ def edit_harvest_log_dialog(editing_row, available_lots):
             with col_b1:
                 ngay = st.date_input("📆 Ngày thu hoạch", value=def_ngay, key="dlg_dt_har")
             with col_b2:
-                st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key="dlg_w_har")
+                st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key=f"dlg_w_har_{ngay}")
             sl = st.number_input("🍌 Số lượng buồng", min_value=0, step=50, value=def_sl, key="dlg_sl_har")
 
         if st.button("✅ Cập nhật", key="btn_edit_har", use_container_width=True, type="primary"):
@@ -389,7 +389,7 @@ def edit_bsr_log_dialog(editing_row, available_lots):
             with col_b1:
                 ngay = st.date_input("📆 Ngày đóng gói", value=def_ngay, key="dlg_dt_bsr")
             with col_b2:
-                st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key="dlg_w_bsr")
+                st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key=f"dlg_w_bsr_{ngay}")
             bsr_val = st.number_input("📐 Tỷ lệ BSR", min_value=0.0, step=0.1, value=def_bsr, format="%.2f", key="dlg_v_bsr")
 
         if st.button("✅ Cập nhật", key="btn_edit_bsr", use_container_width=True, type="primary"):
@@ -575,7 +575,7 @@ def render_main_app():
                     with col_b1:
                         ngay_trong = st.date_input("📆 Ngày trồng", value=date.today(), key="add_base_ngay")
                     with col_b2:
-                        st.text_input("📍 Tuần", value=str(ngay_trong.isocalendar()[1]), disabled=True, key="main_w_base")
+                        st.text_input("📍 Tuần", value=str(ngay_trong.isocalendar()[1]), disabled=True, key=f"main_w_base_{ngay_trong}")
                     so_luong = st.number_input("🔢 Số lượng trồng (cây)", min_value=0, step=100, key="add_base_sl")
 
                 if st.button("✅ Tạo Lô Trồng", key="btn_add_base", use_container_width=True, type="primary"):
@@ -631,7 +631,7 @@ def render_main_app():
                         with col_b1:
                             ngay_th = st.date_input("📆 Ngày thực hiện", value=date.today(), key="add_stg_ngay")
                         with col_b2:
-                            st.text_input("📍 Tuần", value=str(ngay_th.isocalendar()[1]), disabled=True, key="main_w_stg")
+                            st.text_input("📍 Tuần", value=str(ngay_th.isocalendar()[1]), disabled=True, key=f"main_w_stg_{ngay_th}")
                         sl = st.number_input("🔢 Số lượng cây", min_value=0, step=100, key="add_stg_sl")
 
                     if st.button("✅ Cập nhật Tiến độ", key="btn_add_stg", use_container_width=True, type="primary"):
@@ -687,7 +687,7 @@ def render_main_app():
                         with col_b1:
                             ngay = st.date_input("📆 Ngày xuất hủy", value=date.today(), key="add_des_ngay")
                         with col_b2:
-                            st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key="main_w_des")
+                            st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key=f"main_w_des_{ngay}")
                         sl = st.number_input("🔢 Số lượng cây xuất hủy", min_value=0, step=10, key="add_des_sl")
 
                     if st.button("🗑️ Ghi nhận Xuất hủy", key="btn_add_des", use_container_width=True, type="primary"):
@@ -751,7 +751,7 @@ def render_main_app():
                         with col_b1:
                             ngay = st.date_input("📆 Ngày thu hoạch", value=date.today(), key="add_har_dt")
                         with col_b2:
-                            st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key="main_w_har")
+                            st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key=f"main_w_har_{ngay}")
                         sl = st.number_input("🍌 Số lượng buồng thu hoạch", min_value=0, step=50, key="add_har_sl")
     
                     st.markdown("")
@@ -812,7 +812,7 @@ def render_main_app():
                         with col_b1:
                             ngay = st.date_input("📆 Ngày đóng gói", value=date.today(), key="add_bsr_dt")
                         with col_b2:
-                            st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key="main_w_bsr")
+                            st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key=f"main_w_bsr_{ngay}")
                         bsr_val = st.number_input("📐 Nhập tỷ lệ BSR (Buồng / Sản Rạ)", min_value=0.0, value=0.0, step=0.1, format="%.2f", key="add_bsr_val")
     
                     st.markdown("")
