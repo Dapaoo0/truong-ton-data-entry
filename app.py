@@ -251,7 +251,7 @@ def edit_base_lot_dialog(editing_row):
             with col_b1:
                 ngay_trong = st.date_input("📆 Ngày trồng", value=def_ngay)
             with col_b2:
-                st.text_input("📍 Tuần", value=str(ngay_trong.isocalendar()[1]), disabled=True)
+                st.text_input("📍 Tuần", value=str(ngay_trong.isocalendar()[1]), disabled=True, key="dlg_w_base")
             so_luong = st.number_input("🔢 Số lượng", min_value=0, step=100, value=def_sl)
 
         if st.button("✅ Cập nhật", key="btn_edit_base", use_container_width=True, type="primary"):
@@ -291,7 +291,7 @@ def edit_stage_log_dialog(editing_row, available_lots):
             with col_b1:
                 ngay_th = st.date_input("📆 Ngày thực hiện", value=def_ngay)
             with col_b2:
-                st.text_input("📍 Tuần", value=str(ngay_th.isocalendar()[1]), disabled=True)
+                st.text_input("📍 Tuần", value=str(ngay_th.isocalendar()[1]), disabled=True, key="dlg_w_stg")
             sl = st.number_input("🔢 Số lượng cây", min_value=0, step=100, value=def_sl)
         
         if st.button("✅ Cập nhật", key="btn_edit_stg", use_container_width=True, type="primary"):
@@ -330,7 +330,7 @@ def edit_destruction_log_dialog(editing_row, available_lots):
             with col_b1:
                 ngay = st.date_input("📆 Ngày xuất hủy", value=def_ngay)
             with col_b2:
-                st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True)
+                st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key="dlg_w_des")
             sl = st.number_input("🔢 Số lượng xuất hủy", min_value=0, step=10, value=def_sl)
 
         if st.button("✅ Cập nhật", key="btn_edit_des", use_container_width=True, type="primary"):
@@ -360,7 +360,7 @@ def edit_harvest_log_dialog(editing_row, available_lots):
             with col_b1:
                 ngay = st.date_input("📆 Ngày thu hoạch", value=def_ngay)
             with col_b2:
-                st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True)
+                st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key="dlg_w_har")
             sl = st.number_input("🍌 Số lượng buồng", min_value=0, step=50, value=def_sl)
 
         if st.button("✅ Cập nhật", key="btn_edit_har", use_container_width=True, type="primary"):
@@ -389,7 +389,7 @@ def edit_bsr_log_dialog(editing_row, available_lots):
             with col_b1:
                 ngay = st.date_input("📆 Ngày đóng gói", value=def_ngay)
             with col_b2:
-                st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True)
+                st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key="dlg_w_bsr")
             bsr_val = st.number_input("📐 Tỷ lệ BSR", min_value=0.0, step=0.1, value=def_bsr, format="%.2f")
 
         if st.button("✅ Cập nhật", key="btn_edit_bsr", use_container_width=True, type="primary"):
@@ -575,7 +575,7 @@ def render_main_app():
                     with col_b1:
                         ngay_trong = st.date_input("📆 Ngày trồng", value=date.today())
                     with col_b2:
-                        st.text_input("📍 Tuần", value=str(ngay_trong.isocalendar()[1]), disabled=True)
+                        st.text_input("📍 Tuần", value=str(ngay_trong.isocalendar()[1]), disabled=True, key="main_w_base")
                     so_luong = st.number_input("🔢 Số lượng trồng (cây)", min_value=0, step=100)
 
                 if st.button("✅ Tạo Lô Trồng", key="btn_add_base", use_container_width=True, type="primary"):
@@ -631,7 +631,7 @@ def render_main_app():
                         with col_b1:
                             ngay_th = st.date_input("📆 Ngày thực hiện", value=date.today())
                         with col_b2:
-                            st.text_input("📍 Tuần", value=str(ngay_th.isocalendar()[1]), disabled=True)
+                            st.text_input("📍 Tuần", value=str(ngay_th.isocalendar()[1]), disabled=True, key="main_w_stg")
                         sl = st.number_input("🔢 Số lượng cây", min_value=0, step=100)
 
                     if st.button("✅ Cập nhật Tiến độ", key="btn_add_stg", use_container_width=True, type="primary"):
