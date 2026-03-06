@@ -487,7 +487,9 @@ def render_global_data_tab(c_farm):
         st.markdown("**🌱 Trồng mới & Trồng dặm (Cây)**")
         if not df_lots_all.empty and "tuan" in df_lots_all.columns:
             plot_data = df_lots_all.groupby(["tuan", "loai_trong"])["so_luong"].sum().unstack().fillna(0)
-            if not plot_data.empty: st.bar_chart(plot_data)
+            if not plot_data.empty: 
+                # Grouped bar chart is default in Streamlit when passing a dataframe with multiple columns
+                st.bar_chart(plot_data, color=["#4CAF50", "#2196F3"]) 
             else: st.info("Không đủ dữ liệu.")
         else: st.info("Chưa có dữ liệu.")
 
@@ -495,7 +497,8 @@ def render_global_data_tab(c_farm):
         st.markdown("**📈 Tiến độ Chích bắp & Cắt bắp (Cây)**")
         if not df_stg_all.empty and "tuan" in df_stg_all.columns:
             plot_data = df_stg_all.groupby(["tuan", "giai_doan"])["so_luong"].sum().unstack().fillna(0)
-            if not plot_data.empty: st.line_chart(plot_data)
+            if not plot_data.empty: 
+                st.bar_chart(plot_data, color=["#FF9800", "#E91E63"])
             else: st.info("Không đủ dữ liệu.")
         else: st.info("Chưa có dữ liệu.")
 
@@ -513,10 +516,11 @@ def render_global_data_tab(c_farm):
         else: st.info("Chưa có dữ liệu.")
 
     with col_c4:
-        st.markdown("**🗑️ Tỷ lệ Xuất hủy**")
-        if not df_des_all.empty:
-            plot_data = df_des_all.groupby("giai_doan")["so_luong"].sum()
-            if not plot_data.empty: st.bar_chart(plot_data)
+        st.markdown("**🗑️ Xuất hủy theo thời gian (Cây)**")
+        if not df_des_all.empty and "tuan" in df_des_all.columns:
+            plot_data = df_des_all.groupby("tuan")["so_luong"].sum()
+            if not plot_data.empty: 
+                st.line_chart(plot_data, color="#F44336")
             else: st.info("Không đủ dữ liệu.")
         else: st.info("Chưa có dữ liệu.")
 
