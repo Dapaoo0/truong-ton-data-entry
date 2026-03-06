@@ -243,16 +243,16 @@ def edit_base_lot_dialog(editing_row):
     with st.container(border=True):
         col_a, col_b = st.columns(2)
         with col_a:
-            vu = st.selectbox("📅 Vụ", options=vu_ops, index=def_vu)
-            lo = st.text_input("🏷️ Tên Lô", value=def_lo)
-            loai_trong = st.selectbox("🌱 Loại trồng", options=loai_ops, index=def_loai)
+            vu = st.selectbox("📅 Vụ", options=vu_ops, index=def_vu, key="dlg_vu_base")
+            lo = st.text_input("🏷️ Tên Lô", value=def_lo, key="dlg_lo_base")
+            loai_trong = st.selectbox("🌱 Loại trồng", options=loai_ops, index=def_loai, key="dlg_loai_base")
         with col_b:
             col_b1, col_b2 = st.columns([2, 1])
             with col_b1:
-                ngay_trong = st.date_input("📆 Ngày trồng", value=def_ngay)
+                ngay_trong = st.date_input("📆 Ngày trồng", value=def_ngay, key="dlg_dt_base")
             with col_b2:
                 st.text_input("📍 Tuần", value=str(ngay_trong.isocalendar()[1]), disabled=True, key="dlg_w_base")
-            so_luong = st.number_input("🔢 Số lượng", min_value=0, step=100, value=def_sl)
+            so_luong = st.number_input("🔢 Số lượng", min_value=0, step=100, value=def_sl, key="dlg_sl_base")
 
         if st.button("✅ Cập nhật", key="btn_edit_base", use_container_width=True, type="primary"):
             if not lo.strip(): st.error("❌ Nhập tên lô.")
@@ -283,16 +283,16 @@ def edit_stage_log_dialog(editing_row, available_lots):
     with st.container(border=True):
         col_a, col_b = st.columns(2)
         with col_a:
-            lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, index=def_lot)
-            giai_doan = st.radio("📌 Giai đoạn", options=gd_ops, index=def_gd, horizontal=True)
-            mau_day = st.selectbox("🎨 Màu dây", options=mau_ops, index=def_mau)
+            lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, index=def_lot, key="dlg_lot_stg")
+            giai_doan = st.radio("📌 Giai đoạn", options=gd_ops, index=def_gd, horizontal=True, key="dlg_gd_stg")
+            mau_day = st.selectbox("🎨 Màu dây", options=mau_ops, index=def_mau, key="dlg_mau_stg")
         with col_b:
             col_b1, col_b2 = st.columns([2, 1])
             with col_b1:
-                ngay_th = st.date_input("📆 Ngày thực hiện", value=def_ngay)
+                ngay_th = st.date_input("📆 Ngày thực hiện", value=def_ngay, key="dlg_dt_stg")
             with col_b2:
                 st.text_input("📍 Tuần", value=str(ngay_th.isocalendar()[1]), disabled=True, key="dlg_w_stg")
-            sl = st.number_input("🔢 Số lượng cây", min_value=0, step=100, value=def_sl)
+            sl = st.number_input("🔢 Số lượng cây", min_value=0, step=100, value=def_sl, key="dlg_sl_stg")
         
         if st.button("✅ Cập nhật", key="btn_edit_stg", use_container_width=True, type="primary"):
             if sl <= 0: st.error("❌ Cần nhập số lượng.")
@@ -322,16 +322,16 @@ def edit_destruction_log_dialog(editing_row, available_lots):
     with st.container(border=True):
         col_a, col_b = st.columns(2)
         with col_a:
-            lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, index=def_lot)
-            gxh = st.selectbox("⏱️ Giai đoạn", options=gd_ops, index=def_gd)
-            ly_do = st.text_area("📝 Lý do", height=100, value=def_ly_do)
+            lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, index=def_lot, key="dlg_lot_des")
+            gxh = st.selectbox("⏱️ Giai đoạn", options=gd_ops, index=def_gd, key="dlg_gxh_des")
+            ly_do = st.text_area("📝 Lý do", height=100, value=def_ly_do, key="dlg_lydo_des")
         with col_b:
             col_b1, col_b2 = st.columns([2, 1])
             with col_b1:
-                ngay = st.date_input("📆 Ngày xuất hủy", value=def_ngay)
+                ngay = st.date_input("📆 Ngày xuất hủy", value=def_ngay, key="dlg_dt_des")
             with col_b2:
                 st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key="dlg_w_des")
-            sl = st.number_input("🔢 Số lượng xuất hủy", min_value=0, step=10, value=def_sl)
+            sl = st.number_input("🔢 Số lượng xuất hủy", min_value=0, step=10, value=def_sl, key="dlg_sl_des")
 
         if st.button("✅ Cập nhật", key="btn_edit_des", use_container_width=True, type="primary"):
             if sl <= 0: st.error("❌ Cần nhập số lượng.")
@@ -354,14 +354,14 @@ def edit_harvest_log_dialog(editing_row, available_lots):
     with st.container(border=True):
         col_a, col_b = st.columns(2)
         with col_a:
-            lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, index=def_lot)
+            lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, index=def_lot, key="dlg_lot_har")
         with col_b:
             col_b1, col_b2 = st.columns([2, 1])
             with col_b1:
-                ngay = st.date_input("📆 Ngày thu hoạch", value=def_ngay)
+                ngay = st.date_input("📆 Ngày thu hoạch", value=def_ngay, key="dlg_dt_har")
             with col_b2:
                 st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key="dlg_w_har")
-            sl = st.number_input("🍌 Số lượng buồng", min_value=0, step=50, value=def_sl)
+            sl = st.number_input("🍌 Số lượng buồng", min_value=0, step=50, value=def_sl, key="dlg_sl_har")
 
         if st.button("✅ Cập nhật", key="btn_edit_har", use_container_width=True, type="primary"):
             if sl <= 0: st.error("❌ Số lượng buồng phải > 0")
@@ -383,14 +383,14 @@ def edit_bsr_log_dialog(editing_row, available_lots):
     with st.container(border=True):
         col_a, col_b = st.columns(2)
         with col_a:
-            lot_id = st.selectbox("🏷️ Chọn Lô đóng gói", options=available_lots, index=def_lot)
+            lot_id = st.selectbox("🏷️ Chọn Lô đóng gói", options=available_lots, index=def_lot, key="dlg_lot_bsr")
         with col_b:
             col_b1, col_b2 = st.columns([2, 1])
             with col_b1:
-                ngay = st.date_input("📆 Ngày đóng gói", value=def_ngay)
+                ngay = st.date_input("📆 Ngày đóng gói", value=def_ngay, key="dlg_dt_bsr")
             with col_b2:
                 st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key="dlg_w_bsr")
-            bsr_val = st.number_input("📐 Tỷ lệ BSR", min_value=0.0, step=0.1, value=def_bsr, format="%.2f")
+            bsr_val = st.number_input("📐 Tỷ lệ BSR", min_value=0.0, step=0.1, value=def_bsr, format="%.2f", key="dlg_v_bsr")
 
         if st.button("✅ Cập nhật", key="btn_edit_bsr", use_container_width=True, type="primary"):
             if bsr_val <= 0: st.error("❌ Tỷ lệ BSR phải > 0")
@@ -461,9 +461,9 @@ def render_global_data_tab(c_farm):
     lots = ["Tất cả"] + list(df_lots_all["lot_id"].dropna().unique()) if not df_lots_all.empty else ["Tất cả"]
     
     with col_f1:
-        f_team = st.selectbox("Lọc theo Đội", options=teams)
+        f_team = st.selectbox("Lọc theo Đội", options=teams, key="f_glb_team")
     with col_f2:
-        f_lot = st.selectbox("Lọc theo Lô", options=lots)
+        f_lot = st.selectbox("Lọc theo Lô", options=lots, key="f_glb_lot")
 
     # Apply filters
     if f_team != "Tất cả" and not df_lots_all.empty:
@@ -567,16 +567,16 @@ def render_main_app():
             with st.container(border=True):
                 col_a, col_b = st.columns(2)
                 with col_a:
-                    vu = st.selectbox("📅 Vụ", options=VU_OPTIONS)
-                    lo = st.text_input("🏷️ Tên Lô (VD: A1, B3...)", placeholder="Nhập tên lô...")
-                    loai_trong = st.selectbox("🌱 Loại trồng", options=LOAI_TRONG_OPTIONS)
+                    vu = st.selectbox("📅 Vụ", options=VU_OPTIONS, key="add_base_vu")
+                    lo = st.text_input("🏷️ Tên Lô (VD: A1, B3...)", placeholder="Nhập tên lô...", key="add_base_lo")
+                    loai_trong = st.selectbox("🌱 Loại trồng", options=LOAI_TRONG_OPTIONS, key="add_base_loai")
                 with col_b:
                     col_b1, col_b2 = st.columns([2, 1])
                     with col_b1:
-                        ngay_trong = st.date_input("📆 Ngày trồng", value=date.today())
+                        ngay_trong = st.date_input("📆 Ngày trồng", value=date.today(), key="add_base_ngay")
                     with col_b2:
                         st.text_input("📍 Tuần", value=str(ngay_trong.isocalendar()[1]), disabled=True, key="main_w_base")
-                    so_luong = st.number_input("🔢 Số lượng trồng (cây)", min_value=0, step=100)
+                    so_luong = st.number_input("🔢 Số lượng trồng (cây)", min_value=0, step=100, key="add_base_sl")
 
                 if st.button("✅ Tạo Lô Trồng", key="btn_add_base", use_container_width=True, type="primary"):
                     if not lo.strip(): st.error("❌ Nhập tên lô.")
@@ -623,16 +623,16 @@ def render_main_app():
                 with st.container(border=True):
                     col_a, col_b = st.columns(2)
                     with col_a:
-                        lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots)
-                        giai_doan = st.radio("📌 Giai đoạn", options=STAGE_NT_OPTIONS, horizontal=True)
-                        mau_day = st.selectbox("🎨 Màu dây", options=[""] + MAU_DAY_OPTIONS)
+                        lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, key="add_stg_lot")
+                        giai_doan = st.radio("📌 Giai đoạn", options=STAGE_NT_OPTIONS, horizontal=True, key="add_stg_gd")
+                        mau_day = st.selectbox("🎨 Màu dây", options=[""] + MAU_DAY_OPTIONS, key="add_stg_mau")
                     with col_b:
                         col_b1, col_b2 = st.columns([2, 1])
                         with col_b1:
-                            ngay_th = st.date_input("📆 Ngày thực hiện", value=date.today())
+                            ngay_th = st.date_input("📆 Ngày thực hiện", value=date.today(), key="add_stg_ngay")
                         with col_b2:
                             st.text_input("📍 Tuần", value=str(ngay_th.isocalendar()[1]), disabled=True, key="main_w_stg")
-                        sl = st.number_input("🔢 Số lượng cây", min_value=0, step=100)
+                        sl = st.number_input("🔢 Số lượng cây", min_value=0, step=100, key="add_stg_sl")
 
                     if st.button("✅ Cập nhật Tiến độ", key="btn_add_stg", use_container_width=True, type="primary"):
                         if sl <= 0: st.error("❌ Nhập số lượng > 0.")
@@ -679,16 +679,16 @@ def render_main_app():
                 with st.container(border=True):
                     col_a, col_b = st.columns(2)
                     with col_a:
-                        lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots)
-                        giai_doan_xuat_huy = st.selectbox("⏱️ Giai đoạn xuất hủy", options=DESTRUCTION_STAGE_OPTIONS)
-                        ly_do = st.text_area("📝 Lý do (Gió, bệnh...)", height=100)
+                        lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, key="add_des_lot")
+                        giai_doan_xuat_huy = st.selectbox("⏱️ Giai đoạn xuất hủy", options=DESTRUCTION_STAGE_OPTIONS, key="add_des_gxh")
+                        ly_do = st.text_area("📝 Lý do (Gió, bệnh...)", height=100, key="add_des_lydo")
                     with col_b:
                         col_b1, col_b2 = st.columns([2, 1])
                         with col_b1:
-                            ngay = st.date_input("📆 Ngày xuất hủy", value=date.today())
+                            ngay = st.date_input("📆 Ngày xuất hủy", value=date.today(), key="add_des_ngay")
                         with col_b2:
-                            st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True)
-                        sl = st.number_input("🔢 Số lượng cây xuất hủy", min_value=0, step=10)
+                            st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key="main_w_des")
+                        sl = st.number_input("🔢 Số lượng cây xuất hủy", min_value=0, step=10, key="add_des_sl")
 
                     if st.button("🗑️ Ghi nhận Xuất hủy", key="btn_add_des", use_container_width=True, type="primary"):
                         if sl <= 0: st.error("❌ Nhập số lượng > 0.")
@@ -745,14 +745,14 @@ def render_main_app():
                 with st.container(border=True):
                     col_a, col_b = st.columns(2)
                     with col_a:
-                        lot_id = st.selectbox("🏷️ Chọn Lô thu hoạch", options=available_lots)
+                        lot_id = st.selectbox("🏷️ Chọn Lô thu hoạch", options=available_lots, key="add_har_lot")
                     with col_b:
                         col_b1, col_b2 = st.columns([2, 1])
                         with col_b1:
-                            ngay = st.date_input("📆 Ngày thu hoạch", value=date.today())
+                            ngay = st.date_input("📆 Ngày thu hoạch", value=date.today(), key="add_har_dt")
                         with col_b2:
-                            st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True)
-                        sl = st.number_input("🍌 Số lượng buồng thu hoạch", min_value=0, step=50)
+                            st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key="main_w_har")
+                        sl = st.number_input("🍌 Số lượng buồng thu hoạch", min_value=0, step=50, key="add_har_sl")
     
                     st.markdown("")
                     if st.button("✅ Cập nhật Thu hoạch", key="btn_add_har", use_container_width=True, type="primary"):
@@ -806,14 +806,14 @@ def render_main_app():
                 with st.container(border=True):
                     col_a, col_b = st.columns(2)
                     with col_a:
-                        lot_id = st.selectbox("🏷️ Chọn Lô đóng gói", options=available_lots)
+                        lot_id = st.selectbox("🏷️ Chọn Lô đóng gói", options=available_lots, key="add_bsr_lot")
                     with col_b:
                         col_b1, col_b2 = st.columns([2, 1])
                         with col_b1:
-                            ngay = st.date_input("📆 Ngày đóng gói", value=date.today())
+                            ngay = st.date_input("📆 Ngày đóng gói", value=date.today(), key="add_bsr_dt")
                         with col_b2:
-                            st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True)
-                        bsr_val = st.number_input("📐 Nhập tỷ lệ BSR (Buồng / Sản Rạ)", min_value=0.0, value=0.0, step=0.1, format="%.2f")
+                            st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key="main_w_bsr")
+                        bsr_val = st.number_input("📐 Nhập tỷ lệ BSR (Buồng / Sản Rạ)", min_value=0.0, value=0.0, step=0.1, format="%.2f", key="add_bsr_val")
     
                     st.markdown("")
                     if st.button("✅ Cập nhật BSR", key="btn_add_bsr", use_container_width=True, type="primary"):
