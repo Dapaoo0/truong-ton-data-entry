@@ -91,23 +91,6 @@ st.markdown("""
     .team-badge { display: inline-block; padding: 4px 14px; border-radius: 20px; background: #FF9800; color: white; font-weight: 600; font-size: 0.9rem; margin-top: 5px; }
     .dataframe-header { font-size: 1.1rem; font-weight: 600; color: #1B5E20; margin: 1rem 0 0.5rem 0; padding-left: 0.5rem; border-left: 4px solid #2E7D32; }
     .section-divider { border: none; border-top: 2px solid #E8F5E9; margin: 2rem 0; }
-    
-    /* Segmented Control Radio Styling */
-    div[role="radiogroup"] {
-        background: rgba(46, 125, 50, 0.05); padding: 5px; border-radius: 12px;
-        backdrop-filter: blur(8px); display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 1rem;
-    }
-    div[role="radiogroup"] > label {
-        background: transparent !important; padding: 8px 16px !important;
-        border-radius: 8px !important; transition: all 0.3s ease; margin: 0 !important; cursor: pointer;
-    }
-    div[role="radiogroup"] > label:hover { background: rgba(46, 125, 50, 0.1) !important; }
-    div[role="radiogroup"] > label[data-checked="true"] {
-        background: rgba(46, 125, 50, 0.9) !important; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-    div[role="radiogroup"] > label[data-checked="true"] p { color: white !important; font-weight: 600 !important; }
-    div[role="radiogroup"] > label > div:first-child { display: none !important; } /* Hide radio circle */
-    div[role="radiogroup"] [data-testid="stMarkdownContainer"] { margin-left: 0 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -709,7 +692,8 @@ def render_main_app():
     # =================================================
     if c_team in ["NT1", "NT2"]:
         tab_opts = ["🌱 Khởi tạo Lô trồng", "📈 Cập nhật Tiến độ", "🗑️ Cập nhật Xuất hủy", "🌐 Dữ liệu toàn cục"]
-        active_tab = st.radio("Chức năng", tab_opts, horizontal=True, label_visibility="collapsed", key="tab_nt_menu")
+        active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_nt_menu", default=tab_opts[0])
+        if active_tab is None: active_tab = tab_opts[0] # Prevent empty state
 
         # TAB 1: KHỞI TẠO LÔ
         if active_tab == tab_opts[0]:
@@ -889,7 +873,8 @@ def render_main_app():
     # =================================================
     elif c_team == "Đội Thu Hoạch":
         tab_opts = ["🍌 Nhật ký Thu Hoạch", "🌐 Dữ liệu toàn cục"]
-        active_tab = st.radio("Chức năng", tab_opts, horizontal=True, label_visibility="collapsed", key="tab_har_menu")
+        active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_har_menu", default=tab_opts[0])
+        if active_tab is None: active_tab = tab_opts[0]
         
         if active_tab == tab_opts[0]:
             st.markdown("#### Ghi nhận Sản lượng Thu hoạch hàng ngày")
@@ -954,7 +939,8 @@ def render_main_app():
     # =================================================
     elif c_team == "Xưởng Đóng Gói":
         tab_opts = ["📦 Cập nhật BSR", "🌐 Dữ liệu toàn cục"]
-        active_tab = st.radio("Chức năng", tab_opts, horizontal=True, label_visibility="collapsed", key="tab_bsr_menu")
+        active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_bsr_menu", default=tab_opts[0])
+        if active_tab is None: active_tab = tab_opts[0]
         
         if active_tab == tab_opts[0]:
             st.markdown("#### Ghi nhận Tỷ lệ BSR thành phẩm")
