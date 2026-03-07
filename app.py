@@ -133,6 +133,15 @@ def insert_to_db(table_name: str, data: dict) -> bool:
         return True
     except Exception as e:
         if 'duplicate key value violates unique constraint' in str(e):
+            if table_name == "base_lots":
+                lot_id = data.get("lot_id")
+                # Kiểm tra xem lô này đã tồn tại nhưng có đang bị xóa mềm không
+                check_res = supabase.table("base_lots").select("is_deleted").eq("lot_id", lot_id).execute()
+                if check_res.data and check_res.data[0].get("is_deleted") is True:
+                    # Lô đã bị xóa mềm, tiến hành "Khôi phục" và đè dữ liệu mới
+                    data["is_deleted"] = False
+                    supabase.table("base_lots").update(data).eq("lot_id", lot_id).execute()
+                    return True
             st.error(f"❌ Mã Lô '{data.get('lot_id')}' đã tồn tại trong hệ thống. Vui lòng kiểm tra lại!")
         else:
             st.error(f"❌ Lỗi khi lưu vào {table_name}: {e}")
