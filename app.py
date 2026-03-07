@@ -139,9 +139,14 @@ def insert_to_db(table_name: str, data: dict) -> bool:
         return False
 
 def check_quantity_limit(lot_id, new_sl, log_type, giai_doan=None, exclude_id=None):
-    res_lot = supabase.table("base_lots").select("so_luong_con_lai").eq("lot_id", lot_id).eq("is_deleted", False).execute()
+    res_lot = supabase.table("base_lots").select("so_luong, so_luong_con_lai").eq("lot_id", lot_id).eq("is_deleted", False).execute()
     if not res_lot.data: return False, "❌ Lỗi: Không tìm thấy Lô hoặc Lô đã bị xóa."
-    total_planted = int(res_lot.data[0].get("so_luong_con_lai", 0))
+    
+    val_con_lai = res_lot.data[0].get("so_luong_con_lai")
+    if val_con_lai is not None:
+        total_planted = int(val_con_lai)
+    else:
+        total_planted = int(res_lot.data[0].get("so_luong", 0))
 
     max_allowed = total_planted
     action_name = giai_doan.lower() if log_type == "stage" else ("xuất hủy" if log_type == "destruction" else "thu hoạch")
@@ -628,6 +633,7 @@ def render_main_app():
                             "farm": c_farm, "team": c_team, "vu": vu, "lo": lo.strip(),
                             "loai_trong": loai_trong, "lot_id": lot_id,
                             "ngay_trong": ngay_trong.isoformat(), "so_luong": so_luong,
+                            "so_luong_con_lai": so_luong,
                             "tuan": ngay_trong.isocalendar()[1]
                         }
                         confirm_action_dialog("INSERT", "base_lots", None, data, f"✅ Tạo Lô {lot_id} thành công!")
