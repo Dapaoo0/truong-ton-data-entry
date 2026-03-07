@@ -91,6 +91,23 @@ st.markdown("""
     .team-badge { display: inline-block; padding: 4px 14px; border-radius: 20px; background: #FF9800; color: white; font-weight: 600; font-size: 0.9rem; margin-top: 5px; }
     .dataframe-header { font-size: 1.1rem; font-weight: 600; color: #1B5E20; margin: 1rem 0 0.5rem 0; padding-left: 0.5rem; border-left: 4px solid #2E7D32; }
     .section-divider { border: none; border-top: 2px solid #E8F5E9; margin: 2rem 0; }
+    
+    /* Segmented Control Radio Styling */
+    div[role="radiogroup"] {
+        background: rgba(46, 125, 50, 0.05); padding: 5px; border-radius: 12px;
+        backdrop-filter: blur(8px); display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 1rem;
+    }
+    div[role="radiogroup"] > label {
+        background: transparent !important; padding: 8px 16px !important;
+        border-radius: 8px !important; transition: all 0.3s ease; margin: 0 !important; cursor: pointer;
+    }
+    div[role="radiogroup"] > label:hover { background: rgba(46, 125, 50, 0.1) !important; }
+    div[role="radiogroup"] > label[data-checked="true"] {
+        background: rgba(46, 125, 50, 0.9) !important; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    div[role="radiogroup"] > label[data-checked="true"] p { color: white !important; font-weight: 600 !important; }
+    div[role="radiogroup"] > label > div:first-child { display: none !important; } /* Hide radio circle */
+    div[role="radiogroup"] [data-testid="stMarkdownContainer"] { margin-left: 0 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -183,6 +200,36 @@ def check_quantity_limit(lot_id, new_sl, log_type, giai_doan=None, exclude_id=No
     if total_used + int(new_sl) > max_allowed:
         remain = max_allowed - total_used
         return False, f"❌ Bạn đã nhập {new_sl} {unit} {action_name}, nhưng số lượng còn lại chưa {action_name} chỉ có {remain} {unit} (trên tổng {max_allowed} {unit} đã {base_name})."
+    return True, ""
+
+def validate_timeline_logic(lot_id, target_date, action_type):
+    target_dt = pd.to_datetime(target_date).tz_localize(None)
+    
+    if action_type == "Chích bắp":
+        res = supabase.table("base_lots").select("ngay_trong").eq("lot_id", lot_id).eq("is_deleted", False).execute()
+        if res.data and res.data[0].get("ngay_trong"):
+            ngay_trong = pd.to_datetime(res.data[0]["ngay_trong"]).tz_localize(None)
+            if target_dt < ngay_trong:
+                return False, f"❌ Ngày Chích bắp ({target_dt.date()}) không thể trước Ngày Trồng ({ngay_trong.date()})."
+                
+    elif action_type == "Cắt bắp":
+        res = supabase.table("stage_logs").select("ngay_thuc_hien").eq("lot_id", lot_id).eq("giai_doan", "Chích bắp").eq("is_deleted", False).execute()
+        if res.data:
+            earliest_cb = min([pd.to_datetime(r["ngay_thuc_hien"]).tz_localize(None) for r in res.data])
+            if target_dt < earliest_cb:
+                return False, f"❌ Ngày Cắt bắp ({target_dt.date()}) không thể trước Ngày Chích bắp sớm nhất ({earliest_cb.date()})."
+        else:
+            return False, "❌ Lô này chưa được ghi nhận Chích bắp, không thể Cắt bắp!"
+            
+    elif action_type == "Thu hoạch":
+        res = supabase.table("stage_logs").select("ngay_thuc_hien").eq("lot_id", lot_id).eq("giai_doan", "Cắt bắp").eq("is_deleted", False).execute()
+        if res.data:
+            earliest_cut = min([pd.to_datetime(r["ngay_thuc_hien"]).tz_localize(None) for r in res.data])
+            if target_dt < earliest_cut:
+                return False, f"❌ Ngày Thu hoạch ({target_dt.date()}) không thể trước Ngày Cắt bắp sớm nhất ({earliest_cut.date()})."
+        else:
+            return False, "❌ Lô này chưa được ghi nhận Cắt bắp, không thể Thu hoạch!"
+            
     return True, ""
 
 
@@ -688,12 +735,15 @@ def render_main_app():
                             is_valid, msg = check_quantity_limit(lot_id, sl, "stage", giai_doan=giai_doan)
                             if not is_valid: st.error(msg)
                             else:
-                                data = {
-                                    "farm": c_farm, "team": c_team, "lot_id": lot_id,
-                                    "giai_doan": giai_doan, "ngay_thuc_hien": ngay_th.isoformat(),
-                                    "so_luong": sl, "mau_day": mau_day, "tuan": ngay_th.isocalendar()[1]
-                                }
-                                confirm_action_dialog("INSERT", "stage_logs", None, data, f"✅ Lưu tiến độ {giai_doan} {lot_id}!")
+                                is_time_valid, t_msg = validate_timeline_logic(lot_id, ngay_th, giai_doan)
+                                if not is_time_valid: st.error(t_msg)
+                                else:
+                                    data = {
+                                        "farm": c_farm, "team": c_team, "lot_id": lot_id,
+                                        "giai_doan": giai_doan, "ngay_thuc_hien": ngay_th.isoformat(),
+                                        "so_luong": sl, "mau_day": mau_day, "tuan": ngay_th.isocalendar()[1]
+                                    }
+                                    confirm_action_dialog("INSERT", "stage_logs", None, data, f"✅ Lưu tiến độ {giai_doan} {lot_id}!")
 
                 st.markdown("---")
                 col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
@@ -809,11 +859,14 @@ def render_main_app():
                             is_valid, msg = check_quantity_limit(lot_id, sl, "harvest")
                             if not is_valid: st.error(msg)
                             else:
-                                data = {
-                                    "farm": c_farm, "team": c_team, "lot_id": lot_id,
-                                    "ngay_thu_hoach": ngay.isoformat(), "so_luong": sl, "tuan": ngay.isocalendar()[1]
-                                }
-                                confirm_action_dialog("INSERT", "harvest_logs", None, data, f"✅ Lưu thu hoạch lô {lot_id} thành công!")
+                                is_time_valid, t_msg = validate_timeline_logic(lot_id, ngay, "Thu hoạch")
+                                if not is_time_valid: st.error(t_msg)
+                                else:
+                                    data = {
+                                        "farm": c_farm, "team": c_team, "lot_id": lot_id,
+                                        "ngay_thu_hoach": ngay.isoformat(), "so_luong": sl, "tuan": ngay.isocalendar()[1]
+                                    }
+                                    confirm_action_dialog("INSERT", "harvest_logs", None, data, f"✅ Lưu thu hoạch lô {lot_id} thành công!")
                 
                 st.markdown("---")
                 col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
