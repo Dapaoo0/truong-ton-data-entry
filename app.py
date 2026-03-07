@@ -599,10 +599,11 @@ def render_main_app():
     # MODULE 1: ĐỘI NÔNG TRƯỜNG (NT1, NT2)
     # =================================================
     if c_team in ["NT1", "NT2"]:
-        t1, t2, t3, t4 = st.tabs(["🌱 Khởi tạo Lô trồng", "📈 Cập nhật Tiến độ", "🗑️ Cập nhật Xuất hủy", "🌐 Dữ liệu toàn cục"])
+        tab_opts = ["🌱 Khởi tạo Lô trồng", "📈 Cập nhật Tiến độ", "🗑️ Cập nhật Xuất hủy", "🌐 Dữ liệu toàn cục"]
+        active_tab = st.radio("Chức năng", tab_opts, horizontal=True, label_visibility="collapsed", key="tab_nt_menu")
 
         # TAB 1: KHỞI TẠO LÔ
-        with t1:
+        if active_tab == tab_opts[0]:
             st.markdown("#### Đăng ký đợt xuống giống mới")
             df_lots = fetch_table_data("base_lots", c_farm)
             df_lots_team = df_lots[df_lots["team"] == c_team] if not df_lots.empty else pd.DataFrame()
@@ -655,7 +656,7 @@ def render_main_app():
             render_team_dataframe("base_lots", df_lots_team, ["lot_id", "loai_trong", "ngay_trong", "so_luong", "created_at"])
 
         # TAB 2: CẬP NHẬT TIẾN ĐỘ NT
-        with t2:
+        elif active_tab == tab_opts[1]:
             st.markdown("#### Ghi nhận: Chích bắp / Cắt bắp")
             available_lots = get_lots_by_farm(c_farm)
             if not available_lots:
@@ -711,7 +712,7 @@ def render_main_app():
                 render_team_dataframe("stage_logs", df_stg_team, ["lot_id", "giai_doan", "ngay_thuc_hien", "so_luong", "mau_day"])
 
         # TAB 3: XUẤT HỦY
-        with t3:
+        elif active_tab == tab_opts[2]:
             st.markdown("#### Ghi nhận số lượng cây chết / hư hỏng")
             available_lots = get_lots_by_farm(c_farm)
             if not available_lots:
@@ -768,16 +769,17 @@ def render_main_app():
                 render_team_dataframe("destruction_logs", df_des_team, ["lot_id", "ngay_xuat_huy", "giai_doan", "so_luong", "ly_do"])
 
         # TAB 4: DỮ LIỆU TOÀN CỤC
-        with t4:
+        elif active_tab == tab_opts[3]:
             render_global_data_tab(c_farm)
 
     # =================================================
     # MODULE 2: ĐỘI THU HOẠCH
     # =================================================
     elif c_team == "Đội Thu Hoạch":
-        t1, t2 = st.tabs(["🍌 Nhật ký Thu Hoạch", "🌐 Dữ liệu toàn cục"])
+        tab_opts = ["🍌 Nhật ký Thu Hoạch", "🌐 Dữ liệu toàn cục"]
+        active_tab = st.radio("Chức năng", tab_opts, horizontal=True, label_visibility="collapsed", key="tab_har_menu")
         
-        with t1:
+        if active_tab == tab_opts[0]:
             st.markdown("#### Ghi nhận Sản lượng Thu hoạch hàng ngày")
             available_lots = get_lots_by_farm(c_farm)
             if not available_lots:
@@ -829,16 +831,17 @@ def render_main_app():
                     
                 render_team_dataframe("harvest_logs", df_har_team, ["lot_id", "ngay_thu_hoach", "so_luong", "created_at"])
 
-        with t2:
+        elif active_tab == tab_opts[1]:
             render_global_data_tab(c_farm)
 
     # =================================================
     # MODULE 3: XƯỞNG ĐÓNG GÓI
     # =================================================
     elif c_team == "Xưởng Đóng Gói":
-        t1, t2 = st.tabs(["📦 Cập nhật BSR", "🌐 Dữ liệu toàn cục"])
+        tab_opts = ["📦 Cập nhật BSR", "🌐 Dữ liệu toàn cục"]
+        active_tab = st.radio("Chức năng", tab_opts, horizontal=True, label_visibility="collapsed", key="tab_bsr_menu")
         
-        with t1:
+        if active_tab == tab_opts[0]:
             st.markdown("#### Ghi nhận Tỷ lệ BSR thành phẩm")
             available_lots = get_lots_by_farm(c_farm)
             if not available_lots:
@@ -887,7 +890,7 @@ def render_main_app():
                     
                 render_team_dataframe("bsr_logs", df_bsr_team, ["lot_id", "ngay_nhap", "bsr", "created_at"])
 
-        with t2:
+        elif active_tab == tab_opts[1]:
             render_global_data_tab(c_farm)
 
 
