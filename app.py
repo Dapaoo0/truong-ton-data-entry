@@ -565,6 +565,68 @@ def render_global_data_tab(c_farm):
 
     st.divider()
 
+    # --- BIỂU ĐỒ PHỄU TIẾN ĐỘ THEO LÔ ---
+    st.markdown("#### 📊 Biểu đồ Phễu Tiến độ theo Lô (Pipeline Funnel)")
+    st.caption("So sánh tương quan Mức độ Hao hụt và Năng suất từ lúc Xuống giống đến khi Thu hoạch.")
+    
+    # Gom dữ liệu để vẽ grouped bar chart
+    if not df_lots_all.empty:
+        lots = df_lots_all["lot_id"].unique()
+        pipeline_data = []
+        for l in lots:
+            # 1. Trồng
+            sl_trong = df_lots_all[df_lots_all["lot_id"] == l]["so_luong"].sum()
+            pipeline_data.append({"Lô": l, "Giai đoạn": "1. Đã trồng", "Số lượng": sl_trong})
+            
+            # 2. Chích bắp
+            if not df_stg_all.empty:
+                sl_cb = df_stg_all[(df_stg_all["lot_id"] == l) & (df_stg_all["giai_doan"] == "Chích bắp")]["so_luong"].sum()
+                pipeline_data.append({"Lô": l, "Giai đoạn": "2. Chích bắp", "Số lượng": sl_cb})
+            else: pipeline_data.append({"Lô": l, "Giai đoạn": "2. Chích bắp", "Số lượng": 0})
+            
+            # 3. Cắt bắp
+            if not df_stg_all.empty:
+                sl_cut = df_stg_all[(df_stg_all["lot_id"] == l) & (df_stg_all["giai_doan"] == "Cắt bắp")]["so_luong"].sum()
+                pipeline_data.append({"Lô": l, "Giai đoạn": "3. Cắt bắp", "Số lượng": sl_cut})
+            else: pipeline_data.append({"Lô": l, "Giai đoạn": "3. Cắt bắp", "Số lượng": 0})
+            
+            # 4. Thu hoạch (Buồng ~ Cây)
+            if not df_har_all.empty:
+                sl_har = df_har_all[df_har_all["lot_id"] == l]["so_luong"].sum()
+                pipeline_data.append({"Lô": l, "Giai đoạn": "4. Thu hoạch", "Số lượng": sl_har})
+            else: pipeline_data.append({"Lô": l, "Giai đoạn": "4. Thu hoạch", "Số lượng": 0})
+                
+            # 5. Xuất hủy
+            if not df_des_all.empty:
+                sl_des = df_des_all[df_des_all["lot_id"] == l]["so_luong"].sum()
+                pipeline_data.append({"Lô": l, "Giai đoạn": "5. Xuất hủy", "Số lượng": sl_des})
+            else: pipeline_data.append({"Lô": l, "Giai đoạn": "5. Xuất hủy", "Số lượng": 0})
+            
+        df_pipeline = pd.DataFrame(pipeline_data)
+        
+        # Color mapping cho 5 giai đoạn
+        color_map = {
+            "1. Đã trồng": "#4CAF50",      # Green
+            "2. Chích bắp": "#FFC107",     # Amber
+            "3. Cắt bắp": "#FF9800",       # Orange
+            "4. Thu hoạch": "#2196F3",     # Blue
+            "5. Xuất hủy": "#F44336"       # Red
+        }
+        
+        fig_pipe = px.bar(
+            df_pipeline, x="Lô", y="Số lượng", color="Giai đoạn", barmode="group",
+            color_discrete_map=color_map,
+            labels={"Lô": "Danh sách Lô", "Số lượng": "Số lượng cây / buồng", "Giai đoạn": "Tiến trình"}
+        )
+        # Bỏ đi style rườm rà, format sang trọng
+        fig_pipe.update_layout(plot_bgcolor="rgba(0,0,0,0)", yaxis=(dict(showgrid=True, gridcolor='rgba(0,0,0,0.1)')))
+        st.plotly_chart(fig_pipe, use_container_width=True)
+    else:
+        st.info("Chưa có danh sách lô để hiển thị biểu đồ Phễu.")
+
+    st.divider()
+    st.markdown("##### 📉 Chi tiết Biểu đồ Tuần")
+
     col_c1, col_c2 = st.columns(2)
     with col_c1:
         st.markdown("**🌱 Trồng mới & Trồng dặm (Cây)**")
