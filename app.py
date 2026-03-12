@@ -53,25 +53,28 @@ RBAC_DB = {
     "Farm 126": {
         "NT1": "123",
         "NT2": "123",
+        "Đội BVTV": "123",
         "Đội Thu Hoạch": "123",
         "Xưởng Đóng Gói": "123"
     },
     "Farm 157": {
         "NT1": "456",
         "NT2": "456",
+        "Đội BVTV": "456",
         "Đội Thu Hoạch": "456",
         "Xưởng Đóng Gói": "456"
     },
     "Farm 195": {
         "NT1": "789",
         "NT2": "789",
+        "Đội BVTV": "789",
         "Đội Thu Hoạch": "789",
         "Xưởng Đóng Gói": "789"
     }
 }
 
 FARMS = list(RBAC_DB.keys())
-TEAMS = ["NT1", "NT2", "Đội Thu Hoạch", "Xưởng Đóng Gói"]
+TEAMS = ["NT1", "NT2", "Đội BVTV", "Đội Thu Hoạch", "Xưởng Đóng Gói"]
 
 # =====================================================
 # CONFIG OPTIONS
@@ -777,13 +780,17 @@ def render_main_app():
     # =================================================
     # MODULE 1: ĐỘI NÔNG TRƯỜNG (NT1, NT2)
     # =================================================
-    if c_team in ["NT1", "NT2"]:
-        tab_opts = ["🌱 Khởi tạo Lô trồng", "📈 Cập nhật Tiến độ", "🗑️ Cập nhật Xuất hủy", "🌐 Dữ liệu toàn cục"]
+    if c_team in ["NT1", "NT2", "Đội BVTV"]:
+        if c_team == "Đội BVTV":
+            tab_opts = ["📈 Cập nhật Tiến độ", "� Dữ liệu toàn cục"]
+        else:
+            tab_opts = ["�🌱 Khởi tạo Lô trồng", "📈 Cập nhật Tiến độ", "🗑️ Cập nhật Xuất hủy", "🌐 Dữ liệu toàn cục"]
+            
         active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_nt_menu", default=tab_opts[0])
         if active_tab is None: active_tab = tab_opts[0] # Prevent empty state
 
         # TAB 1: KHỞI TẠO LÔ
-        if active_tab == tab_opts[0]:
+        if active_tab == "🌱 Khởi tạo Lô trồng":
             st.markdown("#### Đăng ký đợt xuống giống mới")
             df_lots = fetch_table_data("base_lots", c_farm)
             df_lots_team = df_lots[df_lots["team"] == c_team] if not df_lots.empty else pd.DataFrame()
@@ -839,7 +846,7 @@ def render_main_app():
             render_team_dataframe("base_lots", df_lots_team, ["lot_id", "ngay_trong", "so_luong", "created_at"])
 
         # TAB 2: CẬP NHẬT TIẾN ĐỘ NT
-        elif active_tab == tab_opts[1]:
+        elif active_tab == "📈 Cập nhật Tiến độ":
             st.markdown("#### Ghi nhận: Chích bắp / Cắt bắp")
             available_lots = get_lots_by_farm(c_farm)
             if not available_lots:
@@ -854,7 +861,11 @@ def render_main_app():
                     col_a, col_b = st.columns(2)
                     with col_a:
                         lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, key="add_stg_lot")
-                        giai_doan = st.radio("📌 Giai đoạn", options=STAGE_NT_OPTIONS, horizontal=True, key="add_stg_gd")
+                        if c_team == "Đội BVTV":
+                            giai_doan_opts = ["Chích bắp"]
+                        else:
+                            giai_doan_opts = ["Cắt bắp"]
+                        giai_doan = st.radio("📌 Giai đoạn", options=giai_doan_opts, horizontal=True, key="add_stg_gd")
                         mau_day = st.selectbox("🎨 Màu dây", options=[""] + MAU_DAY_OPTIONS, key="add_stg_mau")
                     with col_b:
                         col_b1, col_b2 = st.columns([2, 1])
@@ -898,7 +909,7 @@ def render_main_app():
                 render_team_dataframe("stage_logs", df_stg_team, ["lot_id", "giai_doan", "ngay_thuc_hien", "so_luong", "mau_day"])
 
         # TAB 3: XUẤT HỦY
-        elif active_tab == tab_opts[2]:
+        elif active_tab == "🗑️ Cập nhật Xuất hủy":
             st.markdown("#### Ghi nhận số lượng cây chết / hư hỏng")
             available_lots = get_lots_by_farm(c_farm)
             if not available_lots:
@@ -955,7 +966,7 @@ def render_main_app():
                 render_team_dataframe("destruction_logs", df_des_team, ["lot_id", "ngay_xuat_huy", "giai_doan", "so_luong", "ly_do"])
 
         # TAB 4: DỮ LIỆU TOÀN CỤC
-        elif active_tab == tab_opts[3]:
+        elif active_tab == "🌐 Dữ liệu toàn cục":
             render_global_data_tab(c_farm)
 
     # =================================================
