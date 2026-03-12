@@ -806,6 +806,8 @@ def render_main_app():
                         data_base = {
                             "farm": c_farm, "team": c_team, "lo": lot_id,
                             "lot_id": lot_id,
+                            "vu": "F0",
+                            "loai_trong": loai_trong,
                             "ngay_trong": ngay_trong.isoformat(), "so_luong": so_luong,
                             "so_luong_con_lai": so_luong,
                             "tuan": ngay_trong.isocalendar()[1]
