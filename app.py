@@ -474,17 +474,22 @@ def render_login():
         st.divider()
 
         # Chọn Farm
-        selected_farm = st.selectbox("🏗️ Chọn Farm", options=FARMS, key="login_farm")
+        selected_farm = st.selectbox("🏗️ Chọn Farm", options=FARMS, index=None, placeholder="Vui lòng chọn Farm...", key="login_farm")
+        
         # Chọn Team thuộc Farm
-        av_teams = list(RBAC_DB.get(selected_farm, {}).keys())
-        selected_team = st.selectbox("👥 Chọn Đội / Vai trò", options=av_teams, key="login_team")
+        av_teams = list(RBAC_DB.get(selected_farm, {}).keys()) if selected_farm else []
+        selected_team = st.selectbox("👥 Chọn Đội / Vai trò", options=av_teams, index=None, placeholder="Vui lòng chọn Đội / Vai trò...", key="login_team")
 
         # Nhập MK
         password = st.text_input("🔑 Mật khẩu", type="password", key="login_pass", placeholder="Nhập mật khẩu...")
 
         st.markdown("")
         if st.button("🚀 Đăng nhập", use_container_width=True, type="primary"):
-            if not password:
+            if not selected_farm:
+                st.warning("⚠️ Vui lòng chọn Farm.")
+            elif not selected_team:
+                st.warning("⚠️ Vui lòng chọn Đội / Vai trò.")
+            elif not password:
                 st.warning("⚠️ Vui lòng nhập mật khẩu.")
             else:
                 correct_pass = RBAC_DB.get(selected_farm, {}).get(selected_team)
