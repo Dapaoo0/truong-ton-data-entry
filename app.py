@@ -409,6 +409,11 @@ def edit_destruction_log_dialog(editing_row, available_lots):
 @dialog_decorator("✏️ Chỉnh sửa Nhật ký Thu Hoạch")
 def edit_harvest_log_dialog(editing_row, available_lots):
     def_lot = available_lots.index(editing_row["lot_id"]) if editing_row["lot_id"] in available_lots else 0
+    def_mau = MAU_DAY_OPTIONS.index(editing_row.get("mau_day", "")) + 1 if editing_row.get("mau_day") in MAU_DAY_OPTIONS else 0
+    
+    hinh_thuc_opts = ["Bằng xe cày", "Bằng ròng rọc"]
+    def_hinh_thuc = hinh_thuc_opts.index(editing_row.get("hinh_thuc_thu_hoach", "")) if editing_row.get("hinh_thuc_thu_hoach") in hinh_thuc_opts else 0
+    
     def_ngay = pd.to_datetime(editing_row["ngay_thu_hoach"]).date()
     def_sl = int(editing_row["so_luong"])
 
@@ -416,6 +421,8 @@ def edit_harvest_log_dialog(editing_row, available_lots):
         col_a, col_b = st.columns(2)
         with col_a:
             lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, index=def_lot, key="dlg_lot_har")
+            mau_day = st.selectbox("🎨 Màu dây", options=[""] + MAU_DAY_OPTIONS, index=def_mau, key="dlg_mau_har")
+            hinh_thuc_thu_hoach = st.selectbox("🚜 Hình thức thu hoạch", options=hinh_thuc_opts, index=def_hinh_thuc, key="dlg_hinh_thuc_har")
         with col_b:
             col_b1, col_b2 = st.columns([2, 1])
             with col_b1:
@@ -425,15 +432,25 @@ def edit_harvest_log_dialog(editing_row, available_lots):
             sl = st.number_input("🍌 Số lượng buồng", min_value=0, step=50, value=def_sl, key="dlg_sl_har")
 
         if st.button("✅ Cập nhật", key="btn_edit_har", use_container_width=True, type="primary"):
-            if sl <= 0: st.error("❌ Số lượng buồng phải > 0")
+            if not mau_day: st.error("❌ Cần chọn Màu dây.")
+            elif sl <= 0: st.error("❌ Số lượng buồng phải > 0")
             else:
-                is_valid, msg = check_quantity_limit(lot_id, sl, "harvest", exclude_id=editing_row["id"])
-                if not is_valid: st.error(msg)
+                res_sm = supabase.table("size_measure_logs").select("id") \
+                    .eq("lot_id", lot_id).eq("mau_day", mau_day).eq("lan_do", 1).eq("is_deleted", False).execute()
+                if not res_sm.data:
+                    st.error(f"❌ Không được phép thu hoạch. Lô `{lot_id}` với màu dây `{mau_day}` chưa trải qua Đo Size lần 1. Xin hãy nhắc Đội NT.")
                 else:
-                    data = {"lot_id": lot_id, "ngay_thu_hoach": ngay.isoformat(), "so_luong": sl, "tuan": ngay.isocalendar()[1]}
-                    supabase.table("harvest_logs").update(data).eq("id", editing_row["id"]).execute()
-                    st.session_state["toast"] = f"✅ Lưu thu hoạch {lot_id} thành công!"
-                    st.rerun()
+                    is_valid, msg = check_quantity_limit(lot_id, sl, "harvest", exclude_id=editing_row["id"])
+                    if not is_valid: st.error(msg)
+                    else:
+                        data = {
+                            "lot_id": lot_id, "mau_day": mau_day, 
+                            "ngay_thu_hoach": ngay.isoformat(), "so_luong": sl, 
+                            "hinh_thuc_thu_hoach": hinh_thuc_thu_hoach, "tuan": ngay.isocalendar()[1]
+                        }
+                        supabase.table("harvest_logs").update(data).eq("id", editing_row["id"]).execute()
+                        st.session_state["toast"] = f"✅ Lưu thu hoạch {lot_id} thành công!"
+                        st.rerun()
 
 @dialog_decorator("✏️ Chỉnh sửa BSR")
 def edit_bsr_log_dialog(editing_row, available_lots):
@@ -459,6 +476,66 @@ def edit_bsr_log_dialog(editing_row, available_lots):
                 data = {"lot_id": lot_id, "ngay_nhap": ngay.isoformat(), "bsr": bsr_val, "tuan": ngay.isocalendar()[1]}
                 supabase.table("bsr_logs").update(data).eq("id", editing_row["id"]).execute()
                 st.session_state["toast"] = f"✅ Lưu BSR lô {lot_id} thành công!"
+                st.rerun()
+
+@dialog_decorator("✏️ Chỉnh sửa Đo Size")
+def edit_size_measure_dialog(editing_row, available_lots):
+    def_lot = available_lots.index(editing_row["lot_id"]) if editing_row["lot_id"] in available_lots else 0
+    def_mau = MAU_DAY_OPTIONS.index(editing_row["mau_day"]) + 1 if editing_row["mau_day"] in MAU_DAY_OPTIONS else 0
+    def_lan_do = editing_row["lan_do"]
+    def_ngay = pd.to_datetime(editing_row["ngay_do"]).date()
+    def_sl = int(editing_row["so_luong_mau"])
+    
+    with st.container(border=True):
+        col_a, col_b = st.columns(2)
+        with col_a:
+            lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, index=def_lot, key="dlg_sm_lot")
+            mau_day = st.selectbox("🎨 Màu dây", options=[""] + MAU_DAY_OPTIONS, index=def_mau, key="dlg_sm_mau")
+            lan_do = st.radio("📏 Lần đo", options=[1, 2], index=def_lan_do-1, horizontal=True, key="dlg_sm_lando")
+        with col_b:
+            col_b1, col_b2 = st.columns([2, 1])
+            with col_b1:
+                ngay = st.date_input("📆 Ngày đo", value=def_ngay, key="dlg_sm_ngay")
+            with col_b2:
+                st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key=f"dlg_w_sm_{ngay}")
+            sl = st.number_input("🔢 Số lượng buồng mẫu", min_value=0, step=10, value=def_sl, key="dlg_sm_sl")
+
+        if st.button("✅ Cập nhật", key="btn_edit_sm", use_container_width=True, type="primary"):
+            if not mau_day: st.error("❌ Cần chọn màu dây")
+            elif sl <= 0: st.error("❌ Số lượng buồng mẫu > 0")
+            else:
+                data = {
+                    "lot_id": lot_id, "mau_day": mau_day, "lan_do": lan_do,
+                    "ngay_do": ngay.isoformat(), "so_luong_mau": sl, "tuan": ngay.isocalendar()[1]
+                }
+                supabase.table("size_measure_logs").update(data).eq("id", editing_row["id"]).execute()
+                st.session_state["toast"] = f"✅ Sửa đo size {lot_id} thành công!"
+                st.rerun()
+
+@dialog_decorator("✏️ Chỉnh sửa Kiểm kê cây")
+def edit_tree_inventory_dialog(editing_row, available_lots):
+    def_lot = available_lots.index(editing_row["lot_id"]) if editing_row["lot_id"] in available_lots else 0
+    def_ngay = pd.to_datetime(editing_row["ngay_kiem_ke"]).date()
+    def_sl = int(editing_row["so_luong_cay_thuc_te"])
+    
+    with st.container(border=True):
+        col_a, col_b = st.columns(2)
+        with col_a:
+            lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, index=def_lot, key="dlg_inv_lot")
+        with col_b:
+            col_b1, col_b2 = st.columns([2, 1])
+            with col_b1:
+                ngay = st.date_input("📆 Ngày kiểm kê", value=def_ngay, key="dlg_inv_ngay")
+            with col_b2:
+                st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key=f"dlg_w_inv_{ngay}")
+            sl = st.number_input("🔢 Số lượng cây thực tế", min_value=0, step=100, value=def_sl, key="dlg_inv_sl")
+
+        if st.button("✅ Cập nhật", key="btn_edit_inv", use_container_width=True, type="primary"):
+            if sl <= 0: st.error("❌ Cần nhập Số lượng cây lớn hơn 0.")
+            else:
+                data = {"lot_id": lot_id, "ngay_kiem_ke": ngay.isoformat(), "so_luong_cay_thuc_te": sl, "tuan": ngay.isocalendar()[1]}
+                supabase.table("tree_inventory_logs").update(data).eq("id", editing_row["id"]).execute()
+                st.session_state["toast"] = f"✅ Lưu kiểm kê cây lô {lot_id} thành công!"
                 st.rerun()
 
 # MÀN HÌNH ĐĂNG NHẬP
@@ -784,7 +861,7 @@ def render_main_app():
         if c_team == "Đội BVTV":
             tab_opts = ["📈 Cập nhật Tiến độ", "🌐 Dữ liệu toàn cục"]
         else:
-            tab_opts = ["🌱 Khởi tạo Lô trồng", "📈 Cập nhật Tiến độ", "🗑️ Cập nhật Xuất hủy", "🌐 Dữ liệu toàn cục"]
+            tab_opts = ["🌱 Khởi tạo Lô trồng", "📈 Cập nhật Tiến độ", "📏 Đo Size", "🗑️ Cập nhật Xuất hủy", "🌳 Kiểm kê cây", "🌐 Dữ liệu toàn cục"]
             
         active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_nt_menu", default=tab_opts[0])
         if active_tab is None: active_tab = tab_opts[0] # Prevent empty state
@@ -844,6 +921,117 @@ def render_main_app():
                 with col_e: st.caption("🔒 Quá 48h")
 
             render_team_dataframe("base_lots", df_lots_team, ["lot_id", "ngay_trong", "so_luong", "created_at"])
+
+        # TAB: ĐO SIZE (DÀNH CHO NT1/NT2)
+        elif active_tab == "📏 Đo Size":
+            st.markdown("#### Đo kích thước buồng mẫu")
+            available_lots = get_lots_by_farm(c_farm)
+            if not available_lots:
+                st.warning("⚠️ Chưa có Lô trồng nào.")
+            else:
+                df_sm = fetch_table_data("size_measure_logs", c_farm)
+                df_sm_team = df_sm[df_sm["team"] == c_team] if not df_sm.empty else pd.DataFrame()
+                editing_row, is_within_48h = get_editing_row("size_measure_logs", df_sm_team)
+                is_editing = editing_row is not None
+                
+                with st.container(border=True):
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, key="add_sm_lot")
+                        mau_day = st.selectbox("🎨 Màu dây", options=[""] + MAU_DAY_OPTIONS, key="add_sm_mau")
+                        lan_do = st.radio("📏 Lần đo", options=[1, 2], horizontal=True, key="add_sm_lando")
+                    with col_b:
+                        col_b1, col_b2 = st.columns([2, 1])
+                        with col_b1:
+                            ngay_do = st.date_input("📆 Ngày đo", value=date.today(), key="add_sm_ngay")
+                        with col_b2:
+                            st.text_input("📍 Tuần", value=str(ngay_do.isocalendar()[1]), disabled=True, key=f"main_w_sm_{ngay_do}")
+                        sl = st.number_input("🔢 Số lượng buồng mẫu", min_value=0, step=10, key="add_sm_sl")
+                    
+                    if st.button("✅ Lưu cập nhật Đo Size", key="btn_add_sm", use_container_width=True, type="primary"):
+                        if not mau_day: st.error("❌ Phải chọn màu dây")
+                        elif sl <= 0: st.error("❌. Số lượng buồng > 0")
+                        else:
+                            # Validation: Nếu chọn là Lần 2, phải kiểm tra xem Lần 1 đã có chưa.
+                            if lan_do == 2:
+                                res_lan1 = supabase.table("size_measure_logs") \
+                                    .select("id").eq("lot_id", lot_id).eq("mau_day", mau_day).eq("lan_do", 1).eq("is_deleted", False).execute()
+                                if not res_lan1.data:
+                                    st.error(f"❌ Không thể đo Lần 2. Lô {lot_id} mức màu {mau_day} chưa được đo Lần 1.")
+                                    st.stop()
+                                    
+                            data = {
+                                "farm": c_farm, "team": c_team, "lot_id": lot_id,
+                                "mau_day": mau_day, "lan_do": lan_do, "so_luong_mau": sl,
+                                "ngay_do": ngay_do.isoformat(), "tuan": ngay_do.isocalendar()[1]
+                            }
+                            confirm_action_dialog("INSERT", "size_measure_logs", None, data, f"✅ Lưu đo size Lần {lan_do} thành công!")
+                
+                st.markdown("---")
+                col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
+                with col_t:
+                    st.markdown('<p class="dataframe-header" style="margin-top:0.5rem;">Dữ liệu của đội bạn</p>', unsafe_allow_html=True)
+                if is_editing and is_within_48h:
+                    with col_e:
+                        if st.button("✏️ Sửa", key="edit_sm_nt", use_container_width=True):
+                            edit_size_measure_dialog(editing_row, available_lots)
+                    with col_d:
+                        if st.button("🗑️ Xóa", key="del_sm_nt", use_container_width=True):
+                            confirm_action_dialog("DELETE", "size_measure_logs", editing_row["id"], None, "✅ Đã xóa Đo Size!")
+                elif is_editing and not is_within_48h:
+                    with col_e: st.caption("🔒 Quá 48h")
+                    
+                render_team_dataframe("size_measure_logs", df_sm_team, ["lot_id", "mau_day", "lan_do", "so_luong_mau", "ngay_do"])
+
+        # TAB: CẬP NHẬT KIỂM KÊ CÂY
+        elif active_tab == "🌳 Kiểm kê cây":
+            st.markdown("#### Báo cáo số lượng cây thực tế (Ngẫu nhiên / Tháng)")
+            available_lots = get_lots_by_farm(c_farm)
+            if not available_lots:
+                st.warning("⚠️ Chưa có Lô trồng nào.")
+            else:
+                df_inv = fetch_table_data("tree_inventory_logs", c_farm)
+                df_inv_team = df_inv[df_inv["team"] == c_team] if not df_inv.empty else pd.DataFrame()
+                editing_row, is_within_48h = get_editing_row("tree_inventory_logs", df_inv_team)
+                is_editing = editing_row is not None
+                
+                with st.container(border=True):
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, key="add_inv_lot")
+                    with col_b:
+                        col_b1, col_b2 = st.columns([2, 1])
+                        with col_b1:
+                            ngay_kk = st.date_input("📆 Ngày kiểm kê", value=date.today(), key="add_inv_ngay")
+                        with col_b2:
+                            st.text_input("📍 Tuần", value=str(ngay_kk.isocalendar()[1]), disabled=True, key=f"main_w_inv_{ngay_kk}")
+                        sl = st.number_input("🔢 Số lượng cây thực tế", min_value=0, step=100, key="add_inv_sl")
+                    
+                    if st.button("✅ Lưu Kiểm Kê", key="btn_add_inv", use_container_width=True, type="primary"):
+                        if sl <= 0: st.error("❌ Số lượng phải lớn hơn 0")
+                        else:
+                            data = {
+                                "farm": c_farm, "team": c_team, "lot_id": lot_id,
+                                "so_luong_cay_thuc_te": sl, "ngay_kiem_ke": ngay_kk.isoformat(),
+                                "tuan": ngay_kk.isocalendar()[1]
+                            }
+                            confirm_action_dialog("INSERT", "tree_inventory_logs", None, data, f"✅ Lưu kiểm kê lô {lot_id}!")
+                
+                st.markdown("---")
+                col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
+                with col_t:
+                    st.markdown('<p class="dataframe-header" style="margin-top:0.5rem;">Dữ liệu của đội bạn</p>', unsafe_allow_html=True)
+                if is_editing and is_within_48h:
+                    with col_e:
+                        if st.button("✏️ Sửa", key="edit_inv_nt", use_container_width=True):
+                            edit_tree_inventory_dialog(editing_row, available_lots)
+                    with col_d:
+                        if st.button("🗑️ Xóa", key="del_inv_nt", use_container_width=True):
+                            confirm_action_dialog("DELETE", "tree_inventory_logs", editing_row["id"], None, "✅ Đã xóa nhật ký kiểm kê!")
+                elif is_editing and not is_within_48h:
+                    with col_e: st.caption("🔒 Quá 48h")
+                    
+                render_team_dataframe("tree_inventory_logs", df_inv_team, ["lot_id", "ngay_kiem_ke", "so_luong_cay_thuc_te"])
 
         # TAB 2: CẬP NHẬT TIẾN ĐỘ NT
         elif active_tab == "📈 Cập nhật Tiến độ":
@@ -992,6 +1180,8 @@ def render_main_app():
                     col_a, col_b = st.columns(2)
                     with col_a:
                         lot_id = st.selectbox("🏷️ Chọn Lô thu hoạch", options=available_lots, key="add_har_lot")
+                        mau_day = st.selectbox("🎨 Màu dây", options=[""] + MAU_DAY_OPTIONS, key="add_har_mau")
+                        hinh_thuc_thu_hoach = st.selectbox("🚜 Hình thức thu hoạch", options=["Bằng xe cày", "Bằng ròng rọc"], key="add_har_hinh_thuc")
                     with col_b:
                         col_b1, col_b2 = st.columns([2, 1])
                         with col_b1:
@@ -1002,19 +1192,27 @@ def render_main_app():
     
                     st.markdown("")
                     if st.button("✅ Cập nhật Thu hoạch", key="btn_add_har", use_container_width=True, type="primary"):
-                        if sl <= 0: st.error("❌ Số lượng buồng phải > 0")
+                        if not mau_day: st.error("❌ Cần chọn Màu dây.")
+                        elif sl <= 0: st.error("❌ Số lượng buồng phải > 0")
                         else:
-                            is_valid, msg = check_quantity_limit(lot_id, sl, "harvest")
-                            if not is_valid: st.error(msg)
+                            # Validation: Bắt buộc đã đo size lần 1 cho lô và màu dây này
+                            res_sm = supabase.table("size_measure_logs").select("id") \
+                                .eq("lot_id", lot_id).eq("mau_day", mau_day).eq("lan_do", 1).eq("is_deleted", False).execute()
+                            if not res_sm.data:
+                                st.error(f"❌ Không được phép thu hoạch. Lô `{lot_id}` với màu dây `{mau_day}` chưa trải qua Đo Size lần 1. Xin hãy nhắc Đội NT.")
                             else:
-                                is_time_valid, t_msg = validate_timeline_logic(lot_id, ngay, "Thu hoạch")
-                                if not is_time_valid: st.error(t_msg)
+                                is_valid, msg = check_quantity_limit(lot_id, sl, "harvest")
+                                if not is_valid: st.error(msg)
                                 else:
-                                    data = {
-                                        "farm": c_farm, "team": c_team, "lot_id": lot_id,
-                                        "ngay_thu_hoach": ngay.isoformat(), "so_luong": sl, "tuan": ngay.isocalendar()[1]
-                                    }
-                                    confirm_action_dialog("INSERT", "harvest_logs", None, data, f"✅ Lưu thu hoạch lô {lot_id} thành công!")
+                                    is_time_valid, t_msg = validate_timeline_logic(lot_id, ngay, "Thu hoạch")
+                                    if not is_time_valid: st.error(t_msg)
+                                    else:
+                                        data = {
+                                            "farm": c_farm, "team": c_team, "lot_id": lot_id,
+                                            "ngay_thu_hoach": ngay.isoformat(), "so_luong": sl,
+                                            "hinh_thuc_thu_hoach": hinh_thuc_thu_hoach, "tuan": ngay.isocalendar()[1]
+                                        }
+                                        confirm_action_dialog("INSERT", "harvest_logs", None, data, f"✅ Lưu thu hoạch lô {lot_id} thành công!")
                 
                 st.markdown("---")
                 col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
@@ -1030,7 +1228,7 @@ def render_main_app():
                 elif is_editing and not is_within_48h:
                     with col_e: st.caption("🔒 Quá 48h")
                     
-                render_team_dataframe("harvest_logs", df_har_team, ["lot_id", "ngay_thu_hoach", "so_luong", "created_at"])
+                render_team_dataframe("harvest_logs", df_har_team, ["lot_id", "ngay_thu_hoach", "so_luong", "hinh_thuc_thu_hoach", "created_at"])
 
         elif active_tab == tab_opts[1]:
             render_global_data_tab(c_farm)
