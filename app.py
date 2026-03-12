@@ -782,9 +782,9 @@ def render_main_app():
     # =================================================
     if c_team in ["NT1", "NT2", "Đội BVTV"]:
         if c_team == "Đội BVTV":
-            tab_opts = ["📈 Cập nhật Tiến độ", "� Dữ liệu toàn cục"]
+            tab_opts = ["📈 Cập nhật Tiến độ", "🌐 Dữ liệu toàn cục"]
         else:
-            tab_opts = ["�🌱 Khởi tạo Lô trồng", "📈 Cập nhật Tiến độ", "🗑️ Cập nhật Xuất hủy", "🌐 Dữ liệu toàn cục"]
+            tab_opts = ["🌱 Khởi tạo Lô trồng", "📈 Cập nhật Tiến độ", "🗑️ Cập nhật Xuất hủy", "🌐 Dữ liệu toàn cục"]
             
         active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_nt_menu", default=tab_opts[0])
         if active_tab is None: active_tab = tab_opts[0] # Prevent empty state
