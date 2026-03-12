@@ -47,6 +47,9 @@ st.set_page_config(
 # =====================================================
 # Cấu trúc: RBAC_DB[Farm][Team] = Password
 RBAC_DB = {
+    "Admin": {
+        "Quản trị viên": "admin123"
+    },
     "Farm 126": {
         "NT1": "123",
         "NT2": "123",
@@ -237,6 +240,14 @@ def confirm_action_dialog(action, table_name, rec_id_or_none, data_dict, success
             success = False
             if action == "INSERT":
                 success = insert_to_db(table_name, data_dict)
+            elif action == "INSERT_BASE":
+                db_data, season_data = data_dict
+                success = insert_to_db("base_lots", db_data)
+                if success:
+                    try:
+                        supabase.table("seasons").insert(season_data).execute()
+                    except Exception as e:
+                        st.error(f"❌ Lỗi ghi vụ: {e}")
             elif action == "UPDATE":
                 try:
                     supabase.table(table_name).update(data_dict).eq("id", rec_id_or_none).execute()
@@ -285,19 +296,15 @@ def render_team_dataframe(table_name, df, display_cols):
 # =====================================================
 @dialog_decorator("✏️ Chỉnh sửa Lô Trồng")
 def edit_base_lot_dialog(editing_row):
-    loai_ops = LOAI_TRONG_OPTIONS
     def_lo = editing_row["lo"]
-    def_loai = loai_ops.index(editing_row["loai_trong"]) if editing_row["loai_trong"] in loai_ops else 0
     def_ngay = pd.to_datetime(editing_row["ngay_trong"]).date()
     def_sl = int(editing_row["so_luong"])
-
-    vu = "F0"
 
     with st.container(border=True):
         col_a, col_b = st.columns(2)
         with col_a:
-            lo = st.text_input("🏷️ Tên Lô", value=def_lo, key="dlg_lo_base")
-            loai_trong = st.selectbox("🌱 Loại trồng", options=loai_ops, index=def_loai, key="dlg_loai_base")
+            st.text_input("🏷️ Tên Lô", value=def_lo, key="dlg_lo_base", disabled=True)
+            st.info("⚠️ Không thể sửa thông tin Lô/Loại trồng. Nếu sai hãy Xóa và tạo mới Lô.")
         with col_b:
             col_b1, col_b2 = st.columns([2, 1])
             with col_b1:
@@ -307,19 +314,18 @@ def edit_base_lot_dialog(editing_row):
             so_luong = st.number_input("🔢 Số lượng", min_value=0, step=100, value=def_sl, key="dlg_sl_base")
 
         if st.button("✅ Cập nhật", key="btn_edit_base", use_container_width=True, type="primary"):
-            if not lo.strip(): st.error("❌ Nhập tên lô.")
-            elif so_luong <= 0: st.error("❌ Cần nhập số lượng.")
+            if so_luong <= 0: st.error("❌ Cần nhập số lượng.")
             else:
-                suffix = "M" if loai_trong == "Trồng mới" else "D"
-                lot_id = f"{vu}-{lo.strip()}-{suffix}".upper()
                 data = {
-                    "vu": vu, "lo": lo.strip(),
-                    "loai_trong": loai_trong, "lot_id": lot_id,
                     "ngay_trong": ngay_trong.isoformat(), "so_luong": so_luong,
                     "tuan": ngay_trong.isocalendar()[1]
                 }
                 supabase.table("base_lots").update(data).eq("id", editing_row["id"]).execute()
-                st.session_state["toast"] = f"✅ Cập nhật {lot_id} thành công!"
+                
+                # Cập nhật thêm cho season đang chạy nếu cần (tùy chọn)
+                supabase.table("seasons").update({"ngay_bat_dau": ngay_trong.isoformat()}).eq("lo", def_lo).eq("vu", "F0").execute()
+                
+                st.session_state["toast"] = f"✅ Cập nhật {def_lo} thành công!"
                 st.rerun()
 
 @dialog_decorator("✏️ Chỉnh sửa Tiến độ")
@@ -470,7 +476,8 @@ def render_login():
         # Chọn Farm
         selected_farm = st.selectbox("🏗️ Chọn Farm", options=FARMS, key="login_farm")
         # Chọn Team thuộc Farm
-        selected_team = st.selectbox("👥 Chọn Đội / Vai trò", options=TEAMS, key="login_team")
+        av_teams = list(RBAC_DB.get(selected_farm, {}).keys())
+        selected_team = st.selectbox("👥 Chọn Đội / Vai trò", options=av_teams, key="login_team")
 
         # Nhập MK
         password = st.text_input("🔑 Mật khẩu", type="password", key="login_pass", placeholder="Nhập mật khẩu...")
@@ -620,13 +627,12 @@ def render_global_data_tab(c_farm):
 
     col_c1, col_c2 = st.columns(2)
     with col_c1:
-        st.markdown("**🌱 Trồng mới & Trồng dặm (Cây)**")
+        st.markdown("**🌱 Diện tích trồng & số lượng**")
         if not df_lots_all.empty and "tuan" in df_lots_all.columns:
-            plot_data = df_lots_all.groupby(["tuan", "loai_trong"], as_index=False)["so_luong"].sum()
+            plot_data = df_lots_all.groupby(["tuan"], as_index=False)["so_luong"].sum()
             if not plot_data.empty: 
-                fig = px.bar(plot_data, x="tuan", y="so_luong", color="loai_trong", barmode="group",
-                             color_discrete_map={"Trồng mới": "#4CAF50", "Trồng dặm": "#2196F3"},
-                             labels={"tuan": "Tuần", "so_luong": "Số lượng (Cây)", "loai_trong": "Phân loại"})
+                fig = px.bar(plot_data, x="tuan", y="so_luong", color_discrete_sequence=["#4CAF50"],
+                             labels={"tuan": "Tuần", "so_luong": "Số lượng (Cây)"})
                 st.plotly_chart(fig, use_container_width=True) 
             else: st.info("Không đủ dữ liệu.")
         else: st.info("Chưa có dữ liệu.")
@@ -696,6 +702,74 @@ def render_main_app():
     st.markdown(f'<p class="main-title">Hệ thống {c_team} - {c_farm}</p>', unsafe_allow_html=True)
 
     # =================================================
+    # MODULE ADMIN
+    # =================================================
+    if c_farm == "Admin" and c_team == "Quản trị viên":
+        st.markdown("## 👑 Admin Dashboard - Quản trị Mùa Vụ & Hệ Thống")
+        st.info("👋 Chào mừng Quản trị viên. Tại đây bạn có thể quản lý lịch sử Vụ cho từng lô.")
+        
+        res = supabase.table("seasons").select("*").eq("is_deleted", False).order("created_at", desc=True).execute()
+        df_seasons = pd.DataFrame(res.data) if res.data else pd.DataFrame()
+        
+        if df_seasons.empty:
+            st.warning("Hiện tại hệ thống chưa có dữ liệu Vụ (Seasons). Vui lòng tạo lô ở Nông trường trước!")
+            return
+            
+        f_farm = st.selectbox("Lọc Farm", options=["Tất cả"] + list(df_seasons["farm"].unique()))
+        if f_farm != "Tất cả":
+            df_seasons = df_seasons[df_seasons["farm"] == f_farm]
+            
+        st.markdown("### 📋 Danh sách Vụ (Seasons)")
+        st.dataframe(
+            df_seasons[["farm", "lo", "vu", "loai_trong", "ngay_bat_dau", "ngay_ket_thuc_thuc_te"]], 
+            use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row", key="sel_admin_seasons"
+        )
+        
+        idx_list = st.session_state.get(f"sel_admin_seasons", {}).get("selection", {}).get("rows", [])
+        if idx_list and len(idx_list) > 0 and idx_list[0] < len(df_seasons):
+            row = df_seasons.iloc[idx_list[0]].to_dict()
+            
+            with st.container(border=True):
+                st.markdown(f"#### 🛠️ Chốt vụ: `{row['farm']}` - Lô `{row['lo']}` (Hiện tại: `{row['vu']}`)")
+                col1, col2 = st.columns(2)
+                with col1:
+                    cur_end = row.get("ngay_ket_thuc_thuc_te")
+                    def_date = pd.to_datetime(cur_end).date() if cur_end else date.today()
+                    end_date = st.date_input("📆 Ngày kết thúc (Thực tế)", value=def_date)
+                with col2:
+                    curr_v = str(row["vu"])
+                    try:
+                        next_v_num = int(curr_v.replace("F", "")) + 1
+                    except:
+                        next_v_num = 1
+                    next_v = f"F{next_v_num}"
+                    
+                    auto_next = st.checkbox(f"🚀 Cho phép tự động tạo vụ nối tiếp: {next_v}", value=True)
+                
+                st.markdown("")
+                if st.button("💾 Lưu thay đổi & Chốt vụ", use_container_width=True, type="primary"):
+                    try:
+                        supabase.table("seasons").update({
+                            "ngay_ket_thuc_thuc_te": end_date.isoformat()
+                        }).eq("id", row["id"]).execute()
+                        
+                        if auto_next and not cur_end:
+                            new_season = {
+                                "farm": row["farm"],
+                                "lo": row["lo"],
+                                "vu": next_v,
+                                "loai_trong": row["loai_trong"],
+                                "ngay_bat_dau": end_date.isoformat()
+                            }
+                            supabase.table("seasons").insert(new_season).execute()
+                        
+                        st.session_state["toast"] = f"✅ Đã chốt vụ {row['vu']} thành công!"
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Lỗi khi chốt vụ: {e}")
+        return
+
+    # =================================================
     # MODULE 1: ĐỘI NÔNG TRƯỜNG (NT1, NT2)
     # =================================================
     if c_team in ["NT1", "NT2"]:
@@ -728,17 +802,20 @@ def render_main_app():
                     if not lo.strip(): st.error("❌ Nhập tên lô.")
                     elif so_luong <= 0: st.error("❌ Cần nhập số lượng.")
                     else:
-                        vu = "F0"
-                        suffix = "M" if loai_trong == "Trồng mới" else "D"
-                        lot_id = f"{vu}-{lo.strip()}-{suffix}".upper()
-                        data = {
-                            "farm": c_farm, "team": c_team, "vu": vu, "lo": lo.strip(),
-                            "loai_trong": loai_trong, "lot_id": lot_id,
+                        lot_id = lo.strip().upper()
+                        data_base = {
+                            "farm": c_farm, "team": c_team, "lo": lot_id,
+                            "lot_id": lot_id,
                             "ngay_trong": ngay_trong.isoformat(), "so_luong": so_luong,
                             "so_luong_con_lai": so_luong,
                             "tuan": ngay_trong.isocalendar()[1]
                         }
-                        confirm_action_dialog("INSERT", "base_lots", None, data, f"✅ Tạo Lô {lot_id} thành công!")
+                        data_season = {
+                            "farm": c_farm, "lo": lot_id, "vu": "F0",
+                            "loai_trong": loai_trong,
+                            "ngay_bat_dau": ngay_trong.isoformat()
+                        }
+                        confirm_action_dialog("INSERT_BASE", "base_lots", None, (data_base, data_season), f"✅ Tạo Lô {lot_id} thành công!")
 
             st.markdown("---")
             col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
@@ -754,7 +831,7 @@ def render_main_app():
             elif is_editing and not is_within_48h:
                 with col_e: st.caption("🔒 Quá 48h")
 
-            render_team_dataframe("base_lots", df_lots_team, ["lot_id", "loai_trong", "ngay_trong", "so_luong", "created_at"])
+            render_team_dataframe("base_lots", df_lots_team, ["lot_id", "ngay_trong", "so_luong", "created_at"])
 
         # TAB 2: CẬP NHẬT TIẾN ĐỘ NT
         elif active_tab == tab_opts[1]:
