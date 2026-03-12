@@ -285,18 +285,17 @@ def render_team_dataframe(table_name, df, display_cols):
 # =====================================================
 @dialog_decorator("✏️ Chỉnh sửa Lô Trồng")
 def edit_base_lot_dialog(editing_row):
-    vu_ops = VU_OPTIONS
     loai_ops = LOAI_TRONG_OPTIONS
-    def_vu = vu_ops.index(editing_row["vu"]) if editing_row["vu"] in vu_ops else 0
     def_lo = editing_row["lo"]
     def_loai = loai_ops.index(editing_row["loai_trong"]) if editing_row["loai_trong"] in loai_ops else 0
     def_ngay = pd.to_datetime(editing_row["ngay_trong"]).date()
     def_sl = int(editing_row["so_luong"])
 
+    vu = "F0"
+
     with st.container(border=True):
         col_a, col_b = st.columns(2)
         with col_a:
-            vu = st.selectbox("📅 Vụ", options=vu_ops, index=def_vu, key="dlg_vu_base")
             lo = st.text_input("🏷️ Tên Lô", value=def_lo, key="dlg_lo_base")
             loai_trong = st.selectbox("🌱 Loại trồng", options=loai_ops, index=def_loai, key="dlg_loai_base")
         with col_b:
@@ -715,7 +714,6 @@ def render_main_app():
             with st.container(border=True):
                 col_a, col_b = st.columns(2)
                 with col_a:
-                    vu = st.selectbox("📅 Vụ", options=VU_OPTIONS, key="add_base_vu")
                     lo = st.text_input("🏷️ Tên Lô (VD: A1, B3...)", placeholder="Nhập tên lô...", key="add_base_lo")
                     loai_trong = st.selectbox("🌱 Loại trồng", options=LOAI_TRONG_OPTIONS, key="add_base_loai")
                 with col_b:
@@ -730,6 +728,7 @@ def render_main_app():
                     if not lo.strip(): st.error("❌ Nhập tên lô.")
                     elif so_luong <= 0: st.error("❌ Cần nhập số lượng.")
                     else:
+                        vu = "F0"
                         suffix = "M" if loai_trong == "Trồng mới" else "D"
                         lot_id = f"{vu}-{lo.strip()}-{suffix}".upper()
                         data = {
