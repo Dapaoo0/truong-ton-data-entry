@@ -30,3 +30,6 @@ You are an expert full-stack developer specialized in Python, Streamlit, and Sup
 ## 5. Security & RBAC
 - Validate `current_farm` and `current_team` constraints before saving or fetching restricted details according to the team scopes.
 - Record auditing logs continuously via `insert_access_log()` whenever users execute mutating actions or authenticate.
+
+## 6. Git Workflow
+- **Commit & Push**: After successfully editing code and completing the user's task, *always* run a `git commit` and `git push` to ensure progress is saved and tracked continuously.
