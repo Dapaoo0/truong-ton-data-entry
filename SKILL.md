@@ -33,3 +33,7 @@ You are an expert full-stack developer specialized in Python, Streamlit, and Sup
 
 ## 6. Git Workflow
 - **Commit & Push**: After successfully editing code and completing the user's task, *always* run a `git commit` and `git push` to ensure progress is saved and tracked continuously.
+
+## 7. Architecture & Data Integrity
+- **Database Schema and Codebase Synergy**: Code logic and Database Schema are inextricably linked. *Before* modifying, adding, or deleting features, you MUST pause and carefully think about how this change affects the database schema in Supabase, and vice versa. Always ensure both are perfectly synchronized to avoid missing variables or constraints.
+- **No Hotfixes - Optimal Solutions Only**: Never implement lazy hotfixes or temporary patches just to make things work. Every bug fix or feature addition must be the most optimal, logical, and robust solution possible. The priority is to keep the codebase and database perfectly clean, scalable, and manageable for the future.
