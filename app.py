@@ -332,8 +332,8 @@ def edit_base_lot_dialog(editing_row):
                 st.rerun()
 
 @dialog_decorator("✏️ Chỉnh sửa Tiến độ")
-def edit_stage_log_dialog(editing_row, available_lots):
-    gd_ops = STAGE_NT_OPTIONS
+def edit_stage_log_dialog(editing_row, available_lots, c_team):
+    gd_ops = ["Chích bắp"] if c_team == "Đội BVTV" else ["Cắt bắp"]
     mau_ops = [""] + MAU_DAY_OPTIONS
     def_lot = available_lots.index(editing_row["lot_id"]) if editing_row["lot_id"] in available_lots else 0
     def_gd = gd_ops.index(editing_row["giai_doan"]) if editing_row["giai_doan"] in gd_ops else 0
@@ -1087,7 +1087,7 @@ def render_main_app():
                 if is_editing and is_within_48h:
                     with col_e:
                         if st.button("✏️ Chỉnh sửa", key="edit_stg_nt", use_container_width=True):
-                            edit_stage_log_dialog(editing_row, available_lots)
+                            edit_stage_log_dialog(editing_row, available_lots, c_team)
                     with col_d:
                         if st.button("🗑️ Xóa", key="del_stg_nt", use_container_width=True):
                             confirm_action_dialog("DELETE", "stage_logs", editing_row["id"], None, "✅ Đã xóa thành công!")
