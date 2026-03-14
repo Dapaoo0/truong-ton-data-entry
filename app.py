@@ -622,46 +622,36 @@ def render_global_data_tab(c_farm):
         
     st.divider()
 
-    # Filter section
-    st.markdown("##### 🔍 Bộ lọc Dữ liệu")
-    col_f1, col_f2, col_f3 = st.columns(3)
-    teams = ["Tất cả"] + list(df_lots_all["team"].dropna().unique()) if not df_lots_all.empty else ["Tất cả"]
-    lots = ["Tất cả"] + list(df_lots_all["lot_id"].dropna().unique()) if not df_lots_all.empty else ["Tất cả"]
-    seasons = ["Tất cả"] + list(df_seasons["vu"].dropna().unique()) if not df_seasons.empty else ["Tất cả"]
-    
-    with col_f1:
-        f_vu = st.selectbox("Lọc theo Vụ", options=seasons, key="f_glb_vu")
-    with col_f2:
-        f_team = st.selectbox("Lọc theo Đội", options=teams, key="f_glb_team")
-    with col_f3:
-        f_lot = st.selectbox("Lọc theo Lô", options=lots, key="f_glb_lot")
+    # Filter helpers
+    teams_all = ["Tất cả"] + list(df_lots_all["team"].dropna().unique()) if not df_lots_all.empty else ["Tất cả"]
+    lots_all = ["Tất cả"] + list(df_lots_all["lot_id"].dropna().unique()) if not df_lots_all.empty else ["Tất cả"]
+    seasons_all = ["Tất cả"] + list(df_seasons["vu"].dropna().unique()) if not df_seasons.empty else ["Tất cả"]
 
-    # Apply filters
-    if f_vu != "Tất cả" and not df_seasons.empty:
-        # Lấy danh sách lot_id thuộc Vụ này
-        valid_lots = df_seasons[df_seasons["vu"] == f_vu]["lo"].tolist()
-        if not df_lots_all.empty: df_lots_all = df_lots_all[df_lots_all["lot_id"].isin(valid_lots)]
-        if not df_stg_all.empty: df_stg_all = df_stg_all[df_stg_all["lot_id"].isin(valid_lots)]
-        if not df_des_all.empty: df_des_all = df_des_all[df_des_all["lot_id"].isin(valid_lots)]
-        if not df_har_all.empty: df_har_all = df_har_all[df_har_all["lot_id"].isin(valid_lots)]
-        if not df_bsr_all.empty: df_bsr_all = df_bsr_all[df_bsr_all["lot_id"].isin(valid_lots)]
-        if not df_tree_inv_all.empty: df_tree_inv_all = df_tree_inv_all[df_tree_inv_all["lot_id"].isin(valid_lots)]
+    def apply_filters_local(f_vu, f_team, f_lot, df_dict):
+        """Helper function to apply filters locally to a set of dataframes"""
+        res = {}
+        # Apply Season format
+        valid_lots_season = None
+        if f_vu != "Tất cả" and not df_seasons.empty:
+            valid_lots_season = df_seasons[df_seasons["vu"] == f_vu]["lo"].tolist()
 
-    if f_team != "Tất cả" and not df_lots_all.empty:
-        df_lots_all = df_lots_all[df_lots_all["team"] == f_team]
-        if not df_stg_all.empty: df_stg_all = df_stg_all[df_stg_all["team"] == f_team]
-        if not df_des_all.empty: df_des_all = df_des_all[df_des_all["team"] == f_team]
-        if not df_har_all.empty: df_har_all = df_har_all[df_har_all["team"] == f_team]
-        if not df_bsr_all.empty: df_bsr_all = df_bsr_all[df_bsr_all["team"] == f_team]
-        if not df_tree_inv_all.empty: df_tree_inv_all = df_tree_inv_all[df_tree_inv_all["team"] == f_team]
-        
-    if f_lot != "Tất cả" and not df_lots_all.empty:
-        df_lots_all = df_lots_all[df_lots_all["lot_id"] == f_lot]
-        if not df_stg_all.empty: df_stg_all = df_stg_all[df_stg_all["lot_id"] == f_lot]
-        if not df_des_all.empty: df_des_all = df_des_all[df_des_all["lot_id"] == f_lot]
-        if not df_har_all.empty: df_har_all = df_har_all[df_har_all["lot_id"] == f_lot]
-        if not df_bsr_all.empty: df_bsr_all = df_bsr_all[df_bsr_all["lot_id"] == f_lot]
-        if not df_tree_inv_all.empty: df_tree_inv_all = df_tree_inv_all[df_tree_inv_all["lot_id"] == f_lot]
+        for name, df in df_dict.items():
+            if df.empty:
+                res[name] = df
+                continue
+            
+            df_filtered = df.copy()
+            if valid_lots_season is not None and "lot_id" in df_filtered.columns:
+                df_filtered = df_filtered[df_filtered["lot_id"].isin(valid_lots_season)]
+            if f_team != "Tất cả" and "team" in df_filtered.columns:
+                df_filtered = df_filtered[df_filtered["team"] == f_team]
+            if f_lot != "Tất cả" and "lot_id" in df_filtered.columns:
+                df_filtered = df_filtered[df_filtered["lot_id"] == f_lot]
+            
+            res[name] = df_filtered
+        return res
+
+    st.divider()
 
     st.divider()
 
@@ -669,36 +659,54 @@ def render_global_data_tab(c_farm):
     st.markdown("#### 📊 Biểu đồ Phễu Tiến độ theo Lô (Pipeline Funnel)")
     st.caption("So sánh tương quan Mức độ Hao hụt và Năng suất từ lúc Xuống giống đến khi Thu hoạch.")
     
+    # 1. Pipeline Chart Filters
+    cpf1, cpf2, cpf3 = st.columns(3)
+    with cpf1:
+        pf_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="pf_vu")
+    with cpf2:
+        pf_team = st.selectbox("Lọc theo Đội", options=teams_all, key="pf_team")
+    with cpf3:
+        pf_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="pf_lot")
+        
+    filtered_pipe_dfs = apply_filters_local(pf_vu, pf_team, pf_lot, {
+        "lots": df_lots_all, "stg": df_stg_all, "des": df_des_all, "har": df_har_all
+    })
+    
+    pipe_lots_df = filtered_pipe_dfs["lots"]
+    pipe_stg_df = filtered_pipe_dfs["stg"]
+    pipe_har_df = filtered_pipe_dfs["har"]
+    pipe_des_df = filtered_pipe_dfs["des"]
+
     # Gom dữ liệu để vẽ grouped bar chart
-    if not df_lots_all.empty:
-        lots = df_lots_all["lot_id"].unique()
+    if not pipe_lots_df.empty:
+        lots = pipe_lots_df["lot_id"].unique()
         pipeline_data = []
         for l in lots:
             # 1. Trồng
-            sl_trong = df_lots_all[df_lots_all["lot_id"] == l]["so_luong"].sum()
+            sl_trong = pipe_lots_df[pipe_lots_df["lot_id"] == l]["so_luong"].sum()
             pipeline_data.append({"Lô": l, "Giai đoạn": "1. Đã trồng", "Số lượng": sl_trong})
             
             # 2. Chích bắp
-            if not df_stg_all.empty:
-                sl_cb = df_stg_all[(df_stg_all["lot_id"] == l) & (df_stg_all["giai_doan"] == "Chích bắp")]["so_luong"].sum()
+            if not pipe_stg_df.empty:
+                sl_cb = pipe_stg_df[(pipe_stg_df["lot_id"] == l) & (pipe_stg_df["giai_doan"] == "Chích bắp")]["so_luong"].sum()
                 pipeline_data.append({"Lô": l, "Giai đoạn": "2. Chích bắp", "Số lượng": sl_cb})
             else: pipeline_data.append({"Lô": l, "Giai đoạn": "2. Chích bắp", "Số lượng": 0})
             
             # 3. Cắt bắp
-            if not df_stg_all.empty:
-                sl_cut = df_stg_all[(df_stg_all["lot_id"] == l) & (df_stg_all["giai_doan"] == "Cắt bắp")]["so_luong"].sum()
+            if not pipe_stg_df.empty:
+                sl_cut = pipe_stg_df[(pipe_stg_df["lot_id"] == l) & (pipe_stg_df["giai_doan"] == "Cắt bắp")]["so_luong"].sum()
                 pipeline_data.append({"Lô": l, "Giai đoạn": "3. Cắt bắp", "Số lượng": sl_cut})
             else: pipeline_data.append({"Lô": l, "Giai đoạn": "3. Cắt bắp", "Số lượng": 0})
             
             # 4. Thu hoạch (Buồng ~ Cây)
-            if not df_har_all.empty:
-                sl_har = df_har_all[df_har_all["lot_id"] == l]["so_luong"].sum()
+            if not pipe_har_df.empty:
+                sl_har = pipe_har_df[pipe_har_df["lot_id"] == l]["so_luong"].sum()
                 pipeline_data.append({"Lô": l, "Giai đoạn": "4. Thu hoạch", "Số lượng": sl_har})
             else: pipeline_data.append({"Lô": l, "Giai đoạn": "4. Thu hoạch", "Số lượng": 0})
                 
             # 5. Xuất hủy
-            if not df_des_all.empty:
-                sl_des = df_des_all[df_des_all["lot_id"] == l]["so_luong"].sum()
+            if not pipe_des_df.empty:
+                sl_des = pipe_des_df[pipe_des_df["lot_id"] == l]["so_luong"].sum()
                 pipeline_data.append({"Lô": l, "Giai đoạn": "5. Xuất hủy", "Số lượng": sl_des})
             else: pipeline_data.append({"Lô": l, "Giai đoạn": "5. Xuất hủy", "Số lượng": 0})
             
@@ -729,33 +737,51 @@ def render_global_data_tab(c_farm):
     st.markdown("##### 📉 Tiến trình Tổng hợp theo Thời gian")
     st.caption("Biểu đồ gộp thể hiện biến động các công đoạn dọc theo trục ngày. Có thể filter để làm nổi bật.")
 
+    # 2. Multi-line Chart Filters
+    mlf1, mlf2, mlf3 = st.columns(3)
+    with mlf1:
+        mlf_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="mlf_vu")
+    with mlf2:
+        mlf_team = st.selectbox("Lọc theo Đội", options=teams_all, key="mlf_team")
+    with mlf3:
+        mlf_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="mlf_lot")
+        
+    filtered_ml_dfs = apply_filters_local(mlf_vu, mlf_team, mlf_lot, {
+        "lots": df_lots_all, "stg": df_stg_all, "des": df_des_all, "har": df_har_all
+    })
+
+    ml_lots_df = filtered_ml_dfs["lots"]
+    ml_stg_df = filtered_ml_dfs["stg"]
+    ml_har_df = filtered_ml_dfs["har"]
+    ml_des_df = filtered_ml_dfs["des"]
+
     plot_dfs = []
     
     # 1. Trồng
-    if not df_lots_all.empty and "ngay_trong" in df_lots_all.columns:
-        df_p = df_lots_all[["ngay_trong", "so_luong"]].copy()
+    if not ml_lots_df.empty and "ngay_trong" in ml_lots_df.columns:
+        df_p = ml_lots_df[["ngay_trong", "so_luong"]].copy()
         df_p.rename(columns={"ngay_trong": "Date"}, inplace=True)
         df_p["Giai đoạn"] = "1. Đã trồng"
         plot_dfs.append(df_p)
 
     # 2. Chích bắp & Cắt bắp
-    if not df_stg_all.empty and "ngay_thuc_hien" in df_stg_all.columns:
-        df_p = df_stg_all[["ngay_thuc_hien", "so_luong", "giai_doan"]].copy()
+    if not ml_stg_df.empty and "ngay_thuc_hien" in ml_stg_df.columns:
+        df_p = ml_stg_df[["ngay_thuc_hien", "so_luong", "giai_doan"]].copy()
         df_p.rename(columns={"ngay_thuc_hien": "Date"}, inplace=True)
         df_p["Giai đoạn"] = df_p["giai_doan"].apply(lambda x: f"2. {x}" if x == "Chích bắp" else f"3. {x}")
         df_p.drop(columns=["giai_doan"], inplace=True)
         plot_dfs.append(df_p)
 
     # 3. Thu hoạch
-    if not df_har_all.empty and "ngay_thu_hoach" in df_har_all.columns:
-        df_p = df_har_all[["ngay_thu_hoach", "so_luong"]].copy()
+    if not ml_har_df.empty and "ngay_thu_hoach" in ml_har_df.columns:
+        df_p = ml_har_df[["ngay_thu_hoach", "so_luong"]].copy()
         df_p.rename(columns={"ngay_thu_hoach": "Date"}, inplace=True)
         df_p["Giai đoạn"] = "4. Thu hoạch"
         plot_dfs.append(df_p)
 
     # 4. Xuất hủy
-    if not df_des_all.empty and "ngay_xuat_huy" in df_des_all.columns:
-        df_p = df_des_all[["ngay_xuat_huy", "so_luong"]].copy()
+    if not ml_des_df.empty and "ngay_xuat_huy" in ml_des_df.columns:
+        df_p = ml_des_df[["ngay_xuat_huy", "so_luong"]].copy()
         df_p.rename(columns={"ngay_xuat_huy": "Date"}, inplace=True)
         df_p["Giai đoạn"] = "5. Xuất hủy"
         plot_dfs.append(df_p)
@@ -770,6 +796,14 @@ def render_global_data_tab(c_farm):
         selected_stages = st.multiselect("Lọc và Nổi bật Giai đoạn", options=all_stages, default=all_stages, key="global_stage_hl")
         
         # Color mapping matching the funnel defaults
+        color_map = {
+            "1. Đã trồng": "#4CAF50",      # Green
+            "2. Chích bắp": "#FFC107",     # Amber
+            "3. Cắt bắp": "#FF9800",       # Orange
+            "4. Thu hoạch": "#2196F3",     # Blue
+            "5. Xuất hủy": "#F44336"       # Red
+        }
+        
         fig = px.line(
             df_grouped, x="Date", y="so_luong", color="Giai đoạn", 
             markers=True, line_shape="spline", color_discrete_map=color_map,
@@ -795,8 +829,20 @@ def render_global_data_tab(c_farm):
     st.markdown("##### 🌳 Sự số lượng cây thực tế (Kiểm kê)")
     st.caption("Theo dõi số lượng cây thực tế trên từng Lô qua các lần kiểm đếm.")
     
-    if not df_tree_inv_all.empty and "ngay_kiem_ke" in df_tree_inv_all.columns:
-        df_inv = df_tree_inv_all.copy()
+    # 3. Tree Inventory Filters
+    tif1, tif2, tif3 = st.columns(3)
+    with tif1:
+        ti_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="ti_vu")
+    with tif2:
+        ti_team = st.selectbox("Lọc theo Đội", options=teams_all, key="ti_team")
+    with tif3:
+        ti_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="ti_lot")
+
+    filtered_ti_dfs = apply_filters_local(ti_vu, ti_team, ti_lot, {"inv": df_tree_inv_all})
+    ti_inv_df = filtered_ti_dfs["inv"]
+    
+    if not ti_inv_df.empty and "ngay_kiem_ke" in ti_inv_df.columns:
+        df_inv = ti_inv_df.copy()
         df_inv["Ngày"] = pd.to_datetime(df_inv["ngay_kiem_ke"])
         df_inv_grouped = df_inv.groupby(["Ngày", "lot_id"], as_index=False)["so_luong_cay_thuc_te"].sum()
         df_inv_grouped.sort_values(by="Ngày", inplace=True)
