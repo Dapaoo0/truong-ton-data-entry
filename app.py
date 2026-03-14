@@ -597,6 +597,8 @@ def render_global_data_tab(c_farm):
     df_des_all = fetch_table_data("destruction_logs", c_farm)
     df_har_all = fetch_table_data("harvest_logs", c_farm)
     df_bsr_all = fetch_table_data("bsr_logs", c_farm)
+    df_tree_inv_all = fetch_table_data("tree_inventory_logs", c_farm)
+    df_seasons = fetch_table_data("seasons", c_farm)
 
     # Nút Xuất Báo cáo Excel (Chứa toàn bộ dữ liệu thô)
     col_t1, col_t2 = st.columns([4, 1])
@@ -622,22 +624,36 @@ def render_global_data_tab(c_farm):
 
     # Filter section
     st.markdown("##### 🔍 Bộ lọc Dữ liệu")
-    col_f1, col_f2 = st.columns(2)
+    col_f1, col_f2, col_f3 = st.columns(3)
     teams = ["Tất cả"] + list(df_lots_all["team"].dropna().unique()) if not df_lots_all.empty else ["Tất cả"]
     lots = ["Tất cả"] + list(df_lots_all["lot_id"].dropna().unique()) if not df_lots_all.empty else ["Tất cả"]
+    seasons = ["Tất cả"] + list(df_seasons["vu"].dropna().unique()) if not df_seasons.empty else ["Tất cả"]
     
     with col_f1:
-        f_team = st.selectbox("Lọc theo Đội", options=teams, key="f_glb_team")
+        f_vu = st.selectbox("Lọc theo Vụ", options=seasons, key="f_glb_vu")
     with col_f2:
+        f_team = st.selectbox("Lọc theo Đội", options=teams, key="f_glb_team")
+    with col_f3:
         f_lot = st.selectbox("Lọc theo Lô", options=lots, key="f_glb_lot")
 
     # Apply filters
+    if f_vu != "Tất cả" and not df_seasons.empty:
+        # Lấy danh sách lot_id thuộc Vụ này
+        valid_lots = df_seasons[df_seasons["vu"] == f_vu]["lo"].tolist()
+        if not df_lots_all.empty: df_lots_all = df_lots_all[df_lots_all["lot_id"].isin(valid_lots)]
+        if not df_stg_all.empty: df_stg_all = df_stg_all[df_stg_all["lot_id"].isin(valid_lots)]
+        if not df_des_all.empty: df_des_all = df_des_all[df_des_all["lot_id"].isin(valid_lots)]
+        if not df_har_all.empty: df_har_all = df_har_all[df_har_all["lot_id"].isin(valid_lots)]
+        if not df_bsr_all.empty: df_bsr_all = df_bsr_all[df_bsr_all["lot_id"].isin(valid_lots)]
+        if not df_tree_inv_all.empty: df_tree_inv_all = df_tree_inv_all[df_tree_inv_all["lot_id"].isin(valid_lots)]
+
     if f_team != "Tất cả" and not df_lots_all.empty:
         df_lots_all = df_lots_all[df_lots_all["team"] == f_team]
         if not df_stg_all.empty: df_stg_all = df_stg_all[df_stg_all["team"] == f_team]
         if not df_des_all.empty: df_des_all = df_des_all[df_des_all["team"] == f_team]
         if not df_har_all.empty: df_har_all = df_har_all[df_har_all["team"] == f_team]
         if not df_bsr_all.empty: df_bsr_all = df_bsr_all[df_bsr_all["team"] == f_team]
+        if not df_tree_inv_all.empty: df_tree_inv_all = df_tree_inv_all[df_tree_inv_all["team"] == f_team]
         
     if f_lot != "Tất cả" and not df_lots_all.empty:
         df_lots_all = df_lots_all[df_lots_all["lot_id"] == f_lot]
@@ -645,6 +661,7 @@ def render_global_data_tab(c_farm):
         if not df_des_all.empty: df_des_all = df_des_all[df_des_all["lot_id"] == f_lot]
         if not df_har_all.empty: df_har_all = df_har_all[df_har_all["lot_id"] == f_lot]
         if not df_bsr_all.empty: df_bsr_all = df_bsr_all[df_bsr_all["lot_id"] == f_lot]
+        if not df_tree_inv_all.empty: df_tree_inv_all = df_tree_inv_all[df_tree_inv_all["lot_id"] == f_lot]
 
     st.divider()
 
@@ -708,53 +725,91 @@ def render_global_data_tab(c_farm):
         st.info("Chưa có danh sách lô để hiển thị biểu đồ Phễu.")
 
     st.divider()
-    st.markdown("##### 📉 Chi tiết Biểu đồ Tuần")
+    st.divider()
+    st.markdown("##### 📉 Tiến trình Tổng hợp theo Thời gian")
+    st.caption("Biểu đồ gộp thể hiện biến động các công đoạn dọc theo trục ngày. Có thể filter để làm nổi bật.")
 
-    col_c1, col_c2 = st.columns(2)
-    with col_c1:
-        st.markdown("**🌱 Diện tích trồng & số lượng**")
-        if not df_lots_all.empty and "tuan" in df_lots_all.columns:
-            plot_data = df_lots_all.groupby(["tuan"], as_index=False)["so_luong"].sum()
-            if not plot_data.empty: 
-                fig = px.bar(plot_data, x="tuan", y="so_luong", color_discrete_sequence=["#4CAF50"],
-                             labels={"tuan": "Tuần", "so_luong": "Số lượng (Cây)"})
-                st.plotly_chart(fig, use_container_width=True) 
-            else: st.info("Không đủ dữ liệu.")
-        else: st.info("Chưa có dữ liệu.")
-
-    with col_c2:
-        st.markdown("**📈 Tiến độ Chích bắp & Cắt bắp (Cây)**")
-        if not df_stg_all.empty and "tuan" in df_stg_all.columns:
-            plot_data = df_stg_all.groupby(["tuan", "giai_doan"], as_index=False)["so_luong"].sum()
-            if not plot_data.empty: 
-                fig = px.bar(plot_data, x="tuan", y="so_luong", color="giai_doan", barmode="group",
-                             color_discrete_map={"Chích bắp": "#FF9800", "Cắt bắp": "#E91E63"},
-                             labels={"tuan": "Tuần", "so_luong": "Số lượng (Cây)", "giai_doan": "Tiến độ"})
-                st.plotly_chart(fig, use_container_width=True)
-            else: st.info("Không đủ dữ liệu.")
-        else: st.info("Chưa có dữ liệu.")
-
-    st.markdown("---")
+    plot_dfs = []
     
-    col_c3, col_c4 = st.columns(2)
-    with col_c3:
-        st.markdown("**🍌 Sản lượng Thu hoạch (Buồng)**")
-        if not df_har_all.empty and "tuan" in df_har_all.columns:
-            plot_data = df_har_all.groupby("tuan")["so_luong"].sum()
-            if not plot_data.empty: 
-                # Chuyển sang dạng line_chart / area_chart cho trực quan và sinh động hơn
-                st.area_chart(plot_data, color="#FFD700") 
-            else: st.info("Không đủ dữ liệu.")
-        else: st.info("Chưa có dữ liệu.")
+    # 1. Trồng
+    if not df_lots_all.empty and "ngay_trong" in df_lots_all.columns:
+        df_p = df_lots_all[["ngay_trong", "so_luong"]].copy()
+        df_p.rename(columns={"ngay_trong": "Date"}, inplace=True)
+        df_p["Giai đoạn"] = "1. Đã trồng"
+        plot_dfs.append(df_p)
 
-    with col_c4:
-        st.markdown("**🗑️ Xuất hủy theo thời gian (Cây)**")
-        if not df_des_all.empty and "tuan" in df_des_all.columns:
-            plot_data = df_des_all.groupby("tuan")["so_luong"].sum()
-            if not plot_data.empty: 
-                st.line_chart(plot_data, color="#F44336")
-            else: st.info("Không đủ dữ liệu.")
-        else: st.info("Chưa có dữ liệu.")
+    # 2. Chích bắp & Cắt bắp
+    if not df_stg_all.empty and "ngay_thuc_hien" in df_stg_all.columns:
+        df_p = df_stg_all[["ngay_thuc_hien", "so_luong", "giai_doan"]].copy()
+        df_p.rename(columns={"ngay_thuc_hien": "Date"}, inplace=True)
+        df_p["Giai đoạn"] = df_p["giai_doan"].apply(lambda x: f"2. {x}" if x == "Chích bắp" else f"3. {x}")
+        df_p.drop(columns=["giai_doan"], inplace=True)
+        plot_dfs.append(df_p)
+
+    # 3. Thu hoạch
+    if not df_har_all.empty and "ngay_thu_hoach" in df_har_all.columns:
+        df_p = df_har_all[["ngay_thu_hoach", "so_luong"]].copy()
+        df_p.rename(columns={"ngay_thu_hoach": "Date"}, inplace=True)
+        df_p["Giai đoạn"] = "4. Thu hoạch"
+        plot_dfs.append(df_p)
+
+    # 4. Xuất hủy
+    if not df_des_all.empty and "ngay_xuat_huy" in df_des_all.columns:
+        df_p = df_des_all[["ngay_xuat_huy", "so_luong"]].copy()
+        df_p.rename(columns={"ngay_xuat_huy": "Date"}, inplace=True)
+        df_p["Giai đoạn"] = "5. Xuất hủy"
+        plot_dfs.append(df_p)
+
+    if plot_dfs:
+        df_combined = pd.concat(plot_dfs)
+        df_combined["Date"] = pd.to_datetime(df_combined["Date"])
+        df_grouped = df_combined.groupby(["Date", "Giai đoạn"], as_index=False)["so_luong"].sum()
+        df_grouped.sort_values(by="Date", inplace=True)
+
+        all_stages = sorted(df_grouped["Giai đoạn"].unique().tolist())
+        selected_stages = st.multiselect("Lọc và Nổi bật Giai đoạn", options=all_stages, default=all_stages, key="global_stage_hl")
+        
+        # Color mapping matching the funnel defaults
+        fig = px.line(
+            df_grouped, x="Date", y="so_luong", color="Giai đoạn", 
+            markers=True, line_shape="spline", color_discrete_map=color_map,
+            labels={"Date": "Ngày Thực hiện", "so_luong": "Số lượng (Cây/Buồng)"}
+        )
+        
+        # Highlight logic - fade out unselected
+        if selected_stages and len(selected_stages) < len(all_stages):
+            for trace in fig.data:
+                if trace.name not in selected_stages:
+                    trace.opacity = 0.15
+                    trace.line.width = 1
+                else:
+                    trace.opacity = 1.0
+                    trace.line.width = 3
+        
+        fig.update_layout(plot_bgcolor="rgba(0,0,0,0)", yaxis=(dict(showgrid=True, gridcolor='rgba(0,0,0,0.1)')), hovermode="x unified")
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Chưa có bất kỳ dữ liệu nào để vẽ biểu đồ dòng thời gian.")
+
+    st.divider()
+    st.markdown("##### 🌳 Sự số lượng cây thực tế (Kiểm kê)")
+    st.caption("Theo dõi số lượng cây thực tế trên từng Lô qua các lần kiểm đếm.")
+    
+    if not df_tree_inv_all.empty and "ngay_kiem_ke" in df_tree_inv_all.columns:
+        df_inv = df_tree_inv_all.copy()
+        df_inv["Ngày"] = pd.to_datetime(df_inv["ngay_kiem_ke"])
+        df_inv_grouped = df_inv.groupby(["Ngày", "lot_id"], as_index=False)["so_luong_cay_thuc_te"].sum()
+        df_inv_grouped.sort_values(by="Ngày", inplace=True)
+        
+        fig_inv = px.line(
+            df_inv_grouped, x="Ngày", y="so_luong_cay_thuc_te", color="lot_id", 
+            markers=True, line_shape="linear",
+            labels={"Ngày": "Ngày Kiểm Kê", "so_luong_cay_thuc_te": "Số lượng cây", "lot_id": "Lô"},
+        )
+        fig_inv.update_layout(plot_bgcolor="rgba(0,0,0,0)", yaxis=(dict(showgrid=True, gridcolor='rgba(0,0,0,0.1)')), hovermode="x unified")
+        st.plotly_chart(fig_inv, use_container_width=True)
+    else:
+        st.info("Chưa có dữ liệu Kiểm kê cây trên farm này.")
 
 # =====================================================
 # GIAO DIỆN CHÍNH (MAIN APP) - ROLE BASED 
