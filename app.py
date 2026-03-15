@@ -385,7 +385,24 @@ def edit_destruction_log_dialog(editing_row, available_lots):
         with col_a:
             lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, index=def_lot, key="dlg_lot_des")
             gxh = st.selectbox("⏱️ Giai đoạn", options=gd_ops, index=def_gd, key="dlg_gxh_des")
-            ly_do = st.text_area("📝 Lý do", height=100, value=def_ly_do, key="dlg_lydo_des")
+            
+            predefined_reasons = ["Bệnh", "Đổ Ngã", "Khác"]
+            matched_reason = "Khác"
+            if def_ly_do in ["Bệnh", "Đổ Ngã"]:
+                matched_reason = def_ly_do
+            
+            if hasattr(st, "pills"):
+                selected_reason = st.pills("📝 Nhóm lý do", options=predefined_reasons, default=matched_reason, key="dlg_des_reason_group")
+                if not selected_reason:
+                    selected_reason = "Khác"
+            else:
+                selected_reason = st.radio("📝 Nhóm lý do", options=predefined_reasons, index=predefined_reasons.index(matched_reason), horizontal=True, key="dlg_des_reason_group")
+            
+            if selected_reason == "Khác":
+                ly_do = st.text_area("📝 Chi tiết lý do", height=80, value=def_ly_do if matched_reason == "Khác" else "", key="dlg_lydo_des")
+            else:
+                ly_do = selected_reason
+                
         with col_b:
             col_b1, col_b2 = st.columns([2, 1])
             with col_b1:
@@ -396,7 +413,7 @@ def edit_destruction_log_dialog(editing_row, available_lots):
 
         if st.button("✅ Cập nhật", key="btn_edit_des", use_container_width=True, type="primary"):
             if sl <= 0: st.error("❌ Cần nhập số lượng.")
-            elif not ly_do.strip(): st.error("❌ Cần ghi rõ lý do.")
+            elif not ly_do.strip(): st.error("❌ Cần ghi rõ lý do chi tiết.")
             else:
                 is_valid, msg = check_quantity_limit(lot_id, sl, "destruction", exclude_id=editing_row["id"])
                 if not is_valid: st.error(msg)
@@ -485,6 +502,8 @@ def edit_size_measure_dialog(editing_row, available_lots):
     def_lan_do = editing_row["lan_do"]
     def_ngay = pd.to_datetime(editing_row["ngay_do"]).date()
     def_sl = int(editing_row["so_luong_mau"])
+    def_hkt = str(editing_row.get("hang_kiem_tra", ""))
+    def_cal = float(editing_row.get("size_cal", 0.0))
     
     with st.container(border=True):
         col_a, col_b = st.columns(2)
@@ -498,6 +517,11 @@ def edit_size_measure_dialog(editing_row, available_lots):
                 ngay = st.date_input("📆 Ngày đo", value=def_ngay, key="dlg_sm_ngay")
             with col_b2:
                 st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key=f"dlg_w_sm_{ngay}")
+            col_b3, col_b4 = st.columns(2)
+            with col_b3:
+                hang_kiem_tra = st.text_input("📏 Hàng kiểm tra", value=def_hkt, key="dlg_sm_hkt")
+            with col_b4:
+                size_cal = st.number_input("📏 Size (Cal)", min_value=0.0, step=0.1, value=def_cal, key="dlg_sm_cal")
             sl = st.number_input("🔢 Số lượng buồng mẫu", min_value=0, step=10, value=def_sl, key="dlg_sm_sl")
 
         if st.button("✅ Cập nhật", key="btn_edit_sm", use_container_width=True, type="primary"):
@@ -506,7 +530,8 @@ def edit_size_measure_dialog(editing_row, available_lots):
             else:
                 data = {
                     "lot_id": lot_id, "mau_day": mau_day, "lan_do": lan_do,
-                    "ngay_do": ngay.isoformat(), "so_luong_mau": sl, "tuan": ngay.isocalendar()[1]
+                    "ngay_do": ngay.isoformat(), "so_luong_mau": sl, "tuan": ngay.isocalendar()[1],
+                    "hang_kiem_tra": hang_kiem_tra.strip(), "size_cal": size_cal
                 }
                 supabase.table("size_measure_logs").update(data).eq("id", editing_row["id"]).execute()
                 st.session_state["toast"] = f"✅ Sửa đo size {lot_id} thành công!"
@@ -992,9 +1017,11 @@ def render_main_app():
                     if not lo.strip(): st.error("❌ Nhập tên lô.")
                     elif so_luong <= 0: st.error("❌ Cần nhập số lượng.")
                     else:
-                        lot_id = lo.strip().upper()
+                        ten_lo_goc = lo.strip().upper()
+                        ngay_trong_str = ngay_trong.strftime('%d%m%Y')
+                        lot_id = f"{ten_lo_goc}_{ngay_trong_str}"
                         data_base = {
-                            "farm": c_farm, "team": c_team, "lo": lot_id,
+                            "farm": c_farm, "team": c_team, "lo": ten_lo_goc,
                             "lot_id": lot_id,
                             "ngay_trong": ngay_trong.isoformat(), "so_luong": so_luong,
                             "so_luong_con_lai": so_luong,
@@ -1047,24 +1074,30 @@ def render_main_app():
                             ngay_do = st.date_input("📆 Ngày đo", value=date.today(), key="add_sm_ngay")
                         with col_b2:
                             st.text_input("📍 Tuần", value=str(ngay_do.isocalendar()[1]), disabled=True, key=f"main_w_sm_{ngay_do}")
+                        col_b3, col_b4 = st.columns(2)
+                        with col_b3:
+                            hang_kiem_tra = st.text_input("📏 Hàng kiểm tra", placeholder="VD: H1-H5", key="add_sm_hkt")
+                        with col_b4:
+                            size_cal = st.number_input("📏 Size (Cal)", min_value=0.0, step=0.1, key="add_sm_cal")
                         sl = st.number_input("🔢 Số lượng buồng mẫu", min_value=0, step=10, key="add_sm_sl")
                     
                     if st.button("✅ Lưu cập nhật Đo Size", key="btn_add_sm", use_container_width=True, type="primary"):
                         if not mau_day: st.error("❌ Phải chọn màu dây")
-                        elif sl <= 0: st.error("❌. Số lượng buồng > 0")
+                        elif sl <= 0: st.error("❌ Số lượng buồng > 0")
                         else:
                             # Validation: Nếu chọn là Lần 2, phải kiểm tra xem Lần 1 đã có chưa.
                             if lan_do == 2:
                                 res_lan1 = supabase.table("size_measure_logs") \
                                     .select("id").eq("lot_id", lot_id).eq("mau_day", mau_day).eq("lan_do", 1).eq("is_deleted", False).execute()
                                 if not res_lan1.data:
-                                    st.error(f"❌ Không thể đo Lần 2. Lô {lot_id} mức màu {mau_day} chưa được đo Lần 1.")
+                                    st.error(f"❌ Không thể đo Lần 2. Lô `{lot_id}` với màu dây `{mau_day}` chưa được đo Lần 1.")
                                     st.stop()
                                     
                             data = {
                                 "farm": c_farm, "team": c_team, "lot_id": lot_id,
                                 "mau_day": mau_day, "lan_do": lan_do, "so_luong_mau": sl,
-                                "ngay_do": ngay_do.isoformat(), "tuan": ngay_do.isocalendar()[1]
+                                "ngay_do": ngay_do.isoformat(), "tuan": ngay_do.isocalendar()[1],
+                                "hang_kiem_tra": hang_kiem_tra.strip(), "size_cal": size_cal
                             }
                             confirm_action_dialog("INSERT", "size_measure_logs", None, data, f"✅ Lưu đo size Lần {lan_do} thành công!")
                 
@@ -1082,7 +1115,7 @@ def render_main_app():
                 elif is_editing and not is_within_48h:
                     with col_e: st.caption("🔒 Quá 48h")
                     
-                render_team_dataframe("size_measure_logs", df_sm_team, ["lot_id", "mau_day", "lan_do", "so_luong_mau", "ngay_do"])
+                render_team_dataframe("size_measure_logs", df_sm_team, ["lot_id", "mau_day", "lan_do", "hang_kiem_tra", "size_cal", "so_luong_mau", "ngay_do"])
 
         # TAB: CẬP NHẬT KIỂM KÊ CÂY
         elif active_tab == "🌳 Kiểm kê cây":
@@ -1214,7 +1247,20 @@ def render_main_app():
                     with col_a:
                         lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, key="add_des_lot")
                         giai_doan_xuat_huy = st.selectbox("⏱️ Giai đoạn xuất hủy", options=DESTRUCTION_STAGE_OPTIONS, key="add_des_gxh")
-                        ly_do = st.text_area("📝 Lý do (Gió, bệnh...)", height=100, key="add_des_lydo")
+                        
+                        predefined_reasons = ["Bệnh", "Đổ Ngã", "Khác"]
+                        if hasattr(st, "pills"):
+                            selected_reason = st.pills("📝 Nhóm lý do", options=predefined_reasons, key="add_des_reason_group")
+                            if not selected_reason:
+                                selected_reason = "Khác"
+                        else:
+                            selected_reason = st.radio("📝 Nhóm lý do", options=predefined_reasons, horizontal=True, key="add_des_reason_group")
+                            
+                        if selected_reason == "Khác":
+                            ly_do = st.text_area("📝 Chi tiết lý do (Bắt buộc)", height=80, key="add_des_lydo")
+                        else:
+                            ly_do = selected_reason
+                            
                     with col_b:
                         col_b1, col_b2 = st.columns([2, 1])
                         with col_b1:
@@ -1225,7 +1271,7 @@ def render_main_app():
 
                     if st.button("🗑️ Ghi nhận Xuất hủy", key="btn_add_des", use_container_width=True, type="primary"):
                         if sl <= 0: st.error("❌ Nhập số lượng > 0.")
-                        elif not ly_do.strip(): st.error("❌ Cần ghi rõ lý do.")
+                        elif selected_reason == "Khác" and not ly_do.strip(): st.error("❌ Cần ghi rõ chi tiết lý do (khi chọn Khác).")
                         else:
                             is_valid, msg = check_quantity_limit(lot_id, sl, "destruction")
                             if not is_valid: st.error(msg)
