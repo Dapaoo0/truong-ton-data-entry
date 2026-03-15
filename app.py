@@ -124,9 +124,17 @@ def insert_access_log(farm: str, team: str, action: str):
 # HÀM TƯƠNG TÁC DB (SUPABASE DATA FETCHERS)
 # =====================================================
 def get_lots_by_farm(farm: str) -> list:
-    """Lấy danh sách lot_id gốc của nguyen Farm (chọn Lô trồng)."""
-    res = supabase.table("base_lots").select("lot_id").eq("farm", farm).eq("is_deleted", False).order("created_at").execute()
-    return [row["lot_id"] for row in res.data] if res.data else []
+    """Lấy danh sách Tên Lô gốc của nguyen Farm."""
+    res = supabase.table("base_lots").select("lo").eq("farm", farm).eq("is_deleted", False).order("created_at").execute()
+    seen = set()
+    lots = []
+    if res.data:
+        for row in res.data:
+            l = row["lo"]
+            if l not in seen:
+                seen.add(l)
+                lots.append(l)
+    return lots
 
 def fetch_table_data(table_name: str, farm: str) -> pd.DataFrame:
     """Hàm chung lấy dữ liệu từ bảng bất kỳ theo farm."""
@@ -153,51 +161,80 @@ def insert_to_db(table_name: str, data: dict) -> bool:
             st.error(f"❌ Lỗi khi lưu vào {table_name}: {e}")
         return False
 
-def check_quantity_limit(lot_id, new_sl, log_type, giai_doan=None, exclude_id=None):
+def get_available_capacity_for_lot(lot_id, log_type, giai_doan=None, exclude_id=None):
     res_lot = supabase.table("base_lots").select("so_luong, so_luong_con_lai").eq("lot_id", lot_id).eq("is_deleted", False).execute()
-    if not res_lot.data: return False, "❌ Lỗi: Không tìm thấy Lô hoặc Lô đã bị xóa."
-    
+    if not res_lot.data: return 0, 0
     val_con_lai = res_lot.data[0].get("so_luong_con_lai")
-    if val_con_lai is not None:
-        total_planted = int(val_con_lai)
-    else:
-        total_planted = int(res_lot.data[0].get("so_luong", 0))
+    total_planted = int(val_con_lai) if val_con_lai is not None else int(res_lot.data[0].get("so_luong", 0))
 
     max_allowed = total_planted
-    action_name = giai_doan.lower() if log_type == "stage" else ("xuất hủy" if log_type == "destruction" else "thu hoạch")
-    base_name = "trồng (còn sống)"
-    unit = "buồng" if log_type == "harvest" else "cây"
 
     if log_type == "stage" and giai_doan == "Cắt bắp":
         res_cb = supabase.table("stage_logs").select("so_luong").eq("lot_id", lot_id).eq("giai_doan", "Chích bắp").eq("is_deleted", False).execute()
         max_allowed = sum(int(r["so_luong"]) for r in res_cb.data)
-        base_name = "chích bắp"
-        
     elif log_type == "harvest":
         res_cut = supabase.table("stage_logs").select("so_luong").eq("lot_id", lot_id).eq("giai_doan", "Cắt bắp").eq("is_deleted", False).execute()
         max_allowed = sum(int(r["so_luong"]) for r in res_cut.data)
-        base_name = "cắt bắp"
 
     total_used = 0
     if log_type == "stage":
         res = supabase.table("stage_logs").select("id, so_luong").eq("lot_id", lot_id).eq("giai_doan", giai_doan).eq("is_deleted", False).execute()
         total_used = sum(int(r["so_luong"]) for r in res.data if r["id"] != exclude_id)
-    elif log_type == "destruction":
-        old_sl = 0
-        if exclude_id:
-            res_old = supabase.table("destruction_logs").select("so_luong").eq("id", exclude_id).execute()
-            if res_old.data: old_sl = int(res_old.data[0]["so_luong"])
-            
-        if int(new_sl) > (max_allowed + old_sl):
-            return False, f"❌ Lô này chỉ còn {max_allowed + old_sl} cây sống, không thể xuất hủy {new_sl} cây."
-        return True, ""
     elif log_type == "harvest":
         res = supabase.table("harvest_logs").select("id, so_luong").eq("lot_id", lot_id).eq("is_deleted", False).execute()
         total_used = sum(int(r["so_luong"]) for r in res.data if r["id"] != exclude_id)
+    elif log_type == "destruction":
+        res = supabase.table("destruction_logs").select("id, so_luong").eq("lot_id", lot_id).eq("is_deleted", False).execute()
+        total_used = sum(int(r["so_luong"]) for r in res.data if r["id"] != exclude_id)
+        
+    return max_allowed, total_used
+
+
+def allocate_fifo_quantity(farm_name, lo_name, new_sl, log_type, target_date, action_type, giai_doan=None):
+    res_lots = supabase.table("base_lots").select("lot_id").eq("farm", farm_name).eq("lo", lo_name).eq("is_deleted", False).order("ngay_trong").execute()
+    if not res_lots.data:
+        return False, f"❌ Lỗi: Không tìm thấy lô {lo_name} hoặc đã bị xóa.", []
+        
+    remaining_to_allocate = int(new_sl)
+    allocations = []
+    total_available_all = 0
+    
+    for lot_row in res_lots.data:
+        lot_id = lot_row["lot_id"]
+        
+        is_time_valid, _ = validate_timeline_logic(lot_id, target_date, action_type)
+        if not is_time_valid:
+            continue
+            
+        max_allowed, total_used = get_available_capacity_for_lot(lot_id, log_type, giai_doan)
+        remain = max_allowed - total_used
+        
+        if remain > 0:
+            total_available_all += remain
+            if remaining_to_allocate > 0:
+                consume = min(remaining_to_allocate, remain)
+                allocations.append({"lot_id": lot_id, "so_luong": consume})
+                remaining_to_allocate -= consume
+                
+    if remaining_to_allocate > 0:
+        action_name = giai_doan.lower() if log_type == "stage" else ("xuất hủy" if log_type == "destruction" else "thu hoạch")
+        return False, f"❌ Yêu cầu {new_sl} nhưng tổng số lượng cho phép của nhánh '{lo_name}' chỉ còn {total_available_all}.", []
+        
+    return True, "", allocations
+
+def check_quantity_limit(lot_id, new_sl, log_type, giai_doan=None, exclude_id=None):
+    max_allowed, total_used = get_available_capacity_for_lot(lot_id, log_type, giai_doan, exclude_id)
+    unit = "buồng" if log_type == "harvest" else "cây"
+    action_name = giai_doan.lower() if log_type == "stage" else ("xuất hủy" if log_type == "destruction" else "thu hoạch")
+
+    if log_type == "destruction":
+        if int(new_sl) > (max_allowed - total_used):
+            return False, f"❌ Mã lứa này chỉ còn {max_allowed - total_used} cây sống, không thể xuất hủy {new_sl} cây."
+        return True, ""
 
     if total_used + int(new_sl) > max_allowed:
         remain = max_allowed - total_used
-        return False, f"❌ Bạn đã nhập {new_sl} {unit} {action_name}, nhưng số lượng còn lại chưa {action_name} chỉ có {remain} {unit} (trên tổng {max_allowed} {unit} đã {base_name})."
+        return False, f"❌ Bạn đã nhập {new_sl} {unit}, nhưng lứa này chỉ có {remain} {unit} cho phép."
     return True, ""
 
 def validate_timeline_logic(lot_id, target_date, action_type):
@@ -243,6 +280,19 @@ def confirm_action_dialog(action, table_name, rec_id_or_none, data_dict, success
             success = False
             if action == "INSERT":
                 success = insert_to_db(table_name, data_dict)
+            elif action == "INSERT_FIFO":
+                db_data = data_dict["base_data"]
+                allocations = data_dict["allocations"]
+                success = True
+                for alloc in allocations:
+                    row_data = db_data.copy()
+                    row_data["lot_id"] = alloc["lot_id"]
+                    row_data["so_luong"] = alloc["so_luong"]
+                    try:
+                        supabase.table(table_name).insert(row_data).execute()
+                    except Exception as e:
+                        st.error(f"❌ Lỗi ghi hệ thống FIFO nhánh {alloc['lot_id']}: {e}")
+                        success = False
             elif action == "INSERT_BASE":
                 db_data, season_data = data_dict
                 success = insert_to_db("base_lots", db_data)
@@ -344,7 +394,8 @@ def edit_stage_log_dialog(editing_row, available_lots, c_team):
     with st.container(border=True):
         col_a, col_b = st.columns(2)
         with col_a:
-            lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, index=def_lot, key="dlg_lot_stg")
+            st.text_input("🏷️ Lứa (Mã hệ thống)", value=editing_row["lot_id"], disabled=True, key="dlg_lot_stg")
+            lot_id = editing_row["lot_id"]
             giai_doan = st.radio("📌 Giai đoạn", options=gd_ops, index=def_gd, horizontal=True, key="dlg_gd_stg")
             mau_day = st.selectbox("🎨 Màu dây", options=mau_ops, index=def_mau, key="dlg_mau_stg")
         with col_b:
@@ -383,7 +434,8 @@ def edit_destruction_log_dialog(editing_row, available_lots):
     with st.container(border=True):
         col_a, col_b = st.columns(2)
         with col_a:
-            lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, index=def_lot, key="dlg_lot_des")
+            st.text_input("🏷️ Lứa (Mã hệ thống)", value=editing_row["lot_id"], disabled=True, key="dlg_lot_des")
+            lot_id = editing_row["lot_id"]
             gxh = st.selectbox("⏱️ Giai đoạn", options=gd_ops, index=def_gd, key="dlg_gxh_des")
             
             predefined_reasons = ["Bệnh", "Đổ Ngã", "Khác"]
@@ -437,7 +489,8 @@ def edit_harvest_log_dialog(editing_row, available_lots):
     with st.container(border=True):
         col_a, col_b = st.columns(2)
         with col_a:
-            lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, index=def_lot, key="dlg_lot_har")
+            st.text_input("🏷️ Lứa (Mã hệ thống)", value=editing_row["lot_id"], disabled=True, key="dlg_lot_har")
+            lot_id = editing_row["lot_id"]
             mau_day = st.selectbox("🎨 Màu dây", options=[""] + MAU_DAY_OPTIONS, index=def_mau, key="dlg_mau_har")
             hinh_thuc_thu_hoach = st.selectbox("🚜 Hình thức thu hoạch", options=hinh_thuc_opts, index=def_hinh_thuc, key="dlg_hinh_thuc_har")
         with col_b:
@@ -478,7 +531,8 @@ def edit_bsr_log_dialog(editing_row, available_lots):
     with st.container(border=True):
         col_a, col_b = st.columns(2)
         with col_a:
-            lot_id = st.selectbox("🏷️ Chọn Lô đóng gói", options=available_lots, index=def_lot, key="dlg_lot_bsr")
+            st.text_input("🏷️ Lứa (Mã hệ thống)", value=editing_row["lot_id"], disabled=True, key="dlg_lot_bsr")
+            lot_id = editing_row["lot_id"]
         with col_b:
             col_b1, col_b2 = st.columns([2, 1])
             with col_b1:
@@ -508,7 +562,8 @@ def edit_size_measure_dialog(editing_row, available_lots):
     with st.container(border=True):
         col_a, col_b = st.columns(2)
         with col_a:
-            lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, index=def_lot, key="dlg_sm_lot")
+            st.text_input("🏷️ Lứa (Mã hệ thống)", value=editing_row["lot_id"], disabled=True, key="dlg_sm_lot")
+            lot_id = editing_row["lot_id"]
             mau_day = st.selectbox("🎨 Màu dây", options=[""] + MAU_DAY_OPTIONS, index=def_mau, key="dlg_sm_mau")
             lan_do = st.radio("📏 Lần đo", options=[1, 2], index=def_lan_do-1, horizontal=True, key="dlg_sm_lando")
         with col_b:
@@ -546,7 +601,8 @@ def edit_tree_inventory_dialog(editing_row, available_lots):
     with st.container(border=True):
         col_a, col_b = st.columns(2)
         with col_a:
-            lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, index=def_lot, key="dlg_inv_lot")
+            st.text_input("🏷️ Lứa (Mã hệ thống)", value=editing_row["lot_id"], disabled=True, key="dlg_inv_lot")
+            lot_id = editing_row["lot_id"]
         with col_b:
             col_b1, col_b2 = st.columns([2, 1])
             with col_b1:
@@ -649,7 +705,7 @@ def render_global_data_tab(c_farm):
 
     # Filter helpers
     teams_all = ["Tất cả"] + list(df_lots_all["team"].dropna().unique()) if not df_lots_all.empty else ["Tất cả"]
-    lots_all = ["Tất cả"] + list(df_lots_all["lot_id"].dropna().unique()) if not df_lots_all.empty else ["Tất cả"]
+    lots_all = ["Tất cả"] + list(df_lots_all["lo"].dropna().unique()) if not df_lots_all.empty else ["Tất cả"]
     seasons_all = ["Tất cả"] + list(df_seasons["vu"].dropna().unique()) if not df_seasons.empty else ["Tất cả"]
 
     def apply_filters_local(f_vu, f_team, f_lot, df_dict):
@@ -671,7 +727,8 @@ def render_global_data_tab(c_farm):
             if f_team != "Tất cả" and "team" in df_filtered.columns:
                 df_filtered = df_filtered[df_filtered["team"] == f_team]
             if f_lot != "Tất cả" and "lot_id" in df_filtered.columns:
-                df_filtered = df_filtered[df_filtered["lot_id"] == f_lot]
+                valid_ids = df_lots_all[df_lots_all["lo"] == f_lot]["lot_id"].tolist() if not df_lots_all.empty else []
+                df_filtered = df_filtered[df_filtered["lot_id"].isin(valid_ids)]
             
             res[name] = df_filtered
         return res
@@ -704,34 +761,36 @@ def render_global_data_tab(c_farm):
 
     # Gom dữ liệu để vẽ grouped bar chart
     if not pipe_lots_df.empty:
-        lots = pipe_lots_df["lot_id"].unique()
+        lots = pipe_lots_df["lo"].unique()
         pipeline_data = []
         for l in lots:
+            valid_ids = pipe_lots_df[pipe_lots_df["lo"] == l]["lot_id"].tolist()
+            
             # 1. Trồng
-            sl_trong = pipe_lots_df[pipe_lots_df["lot_id"] == l]["so_luong"].sum()
+            sl_trong = pipe_lots_df[pipe_lots_df["lo"] == l]["so_luong"].sum()
             pipeline_data.append({"Lô": l, "Giai đoạn": "1. Đã trồng", "Số lượng": sl_trong})
             
             # 2. Chích bắp
             if not pipe_stg_df.empty:
-                sl_cb = pipe_stg_df[(pipe_stg_df["lot_id"] == l) & (pipe_stg_df["giai_doan"] == "Chích bắp")]["so_luong"].sum()
+                sl_cb = pipe_stg_df[(pipe_stg_df["lot_id"].isin(valid_ids)) & (pipe_stg_df["giai_doan"] == "Chích bắp")]["so_luong"].sum()
                 pipeline_data.append({"Lô": l, "Giai đoạn": "2. Chích bắp", "Số lượng": sl_cb})
             else: pipeline_data.append({"Lô": l, "Giai đoạn": "2. Chích bắp", "Số lượng": 0})
             
             # 3. Cắt bắp
             if not pipe_stg_df.empty:
-                sl_cut = pipe_stg_df[(pipe_stg_df["lot_id"] == l) & (pipe_stg_df["giai_doan"] == "Cắt bắp")]["so_luong"].sum()
+                sl_cut = pipe_stg_df[(pipe_stg_df["lot_id"].isin(valid_ids)) & (pipe_stg_df["giai_doan"] == "Cắt bắp")]["so_luong"].sum()
                 pipeline_data.append({"Lô": l, "Giai đoạn": "3. Cắt bắp", "Số lượng": sl_cut})
             else: pipeline_data.append({"Lô": l, "Giai đoạn": "3. Cắt bắp", "Số lượng": 0})
             
             # 4. Thu hoạch (Buồng ~ Cây)
             if not pipe_har_df.empty:
-                sl_har = pipe_har_df[pipe_har_df["lot_id"] == l]["so_luong"].sum()
+                sl_har = pipe_har_df[pipe_har_df["lot_id"].isin(valid_ids)]["so_luong"].sum()
                 pipeline_data.append({"Lô": l, "Giai đoạn": "4. Thu hoạch", "Số lượng": sl_har})
             else: pipeline_data.append({"Lô": l, "Giai đoạn": "4. Thu hoạch", "Số lượng": 0})
                 
             # 5. Xuất hủy
             if not pipe_des_df.empty:
-                sl_des = pipe_des_df[pipe_des_df["lot_id"] == l]["so_luong"].sum()
+                sl_des = pipe_des_df[pipe_des_df["lot_id"].isin(valid_ids)]["so_luong"].sum()
                 pipeline_data.append({"Lô": l, "Giai đoạn": "5. Xuất hủy", "Số lượng": sl_des})
             else: pipeline_data.append({"Lô": l, "Giai đoạn": "5. Xuất hủy", "Số lượng": 0})
             
@@ -868,14 +927,19 @@ def render_global_data_tab(c_farm):
     
     if not ti_inv_df.empty and "ngay_kiem_ke" in ti_inv_df.columns:
         df_inv = ti_inv_df.copy()
+        
+        # Ánh xạ lot_id sang lo gốc
+        mapped_dict = df_lots_all.set_index("lot_id")["lo"].to_dict() if not df_lots_all.empty else {}
+        df_inv["Tên Lô"] = df_inv["lot_id"].map(lambda x: mapped_dict.get(x, x))
+        
         df_inv["Ngày"] = pd.to_datetime(df_inv["ngay_kiem_ke"])
-        df_inv_grouped = df_inv.groupby(["Ngày", "lot_id"], as_index=False)["so_luong_cay_thuc_te"].sum()
+        df_inv_grouped = df_inv.groupby(["Ngày", "Tên Lô"], as_index=False)["so_luong_cay_thuc_te"].sum()
         df_inv_grouped.sort_values(by="Ngày", inplace=True)
         
         fig_inv = px.line(
-            df_inv_grouped, x="Ngày", y="so_luong_cay_thuc_te", color="lot_id", 
+            df_inv_grouped, x="Ngày", y="so_luong_cay_thuc_te", color="Tên Lô", 
             markers=True, line_shape="linear",
-            labels={"Ngày": "Ngày Kiểm Kê", "so_luong_cay_thuc_te": "Số lượng cây", "lot_id": "Lô"},
+            labels={"Ngày": "Ngày Kiểm Kê", "so_luong_cay_thuc_te": "Số lượng cây", "Tên Lô": "Lô"},
         )
         fig_inv.update_layout(plot_bgcolor="rgba(0,0,0,0)", yaxis=(dict(showgrid=True, gridcolor='rgba(0,0,0,0.1)')), hovermode="x unified")
         st.plotly_chart(fig_inv, use_container_width=True)
@@ -1201,18 +1265,15 @@ def render_main_app():
                         if sl <= 0: st.error("❌ Nhập số lượng > 0.")
                         elif not mau_day: st.error("❌ Phải chọn màu dây định danh lứa.")
                         else:
-                            is_valid, msg = check_quantity_limit(lot_id, sl, "stage", giai_doan=giai_doan)
+                            is_valid, msg, allocations = allocate_fifo_quantity(c_farm, lot_id, sl, "stage", ngay_th, giai_doan, giai_doan)
                             if not is_valid: st.error(msg)
                             else:
-                                is_time_valid, t_msg = validate_timeline_logic(lot_id, ngay_th, giai_doan)
-                                if not is_time_valid: st.error(t_msg)
-                                else:
-                                    data = {
-                                        "farm": c_farm, "team": c_team, "lot_id": lot_id,
-                                        "giai_doan": giai_doan, "ngay_thuc_hien": ngay_th.isoformat(),
-                                        "so_luong": sl, "mau_day": mau_day, "tuan": ngay_th.isocalendar()[1]
-                                    }
-                                    confirm_action_dialog("INSERT", "stage_logs", None, data, f"✅ Lưu tiến độ {giai_doan} {lot_id}!")
+                                data = {
+                                    "farm": c_farm, "team": c_team, "giai_doan": giai_doan,
+                                    "ngay_thuc_hien": ngay_th.isoformat(),
+                                    "mau_day": mau_day, "tuan": ngay_th.isocalendar()[1]
+                                }
+                                confirm_action_dialog("INSERT_FIFO", "stage_logs", None, {"base_data": data, "allocations": allocations}, f"✅ Lưu tiến độ {giai_doan} cho {lot_id}!")
 
                 st.markdown("---")
                 col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
@@ -1273,16 +1334,16 @@ def render_main_app():
                         if sl <= 0: st.error("❌ Nhập số lượng > 0.")
                         elif selected_reason == "Khác" and not ly_do.strip(): st.error("❌ Cần ghi rõ chi tiết lý do (khi chọn Khác).")
                         else:
-                            is_valid, msg = check_quantity_limit(lot_id, sl, "destruction")
+                            is_valid, msg, allocations = allocate_fifo_quantity(c_farm, lot_id, sl, "destruction", ngay, "Xuất hủy")
                             if not is_valid: st.error(msg)
                             else:
                                 data = {
-                                    "farm": c_farm, "team": c_team, "lot_id": lot_id,
+                                    "farm": c_farm, "team": c_team,
                                     "ngay_xuat_huy": ngay.isoformat(), "giai_doan": giai_doan_xuat_huy,
-                                    "ly_do": ly_do.strip(), "so_luong": sl,
+                                    "ly_do": ly_do.strip(),
                                     "tuan": ngay.isocalendar()[1]
                                 }
-                                confirm_action_dialog("INSERT", "destruction_logs", None, data, f"✅ Lưu xuất hủy lô {lot_id} thành công!")
+                                confirm_action_dialog("INSERT_FIFO", "destruction_logs", None, {"base_data": data, "allocations": allocations}, f"✅ Lưu xuất hủy nhóm {lot_id} thành công!")
 
                 st.markdown("---")
                 col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
@@ -1346,20 +1407,17 @@ def render_main_app():
                             res_sm = supabase.table("size_measure_logs").select("id") \
                                 .eq("lot_id", lot_id).eq("mau_day", mau_day).eq("lan_do", 1).eq("is_deleted", False).execute()
                             if not res_sm.data:
-                                st.error(f"❌ Không được phép thu hoạch. Lô `{lot_id}` với màu dây `{mau_day}` chưa trải qua Đo Size lần 1. Xin hãy nhắc Đội NT.")
+                                st.error(f"❌ Không được phép thu hoạch. Nhóm lô `{lot_id}` với màu dây `{mau_day}` chưa trải qua Đo Size lần 1. Xin hãy nhắc Đội NT.")
                             else:
-                                is_valid, msg = check_quantity_limit(lot_id, sl, "harvest")
+                                is_valid, msg, allocations = allocate_fifo_quantity(c_farm, lot_id, sl, "harvest", ngay, "Thu hoạch")
                                 if not is_valid: st.error(msg)
                                 else:
-                                    is_time_valid, t_msg = validate_timeline_logic(lot_id, ngay, "Thu hoạch")
-                                    if not is_time_valid: st.error(t_msg)
-                                    else:
-                                        data = {
-                                            "farm": c_farm, "team": c_team, "lot_id": lot_id,
-                                            "ngay_thu_hoach": ngay.isoformat(), "so_luong": sl,
-                                            "hinh_thuc_thu_hoach": hinh_thuc_thu_hoach, "tuan": ngay.isocalendar()[1]
-                                        }
-                                        confirm_action_dialog("INSERT", "harvest_logs", None, data, f"✅ Lưu thu hoạch lô {lot_id} thành công!")
+                                    data = {
+                                        "farm": c_farm, "team": c_team,
+                                        "ngay_thu_hoach": ngay.isoformat(),
+                                        "hinh_thuc_thu_hoach": hinh_thuc_thu_hoach, "tuan": ngay.isocalendar()[1]
+                                    }
+                                    confirm_action_dialog("INSERT_FIFO", "harvest_logs", None, {"base_data": data, "allocations": allocations}, f"✅ Lưu thu hoạch cho {lot_id} thành công!")
                 
                 st.markdown("---")
                 col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
