@@ -80,7 +80,6 @@ TEAMS = ["NT1", "NT2", "Đội BVTV", "Đội Thu Hoạch", "Xưởng Đóng Gó
 # CONFIG OPTIONS
 # =====================================================
 VU_OPTIONS = ["F0", "F1", "F2", "F3", "F4", "F5"]
-MAU_DAY_OPTIONS = ["Đỏ", "Xanh lá", "Vàng", "Xanh dương", "Trắng", "Cam"]
 LOAI_TRONG_OPTIONS = ["Trồng mới", "Trồng dặm"]
 STAGE_NT_OPTIONS = ["Chích bắp", "Cắt bắp"]  # Không còn Thu Hoạch ở đây
 DESTRUCTION_STAGE_OPTIONS = ["Trước chích bắp", "Trước cắt bắp", "Trước thu hoạch"]
@@ -384,10 +383,9 @@ def edit_base_lot_dialog(editing_row):
 @dialog_decorator("✏️ Chỉnh sửa Tiến độ")
 def edit_stage_log_dialog(editing_row, available_lots, c_team):
     gd_ops = ["Chích bắp"] if c_team == "Đội BVTV" else ["Cắt bắp"]
-    mau_ops = [""] + MAU_DAY_OPTIONS
     def_lot = available_lots.index(editing_row["lot_id"]) if editing_row["lot_id"] in available_lots else 0
     def_gd = gd_ops.index(editing_row["giai_doan"]) if editing_row["giai_doan"] in gd_ops else 0
-    def_mau = mau_ops.index(editing_row["mau_day"]) if editing_row["mau_day"] in mau_ops else 0
+    def_mau = str(editing_row.get("mau_day", ""))
     def_ngay = pd.to_datetime(editing_row["ngay_thuc_hien"]).date()
     def_sl = int(editing_row["so_luong"])
 
@@ -397,7 +395,7 @@ def edit_stage_log_dialog(editing_row, available_lots, c_team):
             st.text_input("🏷️ Lứa (Mã hệ thống)", value=editing_row["lot_id"], disabled=True, key="dlg_lot_stg")
             lot_id = editing_row["lot_id"]
             giai_doan = st.radio("📌 Giai đoạn", options=gd_ops, index=def_gd, horizontal=True, key="dlg_gd_stg")
-            mau_day = st.selectbox("🎨 Màu dây", options=mau_ops, index=def_mau, key="dlg_mau_stg")
+            mau_day = st.text_input("🎨 Màu dây", value=def_mau, key="dlg_mau_stg", placeholder="VD: Đỏ, Xanh lá...")
         with col_b:
             col_b1, col_b2 = st.columns([2, 1])
             with col_b1:
@@ -408,14 +406,15 @@ def edit_stage_log_dialog(editing_row, available_lots, c_team):
         
         if st.button("✅ Cập nhật", key="btn_edit_stg", use_container_width=True, type="primary"):
             if sl <= 0: st.error("❌ Cần nhập số lượng.")
-            elif not mau_day: st.error("❌ Phải chọn màu dây định danh lứa.")
+            elif not mau_day.strip(): st.error("❌ Phải nhập màu dây định danh lứa.")
             else:
+                mau_day_clean = mau_day.strip().capitalize()
                 is_valid, msg = check_quantity_limit(lot_id, sl, "stage", giai_doan=giai_doan, exclude_id=editing_row["id"])
                 if not is_valid: st.error(msg)
                 else:
                     data = {
                         "lot_id": lot_id, "giai_doan": giai_doan, 
-                        "ngay_thuc_hien": ngay_th.isoformat(), "so_luong": sl, "mau_day": mau_day,
+                        "ngay_thuc_hien": ngay_th.isoformat(), "so_luong": sl, "mau_day": mau_day_clean,
                         "tuan": ngay_th.isocalendar()[1]
                     }
                     supabase.table("stage_logs").update(data).eq("id", editing_row["id"]).execute()
@@ -478,7 +477,7 @@ def edit_destruction_log_dialog(editing_row, available_lots):
 @dialog_decorator("✏️ Chỉnh sửa Nhật ký Thu Hoạch")
 def edit_harvest_log_dialog(editing_row, available_lots):
     def_lot = available_lots.index(editing_row["lot_id"]) if editing_row["lot_id"] in available_lots else 0
-    def_mau = MAU_DAY_OPTIONS.index(editing_row.get("mau_day", "")) + 1 if editing_row.get("mau_day") in MAU_DAY_OPTIONS else 0
+    def_mau = str(editing_row.get("mau_day", ""))
     
     hinh_thuc_opts = ["Bằng xe cày", "Bằng ròng rọc"]
     def_hinh_thuc = hinh_thuc_opts.index(editing_row.get("hinh_thuc_thu_hoach", "")) if editing_row.get("hinh_thuc_thu_hoach") in hinh_thuc_opts else 0
@@ -491,7 +490,7 @@ def edit_harvest_log_dialog(editing_row, available_lots):
         with col_a:
             st.text_input("🏷️ Lứa (Mã hệ thống)", value=editing_row["lot_id"], disabled=True, key="dlg_lot_har")
             lot_id = editing_row["lot_id"]
-            mau_day = st.selectbox("🎨 Màu dây", options=[""] + MAU_DAY_OPTIONS, index=def_mau, key="dlg_mau_har")
+            mau_day = st.text_input("🎨 Màu dây", value=def_mau, key="dlg_mau_har", placeholder="VD: Đỏ, Xanh lá...")
             hinh_thuc_thu_hoach = st.selectbox("🚜 Hình thức thu hoạch", options=hinh_thuc_opts, index=def_hinh_thuc, key="dlg_hinh_thuc_har")
         with col_b:
             col_b1, col_b2 = st.columns([2, 1])
@@ -502,19 +501,20 @@ def edit_harvest_log_dialog(editing_row, available_lots):
             sl = st.number_input("🍌 Số lượng buồng", min_value=0, step=50, value=def_sl, key="dlg_sl_har")
 
         if st.button("✅ Cập nhật", key="btn_edit_har", use_container_width=True, type="primary"):
-            if not mau_day: st.error("❌ Cần chọn Màu dây.")
+            if not mau_day.strip(): st.error("❌ Cần nhập Màu dây.")
             elif sl <= 0: st.error("❌ Số lượng buồng phải > 0")
             else:
+                mau_day_clean = mau_day.strip().capitalize()
                 res_sm = supabase.table("size_measure_logs").select("id") \
-                    .eq("lot_id", lot_id).eq("mau_day", mau_day).eq("lan_do", 1).eq("is_deleted", False).execute()
+                    .eq("lot_id", lot_id).eq("mau_day", mau_day_clean).eq("lan_do", 1).eq("is_deleted", False).execute()
                 if not res_sm.data:
-                    st.error(f"❌ Không được phép thu hoạch. Lô `{lot_id}` với màu dây `{mau_day}` chưa trải qua Đo Size lần 1. Xin hãy nhắc Đội NT.")
+                    st.error(f"❌ Lô `{lot_id}` với màu dây `{mau_day_clean}` chưa trải qua Đo Size lần 1. Xin hãy nhắc Đội NT.")
                 else:
                     is_valid, msg = check_quantity_limit(lot_id, sl, "harvest", exclude_id=editing_row["id"])
                     if not is_valid: st.error(msg)
                     else:
                         data = {
-                            "lot_id": lot_id, "mau_day": mau_day, 
+                            "lot_id": lot_id, "mau_day": mau_day_clean, 
                             "ngay_thu_hoach": ngay.isoformat(), "so_luong": sl, 
                             "hinh_thuc_thu_hoach": hinh_thuc_thu_hoach, "tuan": ngay.isocalendar()[1]
                         }
@@ -552,7 +552,7 @@ def edit_bsr_log_dialog(editing_row, available_lots):
 @dialog_decorator("✏️ Chỉnh sửa Đo Size")
 def edit_size_measure_dialog(editing_row, available_lots):
     def_lot = available_lots.index(editing_row["lot_id"]) if editing_row["lot_id"] in available_lots else 0
-    def_mau = MAU_DAY_OPTIONS.index(editing_row["mau_day"]) + 1 if editing_row["mau_day"] in MAU_DAY_OPTIONS else 0
+    def_mau = str(editing_row.get("mau_day", ""))
     def_lan_do = editing_row["lan_do"]
     def_ngay = pd.to_datetime(editing_row["ngay_do"]).date()
     def_sl = int(editing_row["so_luong_mau"])
@@ -564,7 +564,7 @@ def edit_size_measure_dialog(editing_row, available_lots):
         with col_a:
             st.text_input("🏷️ Lứa (Mã hệ thống)", value=editing_row["lot_id"], disabled=True, key="dlg_sm_lot")
             lot_id = editing_row["lot_id"]
-            mau_day = st.selectbox("🎨 Màu dây", options=[""] + MAU_DAY_OPTIONS, index=def_mau, key="dlg_sm_mau")
+            mau_day = st.text_input("🎨 Màu dây", value=def_mau, key="dlg_sm_mau", placeholder="VD: Đỏ, Xanh lá...")
             lan_do = st.radio("📏 Lần đo", options=[1, 2], index=def_lan_do-1, horizontal=True, key="dlg_sm_lando")
         with col_b:
             col_b1, col_b2 = st.columns([2, 1])
@@ -580,11 +580,12 @@ def edit_size_measure_dialog(editing_row, available_lots):
             sl = st.number_input("🔢 Số lượng buồng mẫu", min_value=0, step=10, value=def_sl, key="dlg_sm_sl")
 
         if st.button("✅ Cập nhật", key="btn_edit_sm", use_container_width=True, type="primary"):
-            if not mau_day: st.error("❌ Cần chọn màu dây")
+            if not mau_day.strip(): st.error("❌ Cần nhập màu dây")
             elif sl <= 0: st.error("❌ Số lượng buồng mẫu > 0")
             else:
+                mau_day_clean = mau_day.strip().capitalize()
                 data = {
-                    "lot_id": lot_id, "mau_day": mau_day, "lan_do": lan_do,
+                    "lot_id": lot_id, "mau_day": mau_day_clean, "lan_do": lan_do,
                     "ngay_do": ngay.isoformat(), "so_luong_mau": sl, "tuan": ngay.isocalendar()[1],
                     "hang_kiem_tra": hang_kiem_tra.strip(), "size_cal": size_cal
                 }
@@ -1130,7 +1131,7 @@ def render_main_app():
                     col_a, col_b = st.columns(2)
                     with col_a:
                         lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, key="add_sm_lot")
-                        mau_day = st.selectbox("🎨 Màu dây", options=[""] + MAU_DAY_OPTIONS, key="add_sm_mau")
+                        mau_day = st.text_input("🎨 Màu dây", placeholder="VD: Đỏ, Xanh lá...", key="add_sm_mau")
                         lan_do = st.radio("📏 Lần đo", options=[1, 2], horizontal=True, key="add_sm_lando")
                     with col_b:
                         col_b1, col_b2 = st.columns([2, 1])
@@ -1146,20 +1147,21 @@ def render_main_app():
                         sl = st.number_input("🔢 Số lượng buồng mẫu", min_value=0, step=10, key="add_sm_sl")
                     
                     if st.button("✅ Lưu cập nhật Đo Size", key="btn_add_sm", use_container_width=True, type="primary"):
-                        if not mau_day: st.error("❌ Phải chọn màu dây")
+                        if not mau_day.strip(): st.error("❌ Phải nhập màu dây")
                         elif sl <= 0: st.error("❌ Số lượng buồng > 0")
                         else:
+                            mau_day_clean = mau_day.strip().capitalize()
                             # Validation: Nếu chọn là Lần 2, phải kiểm tra xem Lần 1 đã có chưa.
                             if lan_do == 2:
                                 res_lan1 = supabase.table("size_measure_logs") \
-                                    .select("id").eq("lot_id", lot_id).eq("mau_day", mau_day).eq("lan_do", 1).eq("is_deleted", False).execute()
+                                    .select("id").eq("lot_id", lot_id).eq("mau_day", mau_day_clean).eq("lan_do", 1).eq("is_deleted", False).execute()
                                 if not res_lan1.data:
-                                    st.error(f"❌ Không thể đo Lần 2. Lô `{lot_id}` với màu dây `{mau_day}` chưa được đo Lần 1.")
+                                    st.error(f"❌ Không thể đo Lần 2. Lô `{lot_id}` với màu dây `{mau_day_clean}` chưa được đo Lần 1.")
                                     st.stop()
                                     
                             data = {
                                 "farm": c_farm, "team": c_team, "lot_id": lot_id,
-                                "mau_day": mau_day, "lan_do": lan_do, "so_luong_mau": sl,
+                                "mau_day": mau_day_clean, "lan_do": lan_do, "so_luong_mau": sl,
                                 "ngay_do": ngay_do.isoformat(), "tuan": ngay_do.isocalendar()[1],
                                 "hang_kiem_tra": hang_kiem_tra.strip(), "size_cal": size_cal
                             }
@@ -1252,7 +1254,7 @@ def render_main_app():
                         else:
                             giai_doan_opts = ["Cắt bắp"]
                         giai_doan = st.radio("📌 Giai đoạn", options=giai_doan_opts, horizontal=True, key="add_stg_gd")
-                        mau_day = st.selectbox("🎨 Màu dây", options=[""] + MAU_DAY_OPTIONS, key="add_stg_mau")
+                        mau_day = st.text_input("🎨 Màu dây", placeholder="VD: Đỏ, Xanh lá...", key="add_stg_mau")
                     with col_b:
                         col_b1, col_b2 = st.columns([2, 1])
                         with col_b1:
@@ -1263,15 +1265,16 @@ def render_main_app():
 
                     if st.button("✅ Cập nhật Tiến độ", key="btn_add_stg", use_container_width=True, type="primary"):
                         if sl <= 0: st.error("❌ Nhập số lượng > 0.")
-                        elif not mau_day: st.error("❌ Phải chọn màu dây định danh lứa.")
+                        elif not mau_day.strip(): st.error("❌ Phải nhập màu dây định danh lứa.")
                         else:
+                            mau_day_clean = mau_day.strip().capitalize()
                             is_valid, msg, allocations = allocate_fifo_quantity(c_farm, lot_id, sl, "stage", ngay_th, giai_doan, giai_doan)
                             if not is_valid: st.error(msg)
                             else:
                                 data = {
                                     "farm": c_farm, "team": c_team, "giai_doan": giai_doan,
                                     "ngay_thuc_hien": ngay_th.isoformat(),
-                                    "mau_day": mau_day, "tuan": ngay_th.isocalendar()[1]
+                                    "mau_day": mau_day_clean, "tuan": ngay_th.isocalendar()[1]
                                 }
                                 confirm_action_dialog("INSERT_FIFO", "stage_logs", None, {"base_data": data, "allocations": allocations}, f"✅ Lưu tiến độ {giai_doan} cho {lot_id}!")
 
@@ -1388,7 +1391,7 @@ def render_main_app():
                     col_a, col_b = st.columns(2)
                     with col_a:
                         lot_id = st.selectbox("🏷️ Chọn Lô thu hoạch", options=available_lots, key="add_har_lot")
-                        mau_day = st.selectbox("🎨 Màu dây", options=[""] + MAU_DAY_OPTIONS, key="add_har_mau")
+                        mau_day = st.text_input("🎨 Màu dây", placeholder="VD: Đỏ, Xanh lá...", key="add_har_mau")
                         hinh_thuc_thu_hoach = st.selectbox("🚜 Hình thức thu hoạch", options=["Bằng xe cày", "Bằng ròng rọc"], key="add_har_hinh_thuc")
                     with col_b:
                         col_b1, col_b2 = st.columns([2, 1])
@@ -1400,14 +1403,15 @@ def render_main_app():
     
                     st.markdown("")
                     if st.button("✅ Cập nhật Thu hoạch", key="btn_add_har", use_container_width=True, type="primary"):
-                        if not mau_day: st.error("❌ Cần chọn Màu dây.")
+                        if not mau_day.strip(): st.error("❌ Cần nhập Màu dây.")
                         elif sl <= 0: st.error("❌ Số lượng buồng phải > 0")
                         else:
+                            mau_day_clean = mau_day.strip().capitalize()
                             # Validation: Bắt buộc đã đo size lần 1 cho lô và màu dây này
                             res_sm = supabase.table("size_measure_logs").select("id") \
-                                .eq("lot_id", lot_id).eq("mau_day", mau_day).eq("lan_do", 1).eq("is_deleted", False).execute()
+                                .eq("lot_id", lot_id).eq("mau_day", mau_day_clean).eq("lan_do", 1).eq("is_deleted", False).execute()
                             if not res_sm.data:
-                                st.error(f"❌ Không được phép thu hoạch. Nhóm lô `{lot_id}` với màu dây `{mau_day}` chưa trải qua Đo Size lần 1. Xin hãy nhắc Đội NT.")
+                                st.error(f"❌ Lô `{lot_id}` với màu dây `{mau_day_clean}` chưa qua Đo Size lần 1. Hãy nhắc NT.")
                             else:
                                 is_valid, msg, allocations = allocate_fifo_quantity(c_farm, lot_id, sl, "harvest", ngay, "Thu hoạch")
                                 if not is_valid: st.error(msg)
@@ -1415,6 +1419,7 @@ def render_main_app():
                                     data = {
                                         "farm": c_farm, "team": c_team,
                                         "ngay_thu_hoach": ngay.isoformat(),
+                                        "mau_day": mau_day_clean,
                                         "hinh_thuc_thu_hoach": hinh_thuc_thu_hoach, "tuan": ngay.isocalendar()[1]
                                     }
                                     confirm_action_dialog("INSERT_FIFO", "harvest_logs", None, {"base_data": data, "allocations": allocations}, f"✅ Lưu thu hoạch cho {lot_id} thành công!")
