@@ -767,6 +767,28 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des) -> bytes:
     total_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
     center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
     
+    # Bảng màu pastel nhạt cho header Màu dây (chữ đen vẫn đọc được)
+    COLOR_MAP = {
+        "đỏ": "FFB3B3",
+        "cam": "FFD9B3",
+        "vàng": "FFFFB3",
+        "xanh lá": "B3FFB3",
+        "xanh dương": "B3D9FF",
+        "tím": "D9B3FF",
+        "đen": "D9D9D9",
+        "trắng": "F5F5F5",
+        "hồng": "FFB3D9",
+        "nâu": "D9C4B3",
+        "xl": "B3FFB3",  # Xanh lá shorthand
+    }
+    def get_mau_day_fill(mau_day_name):
+        """Lấy PatternFill theo tên màu dây. 'Đỏ-xl' → lấy 'Đỏ'."""
+        base = mau_day_name.split("-")[0].strip().lower() if mau_day_name else ""
+        hex_color = COLOR_MAP.get(base)
+        if hex_color:
+            return PatternFill(start_color=hex_color, end_color=hex_color, fill_type="solid")
+        return None
+    
     # Get unique lots (sorted)
     lot_names = sorted(df_lots["lo"].unique().tolist()) if not df_lots.empty else []
     lot_id_map = {}
@@ -845,17 +867,19 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des) -> bytes:
         c.alignment = center_align
         c.border = thin_border
         
-        # Row 3: Color sub-headers
+        # Row 3: Color sub-headers (tô màu theo tên màu dây)
         for ci, color in enumerate(all_colors):
+            color_fill = get_mau_day_fill(color)
+            
             c1 = ws.cell(row=3, column=cut_start + ci, value=color)
             c1.font = Font(bold=True, size=9)
-            c1.fill = cut_fill
+            c1.fill = color_fill if color_fill else cut_fill
             c1.alignment = center_align
             c1.border = thin_border
             
             c2 = ws.cell(row=3, column=des_start + ci, value=color)
             c2.font = Font(bold=True, size=9)
-            c2.fill = des_fill
+            c2.fill = color_fill if color_fill else des_fill
             c2.alignment = center_align
             c2.border = thin_border
         
