@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 import plotly.express as px
 import io
+import uuid
 
 if hasattr(st, "dialog"):
     dialog_decorator = st.dialog
@@ -107,6 +108,10 @@ def init_session_state():
     if "logged_in" not in st.session_state: st.session_state["logged_in"] = False
     if "current_farm" not in st.session_state: st.session_state["current_farm"] = None
     if "current_team" not in st.session_state: st.session_state["current_team"] = None
+    
+    # Bulk entry queues
+    for k in ["queue_stg", "queue_des", "queue_har", "queue_sm", "queue_inv", "queue_bsr"]:
+        if k not in st.session_state: st.session_state[k] = []
 
 def logout():
     st.session_state["logged_in"] = False
@@ -342,6 +347,40 @@ def render_team_dataframe(table_name, df, display_cols):
         selection_mode="single-row",
         key=f"sel_{table_name}"
     )
+
+def render_queue_ui(queue_key, display_cols, process_func):
+    """Render the queue and action buttons for bulk data entry."""
+    queue = st.session_state[queue_key]
+    if not queue:
+        return
+        
+    st.markdown("#### 📋 Danh sách chờ duyệt")
+    df_queue = pd.DataFrame(queue)
+    df_queue.insert(0, "Xóa", False) # Thêm cột checkbox
+    
+    edited_df = st.data_editor(
+        df_queue[["Xóa"] + display_cols],
+        hide_index=True,
+        use_container_width=True,
+        disabled=display_cols,
+        key=f"editor_{queue_key}"
+    )
+    
+    to_delete_idxs = edited_df.index[edited_df["Xóa"] == True].tolist()
+    
+    col_q1, col_q2 = st.columns(2)
+    with col_q1:
+        if st.button("🚀 Lưu toàn bộ lên Hệ thống", type="primary", use_container_width=True, key=f"btn_sb_{queue_key}"):
+            process_func()
+    with col_q2:
+        if to_delete_idxs:
+            if st.button("🗑️ Xóa dòng đã chọn", use_container_width=True, key=f"btn_del_sel_{queue_key}"):
+                st.session_state[queue_key] = [item for i, item in enumerate(queue) if i not in to_delete_idxs]
+                st.rerun()
+        else:
+            if st.button("🗑️ Xóa toàn bộ danh sách", use_container_width=True, key=f"btn_del_all_{queue_key}"):
+                st.session_state[queue_key] = []
+                st.rerun()
 
 # =====================================================
 # CÁC DIALOG CHỈNH SỬA
@@ -1146,7 +1185,7 @@ def render_main_app():
                             size_cal = st.number_input("📏 Size (Cal)", min_value=0.0, step=0.1, key="add_sm_cal")
                         sl = st.number_input("🔢 Số lượng buồng mẫu", min_value=0, step=10, key="add_sm_sl")
                     
-                    if st.button("✅ Lưu cập nhật Đo Size", key="btn_add_sm", use_container_width=True, type="primary"):
+                    if st.button("➕ Thêm vào Danh sách", key="btn_add_sm", use_container_width=True, type="secondary"):
                         if not mau_day.strip(): st.error("❌ Phải nhập màu dây")
                         elif sl <= 0: st.error("❌ Số lượng buồng > 0")
                         else:
@@ -1159,13 +1198,35 @@ def render_main_app():
                                     st.error(f"❌ Không thể đo Lần 2. Lô `{lot_id}` với màu dây `{mau_day_clean}` chưa được đo Lần 1.")
                                     st.stop()
                                     
-                            data = {
-                                "farm": c_farm, "team": c_team, "lot_id": lot_id,
-                                "mau_day": mau_day_clean, "lan_do": lan_do, "so_luong_mau": sl,
-                                "ngay_do": ngay_do.isoformat(), "tuan": ngay_do.isocalendar()[1],
-                                "hang_kiem_tra": hang_kiem_tra.strip(), "size_cal": size_cal
-                            }
-                            confirm_action_dialog("INSERT", "size_measure_logs", None, data, f"✅ Lưu đo size Lần {lan_do} thành công!")
+                            st.session_state["queue_sm"].append({
+                                "Lô": lot_id, "Màu dây": mau_day_clean, "Lần đo": lan_do, "Số lượng": sl,
+                                "Ngày đo": ngay_do.isoformat(), "Tuần": ngay_do.isocalendar()[1],
+                                "Hàng KT": hang_kiem_tra.strip(), "Size": size_cal
+                            })
+                            st.rerun()
+
+                def process_sm_queue():
+                    queue = st.session_state["queue_sm"]
+                    success_count = 0
+                    for item in queue:
+                        data = {
+                            "farm": c_farm, "team": c_team, "lot_id": item["Lô"],
+                            "mau_day": item["Màu dây"], "lan_do": item["Lần đo"], "so_luong_mau": item["Số lượng"],
+                            "ngay_do": item["Ngày đo"], "tuan": item["Tuần"],
+                            "hang_kiem_tra": item["Hàng KT"], "size_cal": item["Size"]
+                        }
+                        try:
+                            supabase.table("size_measure_logs").insert(data).execute()
+                            success_count += 1
+                        except Exception as e:
+                            st.error(f"❌ Lỗi ghi: {e}")
+                            return
+                    st.session_state["queue_sm"] = []
+                    st.session_state["toast"] = f"✅ Đã lưu {success_count} dòng Đo Size!"
+                    st.cache_data.clear()
+                    st.rerun()
+
+                render_queue_ui("queue_sm", ["Lô", "Màu dây", "Lần đo", "Số lượng", "Hàng KT", "Size", "Ngày đo", "Tuần"], process_sm_queue)
                 
                 st.markdown("---")
                 col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
@@ -1207,15 +1268,35 @@ def render_main_app():
                             st.text_input("📍 Tuần", value=str(ngay_kk.isocalendar()[1]), disabled=True, key=f"main_w_inv_{ngay_kk}")
                         sl = st.number_input("🔢 Số lượng cây thực tế", min_value=0, step=100, key="add_inv_sl")
                     
-                    if st.button("✅ Lưu Kiểm Kê", key="btn_add_inv", use_container_width=True, type="primary"):
+                    if st.button("➕ Thêm vào Danh sách", key="btn_add_inv", use_container_width=True, type="secondary"):
                         if sl <= 0: st.error("❌ Số lượng phải lớn hơn 0")
                         else:
-                            data = {
-                                "farm": c_farm, "team": c_team, "lot_id": lot_id,
-                                "so_luong_cay_thuc_te": sl, "ngay_kiem_ke": ngay_kk.isoformat(),
-                                "tuan": ngay_kk.isocalendar()[1]
-                            }
-                            confirm_action_dialog("INSERT", "tree_inventory_logs", None, data, f"✅ Lưu kiểm kê lô {lot_id}!")
+                            st.session_state["queue_inv"].append({
+                                "Lô": lot_id, "Số lượng": sl, "Ngày": ngay_kk.isoformat(), "Tuần": ngay_kk.isocalendar()[1]
+                            })
+                            st.rerun()
+
+                def process_inv_queue():
+                    queue = st.session_state["queue_inv"]
+                    success_count = 0
+                    for item in queue:
+                        data = {
+                            "farm": c_farm, "team": c_team, "lot_id": item["Lô"],
+                            "so_luong_cay_thuc_te": item["Số lượng"], "ngay_kiem_ke": item["Ngày"],
+                            "tuan": item["Tuần"]
+                        }
+                        try:
+                            supabase.table("tree_inventory_logs").insert(data).execute()
+                            success_count += 1
+                        except Exception as e:
+                            st.error(f"❌ Lỗi ghi: {e}")
+                            return
+                    st.session_state["queue_inv"] = []
+                    st.cache_data.clear()
+                    st.session_state["toast"] = f"✅ Đã lưu {success_count} dòng Kiểm kê!"
+                    st.rerun()
+
+                render_queue_ui("queue_inv", ["Lô", "Số lượng", "Ngày", "Tuần"], process_inv_queue)
                 
                 st.markdown("---")
                 col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
@@ -1263,20 +1344,53 @@ def render_main_app():
                             st.text_input("📍 Tuần", value=str(ngay_th.isocalendar()[1]), disabled=True, key=f"main_w_stg_{ngay_th}")
                         sl = st.number_input("🔢 Số lượng cây", min_value=0, step=100, key="add_stg_sl")
 
-                    if st.button("✅ Cập nhật Tiến độ", key="btn_add_stg", use_container_width=True, type="primary"):
+                    if st.button("➕ Thêm vào Danh sách", key="btn_add_stg", use_container_width=True, type="secondary"):
                         if sl <= 0: st.error("❌ Nhập số lượng > 0.")
                         elif not mau_day.strip(): st.error("❌ Phải nhập màu dây định danh lứa.")
                         else:
                             mau_day_clean = mau_day.strip().capitalize()
-                            is_valid, msg, allocations = allocate_fifo_quantity(c_farm, lot_id, sl, "stage", ngay_th, giai_doan, giai_doan)
-                            if not is_valid: st.error(msg)
+                            is_time_valid, msg_time = validate_timeline_logic(lot_id, ngay_th, giai_doan)
+                            if not is_time_valid:
+                                st.error(msg_time)
                             else:
-                                data = {
-                                    "farm": c_farm, "team": c_team, "giai_doan": giai_doan,
-                                    "ngay_thuc_hien": ngay_th.isoformat(),
-                                    "mau_day": mau_day_clean, "tuan": ngay_th.isocalendar()[1]
-                                }
-                                confirm_action_dialog("INSERT_FIFO", "stage_logs", None, {"base_data": data, "allocations": allocations}, f"✅ Lưu tiến độ {giai_doan} cho {lot_id}!")
+                                st.session_state["queue_stg"].append({
+                                    "Lô": lot_id, "Giai đoạn": giai_doan, "Màu dây": mau_day_clean,
+                                    "Ngày": ngay_th.isoformat(), "Số lượng": sl, "Tuần": ngay_th.isocalendar()[1]
+                                })
+                                st.rerun()
+
+                def process_stg_queue():
+                    queue = st.session_state["queue_stg"]
+                    lot_reqs = {}
+                    for item in queue:
+                        k = (item["Lô"], item["Giai đoạn"])
+                        lot_reqs[k] = lot_reqs.get(k, 0) + item["Số lượng"]
+                    for (l_id, g_doan), req_sl in lot_reqs.items():
+                        valid, msg = check_quantity_limit(l_id, req_sl, "stage", giai_doan=g_doan)
+                        if not valid:
+                            st.error(f"❌ Lỗi tổng số lượng ở Lô {l_id} - {g_doan}: {msg}")
+                            return
+                    success_count = 0
+                    for item in queue:
+                        is_valid, msg, allocations = allocate_fifo_quantity(c_farm, item["Lô"], item["Số lượng"], "stage", item["Ngày"], item["Giai đoạn"], item["Giai đoạn"])
+                        if is_valid:
+                            for alloc in allocations:
+                                data = {"farm": c_farm, "team": c_team, "giai_doan": item["Giai đoạn"], "ngay_thuc_hien": item["Ngày"], "mau_day": item["Màu dây"], "tuan": item["Tuần"], "lot_id": alloc["lot_id"], "so_luong": alloc["so_luong"]}
+                                try:
+                                    supabase.table("stage_logs").insert(data).execute()
+                                except Exception as e:
+                                    st.error(f"❌ Lỗi ghi phân rã {alloc['lot_id']}: {e}")
+                                    return
+                            success_count += 1
+                        else:
+                            st.error(msg)
+                            return
+                    st.session_state["queue_stg"] = []
+                    st.cache_data.clear()
+                    st.session_state["toast"] = f"✅ Đã lưu {success_count} dòng Tiến độ!"
+                    st.rerun()
+
+                render_queue_ui("queue_stg", ["Lô", "Giai đoạn", "Màu dây", "Số lượng", "Ngày", "Tuần"], process_stg_queue)
 
                 st.markdown("---")
                 col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
@@ -1333,20 +1447,47 @@ def render_main_app():
                             st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key=f"main_w_des_{ngay}")
                         sl = st.number_input("🔢 Số lượng cây xuất hủy", min_value=0, step=10, key="add_des_sl")
 
-                    if st.button("🗑️ Ghi nhận Xuất hủy", key="btn_add_des", use_container_width=True, type="primary"):
+                    if st.button("➕ Thêm vào Danh sách", key="btn_add_des", use_container_width=True, type="secondary"):
                         if sl <= 0: st.error("❌ Nhập số lượng > 0.")
                         elif selected_reason == "Khác" and not ly_do.strip(): st.error("❌ Cần ghi rõ chi tiết lý do (khi chọn Khác).")
                         else:
-                            is_valid, msg, allocations = allocate_fifo_quantity(c_farm, lot_id, sl, "destruction", ngay, "Xuất hủy")
-                            if not is_valid: st.error(msg)
-                            else:
-                                data = {
-                                    "farm": c_farm, "team": c_team,
-                                    "ngay_xuat_huy": ngay.isoformat(), "giai_doan": giai_doan_xuat_huy,
-                                    "ly_do": ly_do.strip(),
-                                    "tuan": ngay.isocalendar()[1]
-                                }
-                                confirm_action_dialog("INSERT_FIFO", "destruction_logs", None, {"base_data": data, "allocations": allocations}, f"✅ Lưu xuất hủy nhóm {lot_id} thành công!")
+                            st.session_state["queue_des"].append({
+                                "Lô": lot_id, "Giai đoạn": giai_doan_xuat_huy, "Lý do": ly_do.strip(),
+                                "Ngày": ngay.isoformat(), "Số lượng": sl, "Tuần": ngay.isocalendar()[1]
+                            })
+                            st.rerun()
+
+                def process_des_queue():
+                    queue = st.session_state["queue_des"]
+                    lot_reqs = {}
+                    for item in queue:
+                        lot_reqs[item["Lô"]] = lot_reqs.get(item["Lô"], 0) + item["Số lượng"]
+                    for l_id, req_sl in lot_reqs.items():
+                        valid, msg = check_quantity_limit(l_id, req_sl, "destruction")
+                        if not valid:
+                            st.error(f"❌ Lỗi tổng số lượng ở Lô {l_id}: {msg}")
+                            return
+                    success_count = 0
+                    for item in queue:
+                        is_valid, msg, allocations = allocate_fifo_quantity(c_farm, item["Lô"], item["Số lượng"], "destruction", item["Ngày"], "Xuất hủy")
+                        if is_valid:
+                            for alloc in allocations:
+                                data = {"farm": c_farm, "team": c_team, "ngay_xuat_huy": item["Ngày"], "giai_doan": item["Giai đoạn"], "ly_do": item["Lý do"], "tuan": item["Tuần"], "lot_id": alloc["lot_id"], "so_luong": alloc["so_luong"]}
+                                try:
+                                    supabase.table("destruction_logs").insert(data).execute()
+                                except Exception as e:
+                                    st.error(f"❌ Lỗi ghi phân rã {alloc['lot_id']}: {e}")
+                                    return
+                            success_count += 1
+                        else:
+                            st.error(msg)
+                            return
+                    st.session_state["queue_des"] = []
+                    st.cache_data.clear()
+                    st.session_state["toast"] = f"✅ Đã lưu xuất hủy {success_count} dòng!"
+                    st.rerun()
+
+                render_queue_ui("queue_des", ["Lô", "Giai đoạn", "Lý do", "Số lượng", "Ngày", "Tuần"], process_des_queue)
 
                 st.markdown("---")
                 col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
@@ -1402,7 +1543,7 @@ def render_main_app():
                         sl = st.number_input("🍌 Số lượng buồng thu hoạch", min_value=0, step=50, key="add_har_sl")
     
                     st.markdown("")
-                    if st.button("✅ Cập nhật Thu hoạch", key="btn_add_har", use_container_width=True, type="primary"):
+                    if st.button("➕ Thêm vào Danh sách", key="btn_add_har", use_container_width=True, type="secondary"):
                         if not mau_day.strip(): st.error("❌ Cần nhập Màu dây.")
                         elif sl <= 0: st.error("❌ Số lượng buồng phải > 0")
                         else:
@@ -1411,18 +1552,49 @@ def render_main_app():
                             res_sm = supabase.table("size_measure_logs").select("id") \
                                 .eq("lot_id", lot_id).eq("mau_day", mau_day_clean).eq("lan_do", 1).eq("is_deleted", False).execute()
                             if not res_sm.data:
-                                st.error(f"❌ Lô `{lot_id}` với màu dây `{mau_day_clean}` chưa qua Đo Size lần 1. Hãy nhắc NT.")
-                            else:
-                                is_valid, msg, allocations = allocate_fifo_quantity(c_farm, lot_id, sl, "harvest", ngay, "Thu hoạch")
-                                if not is_valid: st.error(msg)
-                                else:
-                                    data = {
-                                        "farm": c_farm, "team": c_team,
-                                        "ngay_thu_hoach": ngay.isoformat(),
-                                        "mau_day": mau_day_clean,
-                                        "hinh_thuc_thu_hoach": hinh_thuc_thu_hoach, "tuan": ngay.isocalendar()[1]
-                                    }
-                                    confirm_action_dialog("INSERT_FIFO", "harvest_logs", None, {"base_data": data, "allocations": allocations}, f"✅ Lưu thu hoạch cho {lot_id} thành công!")
+                                st.error(f"❌ Cảnh báo: Lô `{lot_id}` với màu dây `{mau_day_clean}` chưa qua Đo Size lần 1. Hãy nhắc NT.")
+                                st.stop()
+                                
+                            st.session_state["queue_har"].append({
+                                "Lô": lot_id, "Màu dây": mau_day_clean, "Hình thức": hinh_thuc_thu_hoach,
+                                "Số lượng": sl, "Ngày": ngay.isoformat(), "Tuần": ngay.isocalendar()[1]
+                            })
+                            st.rerun()
+
+                def process_har_queue():
+                    queue = st.session_state["queue_har"]
+                    lot_reqs = {}
+                    for item in queue:
+                        lot_reqs[item["Lô"]] = lot_reqs.get(item["Lô"], 0) + item["Số lượng"]
+                    for l_id, req_sl in lot_reqs.items():
+                        valid, msg = check_quantity_limit(l_id, req_sl, "harvest")
+                        if not valid:
+                            st.error(f"❌ Lỗi tổng số lượng ở Lô {l_id}: {msg}")
+                            return
+                    success_count = 0
+                    for item in queue:
+                        is_valid, msg, allocations = allocate_fifo_quantity(c_farm, item["Lô"], item["Số lượng"], "harvest", item["Ngày"], "Thu hoạch")
+                        if is_valid:
+                            for alloc in allocations:
+                                data = {
+                                    "farm": c_farm, "team": c_team, "ngay_thu_hoach": item["Ngày"], "mau_day": item["Màu dây"],
+                                    "hinh_thuc_thu_hoach": item["Hình thức"], "tuan": item["Tuần"], "lot_id": alloc["lot_id"], "so_luong": alloc["so_luong"]
+                                }
+                                try:
+                                    supabase.table("harvest_logs").insert(data).execute()
+                                except Exception as e:
+                                    st.error(f"❌ Lỗi ghi phân rã {alloc['lot_id']}: {e}")
+                                    return
+                            success_count += 1
+                        else:
+                            st.error(msg)
+                            return
+                    st.session_state["queue_har"] = []
+                    st.cache_data.clear()
+                    st.session_state["toast"] = f"✅ Đã lưu thu hoạch {success_count} nhóm Lô thành công!"
+                    st.rerun()
+
+                render_queue_ui("queue_har", ["Lô", "Màu dây", "Hình thức", "Số lượng", "Ngày", "Tuần"], process_har_queue)
                 
                 st.markdown("---")
                 col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
@@ -1475,14 +1647,34 @@ def render_main_app():
                         bsr_val = st.number_input("📐 Nhập tỷ lệ BSR (Buồng / Sản Rạ)", min_value=0.0, value=0.0, step=0.1, format="%.2f", key="add_bsr_val")
     
                     st.markdown("")
-                    if st.button("✅ Cập nhật BSR", key="btn_add_bsr", use_container_width=True, type="primary"):
+                    if st.button("➕ Thêm vào Danh sách", key="btn_add_bsr", use_container_width=True, type="secondary"):
                         if bsr_val <= 0: st.error("❌ Tỷ lệ BSR phải > 0")
                         else:
-                            data = {
-                                "farm": c_farm, "team": c_team, "lot_id": lot_id,
-                                "ngay_nhap": ngay.isoformat(), "bsr": bsr_val, "tuan": ngay.isocalendar()[1]
-                            }
-                            confirm_action_dialog("INSERT", "bsr_logs", None, data, f"✅ Ghi nhận BSR lô {lot_id} thành công!")
+                            st.session_state["queue_bsr"].append({
+                                "Lô": lot_id, "BSR": bsr_val, "Ngày": ngay.isoformat(), "Tuần": ngay.isocalendar()[1]
+                            })
+                            st.rerun()
+
+                def process_bsr_queue():
+                    queue = st.session_state["queue_bsr"]
+                    success_count = 0
+                    for item in queue:
+                        data = {
+                            "farm": c_farm, "team": c_team, "lot_id": item["Lô"],
+                            "ngay_nhap": item["Ngày"], "bsr": item["BSR"], "tuan": item["Tuần"]
+                        }
+                        try:
+                            supabase.table("bsr_logs").insert(data).execute()
+                            success_count += 1
+                        except Exception as e:
+                            st.error(f"❌ Lỗi ghi: {e}")
+                            return
+                    st.session_state["queue_bsr"] = []
+                    st.cache_data.clear()
+                    st.session_state["toast"] = f"✅ Ghi nhận {success_count} bản ghi BSR thành công!"
+                    st.rerun()
+
+                render_queue_ui("queue_bsr", ["Lô", "BSR", "Ngày", "Tuần"], process_bsr_queue)
                 
                 st.markdown("---")
                 col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
