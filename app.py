@@ -1161,7 +1161,7 @@ def render_main_app():
                             st.rerun()
                         except Exception as e:
                             st.error(f"❌ Lỗi khi chốt vụ: {e}")
-        elif active_tab == tab_opts[1]:
+        elif active_tab == tab_opts[0]:
             render_global_data_tab("Admin")
         return
 
