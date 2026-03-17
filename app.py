@@ -665,6 +665,35 @@ def edit_tree_inventory_dialog(editing_row, available_lots):
                 st.session_state["toast"] = f"✅ Lưu kiểm kê cây lô {lot_id} thành công!"
                 st.rerun()
 
+@dialog_decorator("✏️ Chỉnh sửa Đo pH Đất")
+def edit_soil_ph_dialog(editing_row, available_lots):
+    def_lot = available_lots.index(editing_row["lot_id"]) if editing_row["lot_id"] in available_lots else 0
+    def_lan_do = int(editing_row["lan_do"])
+    def_ngay = pd.to_datetime(editing_row["ngay_do"]).date()
+    def_val = float(editing_row["ph_value"])
+    
+    with st.container(border=True):
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.text_input("🏷️ Lứa (Mã hệ thống)", value=editing_row["lot_id"], disabled=True, key="dlg_ph_lot")
+            lot_id = editing_row["lot_id"]
+            st.number_input("Lần đo", value=def_lan_do, disabled=True, key="dlg_ph_lando")
+        with col_b:
+            col_b1, col_b2 = st.columns([2, 1])
+            with col_b1:
+                ngay = st.date_input("📆 Ngày đo", value=def_ngay, key="dlg_ph_ngay")
+            with col_b2:
+                st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key=f"dlg_w_ph_{ngay}")
+            val = st.number_input("pH", min_value=0.0, max_value=14.0, step=0.1, value=def_val, key="dlg_ph_val")
+
+        if st.button("✅ Cập nhật", key="btn_edit_ph", use_container_width=True, type="primary"):
+            if val <= 0: st.error("❌ Cần nhập giá trị pH hợp lệ.")
+            else:
+                data = {"lot_id": lot_id, "ngay_do": ngay.isoformat(), "ph_value": val, "tuan": ngay.isocalendar()[1]}
+                supabase.table("soil_ph_logs").update(data).eq("id", editing_row["id"]).execute()
+                st.session_state["toast"] = f"✅ Lưu kết quả pH lô {lot_id} thành công!"
+                st.rerun()
+
 # MÀN HÌNH ĐĂNG NHẬP
 # =====================================================
 def render_login():
@@ -1065,11 +1094,11 @@ def render_main_app():
     # MODULE ADMIN
     # =================================================
     if c_farm == "Admin" and c_team == "Quản trị viên":
-        tab_opts = ["👑 Quản trị Mùa Vụ", "🌐 Dữ liệu toàn cục"]
+        tab_opts = ["🌐 Dữ liệu toàn cục", "👑 Quản trị Mùa Vụ"]
         active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_admin_menu", default=tab_opts[0])
         if active_tab is None: active_tab = tab_opts[0]
         
-        if active_tab == tab_opts[0]:
+        if active_tab == tab_opts[1]:
             st.markdown("## 👑 Admin Dashboard - Quản trị Mùa Vụ & Hệ Thống")
             st.info("👋 Chào mừng Quản trị viên. Tại đây bạn có thể quản lý lịch sử Vụ cho từng lô.")
             
@@ -1152,9 +1181,9 @@ def render_main_app():
     # =================================================
     if c_team in ["NT1", "NT2", "Đội BVTV"]:
         if c_team == "Đội BVTV":
-            tab_opts = ["📈 Cập nhật Tiến độ", "🌐 Dữ liệu toàn cục"]
+            tab_opts = ["🌐 Dữ liệu toàn cục", "📈 Cập nhật Tiến độ"]
         else:
-            tab_opts = ["🌱 Khởi tạo Lô trồng", "📈 Cập nhật Tiến độ", "📏 Đo Size", "🗑️ Cập nhật Xuất hủy", "🌳 Kiểm kê cây", "🧪 Đo pH Đất", "🌐 Dữ liệu toàn cục"]
+            tab_opts = ["🌐 Dữ liệu toàn cục", "🌱 Khởi tạo Lô trồng", "📈 Cập nhật Tiến độ", "📏 Đo Size", "🗑️ Cập nhật Xuất hủy", "🌳 Kiểm kê cây", "🧪 Đo pH Đất"]
             
         active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_nt_menu", default=tab_opts[0])
         if active_tab is None: active_tab = tab_opts[0] # Prevent empty state
@@ -1447,11 +1476,24 @@ def render_main_app():
                 st.markdown("---")
                 col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
                 with col_t:
-                    st.markdown('<p class="dataframe-header" style="margin-top:0.5rem;">Dữ liệu của đội bạn</p>', unsafe_allow_html=True)
+                    st.markdown('<p class="dataframe-header" style="margin-top:0.5rem;">Dữ liệu của đội bạn (Click 1 dòng để sửa/xóa)</p>', unsafe_allow_html=True)
                 
-                # We don't implement edit/delete out of the box for this fragment to save time, unless user explicitly asks
-                with col_e: st.empty()
-                with col_d: st.empty()
+                editing_row, is_within_48h = get_editing_row("soil_ph_logs", df_ph_team)
+                is_editing = editing_row is not None
+                
+                if is_editing and is_within_48h:
+                    with col_e:
+                        if st.button("✏️ Chỉnh sửa", key="edit_ph_nt", use_container_width=True):
+                            edit_soil_ph_dialog(editing_row, available_lots)
+                    with col_d:
+                        if st.button("🗑️ Xóa", key="del_ph_nt", use_container_width=True):
+                            confirm_action_dialog("DELETE", "soil_ph_logs", editing_row["id"], None, "✅ Đã xóa kết quả đo pH!")
+                elif is_editing and not is_within_48h:
+                    with col_e: st.caption("🔒 Quá 48h")
+                    with col_d: st.empty()
+                else:
+                    with col_e: st.empty()
+                    with col_d: st.empty()
                     
                 render_team_dataframe("soil_ph_logs", df_ph_team, ["lot_id", "ngay_do", "lan_do", "ph_value"])
 
@@ -1654,11 +1696,11 @@ def render_main_app():
     # MODULE 2: ĐỘI THU HOẠCH
     # =================================================
     elif c_team == "Đội Thu Hoạch":
-        tab_opts = ["🍌 Nhật ký Thu Hoạch", "🌐 Dữ liệu toàn cục"]
+        tab_opts = ["🌐 Dữ liệu toàn cục", "🍌 Nhật ký Thu Hoạch"]
         active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_har_menu", default=tab_opts[0])
         if active_tab is None: active_tab = tab_opts[0]
         
-        if active_tab == tab_opts[0]:
+        if active_tab == tab_opts[1]:
             st.markdown("#### Ghi nhận Sản lượng Thu hoạch hàng ngày")
             available_lots = get_lots_by_farm(c_farm)
             if not available_lots:
@@ -1760,11 +1802,11 @@ def render_main_app():
     # MODULE 3: XƯỞNG ĐÓNG GÓI
     # =================================================
     elif c_team == "Xưởng Đóng Gói":
-        tab_opts = ["📦 Cập nhật BSR", "🌐 Dữ liệu toàn cục"]
+        tab_opts = ["🌐 Dữ liệu toàn cục", "📦 Cập nhật BSR"]
         active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_bsr_menu", default=tab_opts[0])
         if active_tab is None: active_tab = tab_opts[0]
         
-        if active_tab == tab_opts[0]:
+        if active_tab == tab_opts[1]:
             st.markdown("#### Ghi nhận Tỷ lệ BSR thành phẩm")
             available_lots = get_lots_by_farm(c_farm)
             if not available_lots:
@@ -1833,9 +1875,8 @@ def render_main_app():
                     
                 render_team_dataframe("bsr_logs", df_bsr_team, ["lot_id", "ngay_nhap", "bsr", "created_at"])
 
-        elif active_tab == tab_opts[1]:
+        elif active_tab == tab_opts[0]:
             render_global_data_tab(c_farm)
-
 
 # =====================================================
 # MAIN ROUTING
