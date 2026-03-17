@@ -14,6 +14,9 @@ from supabase import create_client, Client
 import plotly.express as px
 import io
 import uuid
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 
 if hasattr(st, "dialog"):
     dialog_decorator = st.dialog
@@ -472,6 +475,7 @@ def edit_destruction_log_dialog(editing_row, available_lots):
     def_lot = available_lots.index(editing_row["lot_id"]) if editing_row["lot_id"] in available_lots else 0
     def_gd = gd_ops.index(editing_row["giai_doan"]) if editing_row["giai_doan"] in gd_ops else 0
     def_ly_do = str(editing_row["ly_do"])
+    def_mau = str(editing_row.get("mau_day", "") or "")
     def_ngay = pd.to_datetime(editing_row["ngay_xuat_huy"]).date()
     def_sl = int(editing_row["so_luong"])
     
@@ -481,6 +485,7 @@ def edit_destruction_log_dialog(editing_row, available_lots):
             st.text_input("🏷️ Lứa (Mã hệ thống)", value=editing_row["lot_id"], disabled=True, key="dlg_lot_des")
             lot_id = editing_row["lot_id"]
             gxh = st.selectbox("⏱️ Giai đoạn", options=gd_ops, index=def_gd, key="dlg_gxh_des")
+            mau_day = st.text_input("🎨 Màu dây", value=def_mau, key="dlg_mau_des", placeholder="VD: Đỏ, Xanh lá...")
             
             predefined_reasons = ["Bệnh", "Đổ Ngã", "Khác"]
             matched_reason = "Khác"
@@ -511,10 +516,11 @@ def edit_destruction_log_dialog(editing_row, available_lots):
             if sl <= 0: st.error("❌ Cần nhập số lượng.")
             elif not ly_do.strip(): st.error("❌ Cần ghi rõ lý do chi tiết.")
             else:
+                mau_day_clean = mau_day.strip().capitalize() if mau_day.strip() else None
                 is_valid, msg = check_quantity_limit(lot_id, sl, "destruction", exclude_id=editing_row["id"])
                 if not is_valid: st.error(msg)
                 else:
-                    data = {"lot_id": lot_id, "ngay_xuat_huy": ngay.isoformat(), "giai_doan": gxh, "ly_do": ly_do.strip(), "so_luong": sl, "tuan": ngay.isocalendar()[1]}
+                    data = {"lot_id": lot_id, "ngay_xuat_huy": ngay.isoformat(), "giai_doan": gxh, "ly_do": ly_do.strip(), "so_luong": sl, "tuan": ngay.isocalendar()[1], "mau_day": mau_day_clean}
                     supabase.table("destruction_logs").update(data).eq("id", editing_row["id"]).execute()
                     st.session_state["toast"] = "✅ Đã cập nhật!"
                     st.rerun()
@@ -743,6 +749,211 @@ def render_login():
         st.divider()
         st.markdown("<p style='text-align: center; color: #888888; font-size: 0.85rem;'>💡 Vui lòng chọn đúng vai trò của mình để thao tác đúng nghiệp vụ.</p>", unsafe_allow_html=True)
 
+def generate_cut_bap_excel(df_lots, df_stg, df_des) -> bytes:
+    """Tạo file Excel báo cáo Cắt bắp theo tuần, với mỗi tuần chia theo Màu dây."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Báo cáo Cắt bắp"
+    
+    # Styles
+    thin_border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin')
+    )
+    header_font = Font(bold=True, size=10)
+    header_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    cut_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+    des_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+    total_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+    center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    
+    # Get unique lots (sorted)
+    lot_names = sorted(df_lots["lo"].unique().tolist()) if not df_lots.empty else []
+    lot_id_map = {}
+    if not df_lots.empty:
+        for _, row in df_lots.iterrows():
+            lo = row["lo"]
+            if lo not in lot_id_map:
+                lot_id_map[lo] = []
+            lot_id_map[lo].append(row["lot_id"])
+    
+    # Filter Cắt bắp only from stage_logs
+    df_cut = df_stg[df_stg["giai_doan"] == "Cắt bắp"].copy() if not df_stg.empty and "giai_doan" in df_stg.columns else pd.DataFrame()
+    
+    # All unique weeks from both cut and destruction, sorted
+    weeks = set()
+    if not df_cut.empty and "tuan" in df_cut.columns:
+        weeks.update(df_cut["tuan"].dropna().unique())
+    if not df_des.empty and "tuan" in df_des.columns:
+        weeks.update(df_des["tuan"].dropna().unique())
+    weeks = sorted([int(w) for w in weeks])
+    
+    # All unique mau_day colors (merged: Đỏ, Trắng, etc.)
+    all_colors_cut = set()
+    if not df_cut.empty and "mau_day" in df_cut.columns:
+        all_colors_cut = set(df_cut["mau_day"].dropna().unique())
+    all_colors_des = set()
+    if not df_des.empty and "mau_day" in df_des.columns:
+        all_colors_des = set(df_des["mau_day"].dropna().unique())
+    all_colors = sorted(all_colors_cut.union(all_colors_des))
+    if not all_colors:
+        all_colors = ["(Không có)"]
+    
+    n_colors = len(all_colors)
+    
+    # === BUILD HEADER ===
+    # Row 1: "Lô" label + Week group headers
+    # Row 2: "Lô" label + "CẮT BẮP" / "XUẤT HỦY" sub-headers per week
+    # Row 3: "Lô" label + color columns per section per week
+    
+    ws.cell(row=1, column=1, value="Lô").font = header_font
+    ws.cell(row=1, column=1).fill = header_fill
+    ws.cell(row=1, column=1).border = thin_border
+    ws.cell(row=1, column=1).alignment = center_align
+    ws.merge_cells(start_row=1, start_column=1, end_row=3, end_column=1)
+    
+    col_offset = 2  # Start after "Lô" column
+    week_col_map = {}  # {week: {"cut_start": int, "des_start": int}}
+    
+    for week in weeks:
+        cut_start = col_offset
+        des_start = col_offset + n_colors
+        week_col_map[week] = {"cut_start": cut_start, "des_start": des_start}
+        week_end = col_offset + 2 * n_colors - 1
+        
+        # Row 1: Week header (merged)
+        ws.merge_cells(start_row=1, start_column=col_offset, end_row=1, end_column=week_end)
+        c = ws.cell(row=1, column=col_offset, value=f"Tuần {week}")
+        c.font = Font(bold=True, size=11)
+        c.fill = header_fill
+        c.alignment = center_align
+        c.border = thin_border
+        
+        # Row 2: CẮT BẮP header (merged over n_colors cols)
+        ws.merge_cells(start_row=2, start_column=cut_start, end_row=2, end_column=cut_start + n_colors - 1)
+        c = ws.cell(row=2, column=cut_start, value="CẮT BẮP")
+        c.font = Font(bold=True, color="006100")
+        c.fill = cut_fill
+        c.alignment = center_align
+        c.border = thin_border
+        
+        # Row 2: XUẤT HỦY header
+        ws.merge_cells(start_row=2, start_column=des_start, end_row=2, end_column=des_start + n_colors - 1)
+        c = ws.cell(row=2, column=des_start, value="XUẤT HỦY")
+        c.font = Font(bold=True, color="9C0006")
+        c.fill = des_fill
+        c.alignment = center_align
+        c.border = thin_border
+        
+        # Row 3: Color sub-headers
+        for ci, color in enumerate(all_colors):
+            c1 = ws.cell(row=3, column=cut_start + ci, value=color)
+            c1.font = Font(bold=True, size=9)
+            c1.fill = cut_fill
+            c1.alignment = center_align
+            c1.border = thin_border
+            
+            c2 = ws.cell(row=3, column=des_start + ci, value=color)
+            c2.font = Font(bold=True, size=9)
+            c2.fill = des_fill
+            c2.alignment = center_align
+            c2.border = thin_border
+        
+        col_offset = week_end + 1
+    
+    # Apply borders to empty merged cells in row 1-3
+    for r in range(1, 4):
+        for c_idx in range(1, col_offset):
+            cell = ws.cell(row=r, column=c_idx)
+            cell.border = thin_border
+    
+    # === FILL DATA ROWS ===
+    data_start_row = 4
+    for li, lo_name in enumerate(lot_names):
+        row_idx = data_start_row + li
+        c = ws.cell(row=row_idx, column=1, value=lo_name)
+        c.font = Font(bold=True)
+        c.border = thin_border
+        c.alignment = center_align
+        
+        valid_ids = lot_id_map.get(lo_name, [])
+        
+        for week in weeks:
+            wm = week_col_map[week]
+            
+            for ci, color in enumerate(all_colors):
+                # CẮT BẮP
+                val_cut = 0
+                if not df_cut.empty:
+                    mask = (df_cut["lot_id"].isin(valid_ids)) & (df_cut["tuan"] == week)
+                    if "mau_day" in df_cut.columns:
+                        mask = mask & (df_cut["mau_day"] == color)
+                    val_cut = int(df_cut[mask]["so_luong"].sum())
+                
+                cell = ws.cell(row=row_idx, column=wm["cut_start"] + ci, value=val_cut if val_cut > 0 else "")
+                cell.border = thin_border
+                cell.alignment = center_align
+                
+                # XUẤT HỦY
+                val_des = 0
+                if not df_des.empty:
+                    mask = (df_des["lot_id"].isin(valid_ids)) & (df_des["tuan"] == week)
+                    if "mau_day" in df_des.columns:
+                        mask = mask & (df_des["mau_day"] == color)
+                    val_des = int(df_des[mask]["so_luong"].sum())
+                
+                cell = ws.cell(row=row_idx, column=wm["des_start"] + ci, value=val_des if val_des > 0 else "")
+                cell.border = thin_border
+                cell.alignment = center_align
+    
+    # === TOTAL ROW ===
+    total_row = data_start_row + len(lot_names)
+    c = ws.cell(row=total_row, column=1, value="Tổng")
+    c.font = Font(bold=True, size=11)
+    c.fill = total_fill
+    c.border = thin_border
+    c.alignment = center_align
+    
+    for week in weeks:
+        wm = week_col_map[week]
+        for ci in range(n_colors):
+            # Sum cut
+            col_idx = wm["cut_start"] + ci
+            total = 0
+            for r in range(data_start_row, total_row):
+                v = ws.cell(row=r, column=col_idx).value
+                if v and isinstance(v, (int, float)):
+                    total += int(v)
+            c = ws.cell(row=total_row, column=col_idx, value=total if total > 0 else "")
+            c.font = Font(bold=True)
+            c.fill = total_fill
+            c.border = thin_border
+            c.alignment = center_align
+            
+            # Sum des
+            col_idx = wm["des_start"] + ci
+            total = 0
+            for r in range(data_start_row, total_row):
+                v = ws.cell(row=r, column=col_idx).value
+                if v and isinstance(v, (int, float)):
+                    total += int(v)
+            c = ws.cell(row=total_row, column=col_idx, value=total if total > 0 else "")
+            c.font = Font(bold=True)
+            c.fill = total_fill
+            c.border = thin_border
+            c.alignment = center_align
+    
+    # Auto column width
+    ws.column_dimensions[get_column_letter(1)].width = 8
+    for c_idx in range(2, col_offset):
+        ws.column_dimensions[get_column_letter(c_idx)].width = 10
+    
+    # Save to bytes
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output.getvalue()
+
 def render_global_data_tab(c_farm):
     st.markdown("### 🌐 Bảng dữ liệu Toàn cục Farm")
     st.caption("Khám phá dữ liệu tổng quan bằng các Biểu đồ phân tích và Bộ lọc.")
@@ -757,7 +968,7 @@ def render_global_data_tab(c_farm):
     df_seasons = fetch_table_data("seasons", c_farm)
 
     # Nút Xuất Báo cáo Excel (Chứa toàn bộ dữ liệu thô)
-    col_t1, col_t2 = st.columns([4, 1])
+    col_t1, col_t2, col_t3 = st.columns([3, 1, 1])
     with col_t2:
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -771,6 +982,17 @@ def render_global_data_tab(c_farm):
             label="📥 Xuất Báo Cáo Excel",
             data=output.getvalue(),
             file_name=f"Bao_cao_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            type="secondary"
+        )
+    with col_t3:
+        # Nút Xuất Báo cáo Cắt bắp
+        cut_excel = generate_cut_bap_excel(df_lots_all, df_stg_all, df_des_all)
+        st.download_button(
+            label="✂️ Báo cáo Cắt bắp",
+            data=cut_excel,
+            file_name=f"Bao_cao_cat_bap_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
             type="secondary"
@@ -1658,6 +1880,7 @@ def render_main_app():
                     with col_a:
                         lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, key="add_des_lot")
                         giai_doan_xuat_huy = st.selectbox("⏱️ Giai đoạn xuất hủy", options=DESTRUCTION_STAGE_OPTIONS, key="add_des_gxh")
+                        mau_day_des = st.text_input("🎨 Màu dây", placeholder="VD: Đỏ, Xanh lá...", key="add_des_mau")
                         
                         predefined_reasons = ["Bệnh", "Đổ Ngã", "Khác"]
                         if hasattr(st, "pills"):
@@ -1684,8 +1907,9 @@ def render_main_app():
                         if sl <= 0: st.error("❌ Nhập số lượng > 0.")
                         elif selected_reason == "Khác" and not ly_do.strip(): st.error("❌ Cần ghi rõ chi tiết lý do (khi chọn Khác).")
                         else:
+                            mau_day_clean = mau_day_des.strip().capitalize() if mau_day_des.strip() else ""
                             st.session_state["queue_des"].append({
-                                "Lô": lot_id, "Giai đoạn": giai_doan_xuat_huy, "Lý do": ly_do.strip(),
+                                "Lô": lot_id, "Giai đoạn": giai_doan_xuat_huy, "Màu dây": mau_day_clean, "Lý do": ly_do.strip(),
                                 "Ngày": ngay.isoformat(), "Số lượng": sl, "Tuần": ngay.isocalendar()[1]
                             })
                             st.rerun()
@@ -1705,7 +1929,7 @@ def render_main_app():
                         is_valid, msg, allocations = allocate_fifo_quantity(c_farm, item["Lô"], item["Số lượng"], "destruction", item["Ngày"], "Xuất hủy")
                         if is_valid:
                             for alloc in allocations:
-                                data = {"farm": c_farm, "team": c_team, "ngay_xuat_huy": item["Ngày"], "giai_doan": item["Giai đoạn"], "ly_do": item["Lý do"], "tuan": item["Tuần"], "lot_id": alloc["lot_id"], "so_luong": alloc["so_luong"]}
+                                data = {"farm": c_farm, "team": c_team, "ngay_xuat_huy": item["Ngày"], "giai_doan": item["Giai đoạn"], "mau_day": item.get("Màu dây", "") or None, "ly_do": item["Lý do"], "tuan": item["Tuần"], "lot_id": alloc["lot_id"], "so_luong": alloc["so_luong"]}
                                 try:
                                     supabase.table("destruction_logs").insert(data).execute()
                                 except Exception as e:
@@ -1720,7 +1944,7 @@ def render_main_app():
                     st.session_state["toast"] = f"✅ Đã lưu xuất hủy {success_count} dòng!"
                     st.rerun()
 
-                render_queue_ui("queue_des", ["Lô", "Giai đoạn", "Lý do", "Số lượng", "Ngày", "Tuần"], process_des_queue)
+                render_queue_ui("queue_des", ["Lô", "Giai đoạn", "Màu dây", "Lý do", "Số lượng", "Ngày", "Tuần"], process_des_queue)
 
                 st.markdown("---")
                 col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
@@ -1736,7 +1960,7 @@ def render_main_app():
                 elif is_editing and not is_within_48h:
                     with col_e: st.caption("🔒 Quá 48h")
                     
-                render_team_dataframe("destruction_logs", df_des_team, ["lot_id", "ngay_xuat_huy", "giai_doan", "so_luong", "ly_do"])
+                render_team_dataframe("destruction_logs", df_des_team, ["lot_id", "ngay_xuat_huy", "giai_doan", "mau_day", "so_luong", "ly_do"])
 
         # TAB 4: DỮ LIỆU TOÀN CỤC
         elif active_tab == "🌐 Dữ liệu toàn cục":
