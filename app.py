@@ -56,26 +56,29 @@ RBAC_DB = {
         "NT2": "123",
         "Đội BVTV": "123",
         "Đội Thu Hoạch": "123",
-        "Xưởng Đóng Gói": "123"
+        "Xưởng Đóng Gói": "123",
+        "Quản lý farm": "ql126"
     },
     "Farm 157": {
         "NT1": "456",
         "NT2": "456",
         "Đội BVTV": "456",
         "Đội Thu Hoạch": "456",
-        "Xưởng Đóng Gói": "456"
+        "Xưởng Đóng Gói": "456",
+        "Quản lý farm": "ql157"
     },
     "Farm 195": {
         "NT1": "789",
         "NT2": "789",
         "Đội BVTV": "789",
         "Đội Thu Hoạch": "789",
-        "Xưởng Đóng Gói": "789"
+        "Xưởng Đóng Gói": "789",
+        "Quản lý farm": "ql195"
     }
 }
 
 FARMS = list(RBAC_DB.keys())
-TEAMS = ["NT1", "NT2", "Đội BVTV", "Đội Thu Hoạch", "Xưởng Đóng Gói"]
+TEAMS = ["NT1", "NT2", "Đội BVTV", "Đội Thu Hoạch", "Xưởng Đóng Gói", "Quản lý farm"]
 
 # =====================================================
 # CONFIG OPTIONS
@@ -141,8 +144,11 @@ def get_lots_by_farm(farm: str) -> list:
     return lots
 
 def fetch_table_data(table_name: str, farm: str) -> pd.DataFrame:
-    """Hàm chung lấy dữ liệu từ bảng bất kỳ theo farm."""
-    res = supabase.table(table_name).select("*").eq("farm", farm).eq("is_deleted", False).order("created_at", desc=True).execute()
+    """Hàm chung lấy dữ liệu. Quản trị viên (Admin) sẽ lấy của tất cả các farm."""
+    query = supabase.table(table_name).select("*").eq("is_deleted", False)
+    if farm != "Admin":
+        query = query.eq("farm", farm)
+    res = query.order("created_at", desc=True).execute()
     return pd.DataFrame(res.data) if res.data else pd.DataFrame()
 
 def insert_to_db(table_name: str, data: dict) -> bool:
@@ -744,11 +750,12 @@ def render_global_data_tab(c_farm):
     st.divider()
 
     # Filter helpers
+    farms_all = ["Tất cả"] + list(df_lots_all["farm"].dropna().unique()) if not df_lots_all.empty else ["Tất cả"]
     teams_all = ["Tất cả"] + list(df_lots_all["team"].dropna().unique()) if not df_lots_all.empty else ["Tất cả"]
     lots_all = ["Tất cả"] + list(df_lots_all["lo"].dropna().unique()) if not df_lots_all.empty else ["Tất cả"]
     seasons_all = ["Tất cả"] + list(df_seasons["vu"].dropna().unique()) if not df_seasons.empty else ["Tất cả"]
 
-    def apply_filters_local(f_vu, f_team, f_lot, df_dict):
+    def apply_filters_local(f_farm, f_vu, f_team, f_lot, df_dict):
         """Helper function to apply filters locally to a set of dataframes"""
         res = {}
         # Apply Season format
@@ -762,6 +769,8 @@ def render_global_data_tab(c_farm):
                 continue
             
             df_filtered = df.copy()
+            if f_farm != "Tất cả" and "farm" in df_filtered.columns:
+                df_filtered = df_filtered[df_filtered["farm"] == f_farm]
             if valid_lots_season is not None and "lot_id" in df_filtered.columns:
                 df_filtered = df_filtered[df_filtered["lot_id"].isin(valid_lots_season)]
             if f_team != "Tất cả" and "team" in df_filtered.columns:
@@ -782,15 +791,27 @@ def render_global_data_tab(c_farm):
     st.caption("So sánh tương quan Mức độ Hao hụt và Năng suất từ lúc Xuống giống đến khi Thu hoạch.")
     
     # 1. Pipeline Chart Filters
-    cpf1, cpf2, cpf3 = st.columns(3)
-    with cpf1:
-        pf_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="pf_vu")
-    with cpf2:
-        pf_team = st.selectbox("Lọc theo Đội", options=teams_all, key="pf_team")
-    with cpf3:
-        pf_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="pf_lot")
+    if c_farm == "Admin":
+        cpf0, cpf1, cpf2, cpf3 = st.columns(4)
+        with cpf0:
+            pf_farm = st.selectbox("Lọc theo Farm", options=farms_all, key="pf_farm")
+        with cpf1:
+            pf_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="pf_vu")
+        with cpf2:
+            pf_team = st.selectbox("Lọc theo Đội", options=teams_all, key="pf_team")
+        with cpf3:
+            pf_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="pf_lot")
+    else:
+        pf_farm = c_farm
+        cpf1, cpf2, cpf3 = st.columns(3)
+        with cpf1:
+            pf_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="pf_vu")
+        with cpf2:
+            pf_team = st.selectbox("Lọc theo Đội", options=teams_all, key="pf_team")
+        with cpf3:
+            pf_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="pf_lot")
         
-    filtered_pipe_dfs = apply_filters_local(pf_vu, pf_team, pf_lot, {
+    filtered_pipe_dfs = apply_filters_local(pf_farm, pf_vu, pf_team, pf_lot, {
         "lots": df_lots_all, "stg": df_stg_all, "des": df_des_all, "har": df_har_all
     })
     
@@ -851,7 +872,7 @@ def render_global_data_tab(c_farm):
             labels={"Lô": "Danh sách Lô", "Số lượng": "Số lượng cây / buồng", "Giai đoạn": "Tiến trình"}
         )
         # Bỏ đi style rườm rà, format sang trọng
-        fig_pipe.update_layout(plot_bgcolor="rgba(0,0,0,0)", yaxis=(dict(showgrid=True, gridcolor='rgba(0,0,0,0.1)')))
+        fig_pipe.update_layout(plot_bgcolor="rgba(0,0,0,0)", yaxis={"showgrid": True, "gridcolor": "rgba(0,0,0,0.1)"})
         st.plotly_chart(fig_pipe, use_container_width=True)
     else:
         st.info("Chưa có danh sách lô để hiển thị biểu đồ Phễu.")
@@ -862,15 +883,27 @@ def render_global_data_tab(c_farm):
     st.caption("Biểu đồ gộp thể hiện biến động các công đoạn dọc theo trục ngày. Có thể filter để làm nổi bật.")
 
     # 2. Multi-line Chart Filters
-    mlf1, mlf2, mlf3 = st.columns(3)
-    with mlf1:
-        mlf_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="mlf_vu")
-    with mlf2:
-        mlf_team = st.selectbox("Lọc theo Đội", options=teams_all, key="mlf_team")
-    with mlf3:
-        mlf_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="mlf_lot")
+    if c_farm == "Admin":
+        mlf0, mlf1, mlf2, mlf3 = st.columns(4)
+        with mlf0:
+            mlf_farm = st.selectbox("Lọc theo Farm", options=farms_all, key="mlf_farm")
+        with mlf1:
+            mlf_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="mlf_vu")
+        with mlf2:
+            mlf_team = st.selectbox("Lọc theo Đội", options=teams_all, key="mlf_team")
+        with mlf3:
+            mlf_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="mlf_lot")
+    else:
+        mlf_farm = c_farm
+        mlf1, mlf2, mlf3 = st.columns(3)
+        with mlf1:
+            mlf_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="mlf_vu")
+        with mlf2:
+            mlf_team = st.selectbox("Lọc theo Đội", options=teams_all, key="mlf_team")
+        with mlf3:
+            mlf_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="mlf_lot")
         
-    filtered_ml_dfs = apply_filters_local(mlf_vu, mlf_team, mlf_lot, {
+    filtered_ml_dfs = apply_filters_local(mlf_farm, mlf_vu, mlf_team, mlf_lot, {
         "lots": df_lots_all, "stg": df_stg_all, "des": df_des_all, "har": df_har_all
     })
 
@@ -944,7 +977,7 @@ def render_global_data_tab(c_farm):
                     trace.opacity = 1.0
                     trace.line.width = 3
         
-        fig.update_layout(plot_bgcolor="rgba(0,0,0,0)", yaxis=(dict(showgrid=True, gridcolor='rgba(0,0,0,0.1)')), hovermode="x unified")
+        fig.update_layout(plot_bgcolor="rgba(0,0,0,0)", yaxis={"showgrid": True, "gridcolor": "rgba(0,0,0,0.1)"}, hovermode="x unified")
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("Chưa có bất kỳ dữ liệu nào để vẽ biểu đồ dòng thời gian.")
@@ -954,15 +987,27 @@ def render_global_data_tab(c_farm):
     st.caption("Theo dõi số lượng cây thực tế trên từng Lô qua các lần kiểm đếm.")
     
     # 3. Tree Inventory Filters
-    tif1, tif2, tif3 = st.columns(3)
-    with tif1:
-        ti_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="ti_vu")
-    with tif2:
-        ti_team = st.selectbox("Lọc theo Đội", options=teams_all, key="ti_team")
-    with tif3:
-        ti_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="ti_lot")
+    if c_farm == "Admin":
+        tif0, tif1, tif2, tif3 = st.columns(4)
+        with tif0:
+            ti_farm = st.selectbox("Lọc theo Farm", options=farms_all, key="ti_farm")
+        with tif1:
+            ti_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="ti_vu")
+        with tif2:
+            ti_team = st.selectbox("Lọc theo Đội", options=teams_all, key="ti_team")
+        with tif3:
+            ti_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="ti_lot")
+    else:
+        ti_farm = c_farm
+        tif1, tif2, tif3 = st.columns(3)
+        with tif1:
+            ti_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="ti_vu")
+        with tif2:
+            ti_team = st.selectbox("Lọc theo Đội", options=teams_all, key="ti_team")
+        with tif3:
+            ti_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="ti_lot")
 
-    filtered_ti_dfs = apply_filters_local(ti_vu, ti_team, ti_lot, {"inv": df_tree_inv_all})
+    filtered_ti_dfs = apply_filters_local(ti_farm, ti_vu, ti_team, ti_lot, {"inv": df_tree_inv_all})
     ti_inv_df = filtered_ti_dfs["inv"]
     
     if not ti_inv_df.empty and "ngay_kiem_ke" in ti_inv_df.columns:
@@ -981,7 +1026,7 @@ def render_global_data_tab(c_farm):
             markers=True, line_shape="linear",
             labels={"Ngày": "Ngày Kiểm Kê", "so_luong_cay_thuc_te": "Số lượng cây", "Tên Lô": "Lô"},
         )
-        fig_inv.update_layout(plot_bgcolor="rgba(0,0,0,0)", yaxis=(dict(showgrid=True, gridcolor='rgba(0,0,0,0.1)')), hovermode="x unified")
+        fig_inv.update_layout(plot_bgcolor="rgba(0,0,0,0)", yaxis={"showgrid": True, "gridcolor": "rgba(0,0,0,0.1)"}, hovermode="x unified")
         st.plotly_chart(fig_inv, use_container_width=True)
     else:
         st.info("Chưa có dữ liệu Kiểm kê cây trên farm này.")
@@ -1020,68 +1065,84 @@ def render_main_app():
     # MODULE ADMIN
     # =================================================
     if c_farm == "Admin" and c_team == "Quản trị viên":
-        st.markdown("## 👑 Admin Dashboard - Quản trị Mùa Vụ & Hệ Thống")
-        st.info("👋 Chào mừng Quản trị viên. Tại đây bạn có thể quản lý lịch sử Vụ cho từng lô.")
+        tab_opts = ["👑 Quản trị Mùa Vụ", "🌐 Dữ liệu toàn cục"]
+        active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_admin_menu", default=tab_opts[0])
+        if active_tab is None: active_tab = tab_opts[0]
         
-        res = supabase.table("seasons").select("*").eq("is_deleted", False).order("created_at", desc=True).execute()
-        df_seasons = pd.DataFrame(res.data) if res.data else pd.DataFrame()
-        
-        if df_seasons.empty:
-            st.warning("Hiện tại hệ thống chưa có dữ liệu Vụ (Seasons). Vui lòng tạo lô ở Nông trường trước!")
-            return
+        if active_tab == tab_opts[0]:
+            st.markdown("## 👑 Admin Dashboard - Quản trị Mùa Vụ & Hệ Thống")
+            st.info("👋 Chào mừng Quản trị viên. Tại đây bạn có thể quản lý lịch sử Vụ cho từng lô.")
             
-        f_farm = st.selectbox("Lọc Farm", options=["Tất cả"] + list(df_seasons["farm"].unique()))
-        if f_farm != "Tất cả":
-            df_seasons = df_seasons[df_seasons["farm"] == f_farm]
+            res = supabase.table("seasons").select("*").eq("is_deleted", False).order("created_at", desc=True).execute()
+            df_seasons = pd.DataFrame(res.data) if res.data else pd.DataFrame()
             
-        st.markdown("### 📋 Danh sách Vụ (Seasons)")
-        st.dataframe(
-            df_seasons[["farm", "lo", "vu", "loai_trong", "ngay_bat_dau", "ngay_ket_thuc_thuc_te"]], 
-            use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row", key="sel_admin_seasons"
-        )
-        
-        idx_list = st.session_state.get(f"sel_admin_seasons", {}).get("selection", {}).get("rows", [])
-        if idx_list and len(idx_list) > 0 and idx_list[0] < len(df_seasons):
-            row = df_seasons.iloc[idx_list[0]].to_dict()
-            
-            with st.container(border=True):
-                st.markdown(f"#### 🛠️ Chốt vụ: `{row['farm']}` - Lô `{row['lo']}` (Hiện tại: `{row['vu']}`)")
-                col1, col2 = st.columns(2)
-                with col1:
-                    cur_end = row.get("ngay_ket_thuc_thuc_te")
-                    def_date = pd.to_datetime(cur_end).date() if cur_end else date.today()
-                    end_date = st.date_input("📆 Ngày kết thúc (Thực tế)", value=def_date)
-                with col2:
-                    curr_v = str(row["vu"])
-                    try:
-                        next_v_num = int(curr_v.replace("F", "")) + 1
-                    except:
-                        next_v_num = 1
-                    next_v = f"F{next_v_num}"
-                    
-                    auto_next = st.checkbox(f"🚀 Cho phép tự động tạo vụ nối tiếp: {next_v}", value=True)
+            if df_seasons.empty:
+                st.warning("Hiện tại hệ thống chưa có dữ liệu Vụ (Seasons). Vui lòng tạo lô ở Nông trường trước!")
+                return
                 
-                st.markdown("")
-                if st.button("💾 Lưu thay đổi & Chốt vụ", use_container_width=True, type="primary"):
-                    try:
-                        supabase.table("seasons").update({
-                            "ngay_ket_thuc_thuc_te": end_date.isoformat()
-                        }).eq("id", row["id"]).execute()
+            f_farm = st.selectbox("Lọc Farm", options=["Tất cả"] + list(df_seasons["farm"].unique()))
+            if f_farm != "Tất cả":
+                df_seasons = df_seasons[df_seasons["farm"] == f_farm]
+                
+            st.markdown("### 📋 Danh sách Vụ (Seasons)")
+            st.dataframe(
+                df_seasons[["farm", "lo", "vu", "loai_trong", "ngay_bat_dau", "ngay_ket_thuc_thuc_te"]], 
+                use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row", key="sel_admin_seasons"
+            )
+            
+            idx_list = st.session_state.get(f"sel_admin_seasons", {}).get("selection", {}).get("rows", [])
+            if idx_list and len(idx_list) > 0 and idx_list[0] < len(df_seasons):
+                row = df_seasons.iloc[idx_list[0]].to_dict()
+                
+                with st.container(border=True):
+                    st.markdown(f"#### 🛠️ Chốt vụ: `{row['farm']}` - Lô `{row['lo']}` (Hiện tại: `{row['vu']}`)")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        cur_end = row.get("ngay_ket_thuc_thuc_te")
+                        def_date = pd.to_datetime(cur_end).date() if cur_end else date.today()
+                        end_date = st.date_input("📆 Ngày kết thúc (Thực tế)", value=def_date)
+                    with col2:
+                        curr_v = str(row["vu"])
+                        try:
+                            next_v_num = int(curr_v.replace("F", "")) + 1
+                        except:
+                            next_v_num = 1
+                        next_v = f"F{next_v_num}"
                         
-                        if auto_next and not cur_end:
-                            new_season = {
-                                "farm": row["farm"],
-                                "lo": row["lo"],
-                                "vu": next_v,
-                                "loai_trong": row["loai_trong"],
-                                "ngay_bat_dau": end_date.isoformat()
-                            }
-                            supabase.table("seasons").insert(new_season).execute()
-                        
-                        st.session_state["toast"] = f"✅ Đã chốt vụ {row['vu']} thành công!"
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Lỗi khi chốt vụ: {e}")
+                        auto_next = st.checkbox(f"🚀 Cho phép tự động tạo vụ nối tiếp: {next_v}", value=True)
+                    
+                    st.markdown("")
+                    if st.button("💾 Lưu thay đổi & Chốt vụ", use_container_width=True, type="primary"):
+                        try:
+                            supabase.table("seasons").update({
+                                "ngay_ket_thuc_thuc_te": end_date.isoformat()
+                            }).eq("id", row["id"]).execute()
+                            
+                            if auto_next and not cur_end:
+                                new_season = {
+                                    "farm": row["farm"],
+                                    "lo": row["lo"],
+                                    "vu": next_v,
+                                    "loai_trong": row["loai_trong"],
+                                    "ngay_bat_dau": end_date.isoformat()
+                                }
+                                supabase.table("seasons").insert(new_season).execute()
+                            
+                            st.session_state["toast"] = f"✅ Đã chốt vụ {row['vu']} thành công!"
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Lỗi khi chốt vụ: {e}")
+        elif active_tab == tab_opts[1]:
+            render_global_data_tab("Admin")
+        return
+
+    # =================================================
+    # MODULE 4: QUẢN LÝ FARM
+    # =================================================
+    if c_team == "Quản lý farm":
+        st.markdown("## 📊 Dashboard Quản Lý Farm")
+        st.info("👋 Chế độ chỉ xem (Read-only). Tương tác với các biểu đồ bên dưới để phân tích dữ liệu.")
+        render_global_data_tab(c_farm)
         return
 
     # =================================================
