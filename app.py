@@ -945,14 +945,18 @@ def render_global_data_tab(c_farm):
     
     # 1. Trồng
     if not ml_lots_df.empty and "ngay_trong" in ml_lots_df.columns:
-        df_p = ml_lots_df[["ngay_trong", "so_luong"]].copy()
+        cols_to_keep = ["ngay_trong", "so_luong"]
+        if "lot_id" in ml_lots_df.columns: cols_to_keep.append("lot_id")
+        df_p = ml_lots_df[cols_to_keep].copy()
         df_p.rename(columns={"ngay_trong": "Date"}, inplace=True)
         df_p["Giai đoạn"] = "1. Đã trồng"
         plot_dfs.append(df_p)
 
     # 2. Chích bắp & Cắt bắp
     if not ml_stg_df.empty and "ngay_thuc_hien" in ml_stg_df.columns:
-        df_p = ml_stg_df[["ngay_thuc_hien", "so_luong", "giai_doan"]].copy()
+        cols_to_keep = ["ngay_thuc_hien", "so_luong", "giai_doan"]
+        if "lot_id" in ml_stg_df.columns: cols_to_keep.append("lot_id")
+        df_p = ml_stg_df[cols_to_keep].copy()
         df_p.rename(columns={"ngay_thuc_hien": "Date"}, inplace=True)
         df_p["Giai đoạn"] = df_p["giai_doan"].apply(lambda x: f"2. {x}" if x == "Chích bắp" else f"3. {x}")
         df_p.drop(columns=["giai_doan"], inplace=True)
@@ -960,14 +964,18 @@ def render_global_data_tab(c_farm):
 
     # 3. Thu hoạch
     if not ml_har_df.empty and "ngay_thu_hoach" in ml_har_df.columns:
-        df_p = ml_har_df[["ngay_thu_hoach", "so_luong"]].copy()
+        cols_to_keep = ["ngay_thu_hoach", "so_luong"]
+        if "lot_id" in ml_har_df.columns: cols_to_keep.append("lot_id")
+        df_p = ml_har_df[cols_to_keep].copy()
         df_p.rename(columns={"ngay_thu_hoach": "Date"}, inplace=True)
         df_p["Giai đoạn"] = "4. Thu hoạch"
         plot_dfs.append(df_p)
 
     # 4. Xuất hủy
     if not ml_des_df.empty and "ngay_xuat_huy" in ml_des_df.columns:
-        df_p = ml_des_df[["ngay_xuat_huy", "so_luong"]].copy()
+        cols_to_keep = ["ngay_xuat_huy", "so_luong"]
+        if "lot_id" in ml_des_df.columns: cols_to_keep.append("lot_id")
+        df_p = ml_des_df[cols_to_keep].copy()
         df_p.rename(columns={"ngay_xuat_huy": "Date"}, inplace=True)
         df_p["Giai đoạn"] = "5. Xuất hủy"
         plot_dfs.append(df_p)
@@ -975,8 +983,38 @@ def render_global_data_tab(c_farm):
     if plot_dfs:
         df_combined = pd.concat(plot_dfs)
         df_combined["Date"] = pd.to_datetime(df_combined["Date"])
+
+        # --- Breakdown text: số lượng theo từng Lô, dùng cho tooltip ---
+        # Lấy tên lô từ lot_id nếu có (join base_lots)
+        lot_name_map = {}
+        if not ml_lots_df.empty and "lot_id" in ml_lots_df.columns and "lo" in ml_lots_df.columns:
+            lot_name_map = ml_lots_df.set_index("lot_id")["lo"].to_dict()
+        
+        if "lot_id" in df_combined.columns:
+            df_combined["Tên Lô"] = df_combined["lot_id"].map(lot_name_map).fillna(df_combined.get("lot_id", ""))
+            df_breakdown = (
+                df_combined.groupby(["Date", "Giai đoạn", "Tên Lô"], as_index=False)["so_luong"]
+                .sum()
+                .sort_values("so_luong", ascending=False)
+            )
+            def make_breakdown(grp):
+                return "<br>".join(f"&nbsp;&nbsp;• {row['Tên Lô']}: {int(row['so_luong']):,}" for _, row in grp.iterrows())
+            df_bd_text = (
+                df_breakdown.groupby(["Date", "Giai đoạn"])
+                .apply(make_breakdown)
+                .reset_index(name="breakdown_text")
+            )
+        else:
+            df_bd_text = None
+
         df_grouped = df_combined.groupby(["Date", "Giai đoạn"], as_index=False)["so_luong"].sum()
         df_grouped.sort_values(by="Date", inplace=True)
+
+        if df_bd_text is not None:
+            df_grouped = df_grouped.merge(df_bd_text, on=["Date", "Giai đoạn"], how="left")
+            df_grouped["breakdown_text"] = df_grouped["breakdown_text"].fillna("")
+        else:
+            df_grouped["breakdown_text"] = ""
 
         all_stages = sorted(df_grouped["Giai đoạn"].unique().tolist())
         selected_stages = st.multiselect("Lọc và Nổi bật Giai đoạn", options=all_stages, default=all_stages, key="global_stage_hl")
@@ -991,9 +1029,21 @@ def render_global_data_tab(c_farm):
         }
         
         fig = px.line(
-            df_grouped, x="Date", y="so_luong", color="Giai đoạn", 
-            markers=True, line_shape="spline", color_discrete_map=color_map,
+            df_grouped, x="Date", y="so_luong", color="Giai đoạn",
+            markers=True, line_shape="linear", color_discrete_map=color_map,
+            custom_data=["breakdown_text"],
             labels={"Date": "Ngày Thực hiện", "so_luong": "Số lượng (Cây/Buồng)"}
+        )
+        
+        # Custom tooltip
+        fig.update_traces(
+            hovertemplate=(
+                "<b>%{fullData.name}</b><br>"
+                "📅 %{x|%d/%m/%Y}<br>"
+                "Tổng: <b>%{y:,.0f}</b><br>"
+                "Chi tiết theo Lô:<br>%{customdata[0]}"
+                "<extra></extra>"
+            )
         )
         
         # Highlight logic - fade out unselected
