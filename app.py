@@ -1148,11 +1148,13 @@ def render_main_app():
     # =================================================
     # MODULE 1: ĐỘI NÔNG TRƯỜNG (NT1, NT2)
     # =================================================
+    # MODULE 1: ĐỘI NÔNG TRƯỜNG (NT1, NT2)
+    # =================================================
     if c_team in ["NT1", "NT2", "Đội BVTV"]:
         if c_team == "Đội BVTV":
             tab_opts = ["📈 Cập nhật Tiến độ", "🌐 Dữ liệu toàn cục"]
         else:
-            tab_opts = ["🌱 Khởi tạo Lô trồng", "📈 Cập nhật Tiến độ", "📏 Đo Size", "🗑️ Cập nhật Xuất hủy", "🌳 Kiểm kê cây", "🌐 Dữ liệu toàn cục"]
+            tab_opts = ["🌱 Khởi tạo Lô trồng", "📈 Cập nhật Tiến độ", "📏 Đo Size", "🗑️ Cập nhật Xuất hủy", "🌳 Kiểm kê cây", "🧪 Đo pH Đất", "🌐 Dữ liệu toàn cục"]
             
         active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_nt_menu", default=tab_opts[0])
         if active_tab is None: active_tab = tab_opts[0] # Prevent empty state
@@ -1374,6 +1376,84 @@ def render_main_app():
                     with col_e: st.caption("🔒 Quá 48h")
                     
                 render_team_dataframe("tree_inventory_logs", df_inv_team, ["lot_id", "ngay_kiem_ke", "so_luong_cay_thuc_te"])
+
+        # TAB: ĐO PH ĐẤT
+        elif active_tab == "🧪 Đo pH Đất":
+            st.markdown("#### Ghi nhận kết quả Đo pH Đất")
+            available_lots = get_lots_by_farm(c_farm)
+            
+            if not available_lots:
+                st.warning("⚠️ Chưa có Lô trồng nào trên hệ thống.")
+            else:
+                df_ph = fetch_table_data("soil_ph_logs", c_farm)
+                df_ph_team = df_ph[df_ph["team"] == c_team] if not df_ph.empty else pd.DataFrame()
+                
+                with st.container(border=True):
+                    col_a, col_b, col_c = st.columns([2, 1, 1])
+                    with col_a:
+                        lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, key="add_ph_lot")
+                    with col_b:
+                        ngay_do = st.date_input("📆 Ngày đo", value=date.today(), key="add_ph_ngay")
+                    with col_c:
+                        tuan_do = st.text_input("📍 Tuần", value=str(ngay_do.isocalendar()[1]), disabled=True, key=f"add_ph_tuan_{ngay_do}")
+                    
+                    st.markdown("---")
+                    
+                    @st.fragment
+                    def render_ph_inputs():
+                        if "ph_measure_count" not in st.session_state:
+                            st.session_state.ph_measure_count = 1
+                        
+                        ph_data = []
+                        for i in range(1, st.session_state.ph_measure_count + 1):
+                            col1, col2 = st.columns([1, 3])
+                            with col1:
+                                st.markdown(f"**Lần đo {i}**")
+                            with col2:
+                                val = st.number_input(f"pH", min_value=0.0, max_value=14.0, step=0.1, key=f"add_ph_val_{i}", label_visibility="collapsed")
+                                ph_data.append(val)
+                                
+                        st.markdown("")
+                        col_btn_add, col_btn_save = st.columns(2)
+                        with col_btn_add:
+                            if st.button("➕ Thêm lần đo", use_container_width=True, type="secondary"):
+                                st.session_state.ph_measure_count += 1
+                                st.rerun()
+                                
+                        with col_btn_save:
+                            if st.button("🚀 Lưu kết quả", use_container_width=True, type="primary"):
+                                success_count = 0
+                                for lan, val in enumerate(ph_data, start=1):
+                                    if val > 0:
+                                        data = {
+                                            "farm": c_farm, "team": c_team, "lot_id": lot_id,
+                                            "ngay_do": ngay_do.isoformat(), "tuan": ngay_do.isocalendar()[1],
+                                            "lan_do": lan, "ph_value": val
+                                        }
+                                        try:
+                                            supabase.table("soil_ph_logs").insert(data).execute()
+                                            success_count += 1
+                                        except Exception as e:
+                                            st.error(f"❌ Lỗi ghi Lần {lan}: {e}")
+                                
+                                if success_count > 0:
+                                    st.session_state.ph_measure_count = 1
+                                    st.cache_data.clear()
+                                    st.session_state["toast"] = f"✅ Ghi nhận {success_count} kết quả Đo pH thành công!"
+                                    st.rerun()
+
+                    render_ph_inputs()
+                
+                st.markdown("---")
+                col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
+                with col_t:
+                    st.markdown('<p class="dataframe-header" style="margin-top:0.5rem;">Dữ liệu của đội bạn</p>', unsafe_allow_html=True)
+                
+                # We don't implement edit/delete out of the box for this fragment to save time, unless user explicitly asks
+                with col_e: st.empty()
+                with col_d: st.empty()
+                    
+                render_team_dataframe("soil_ph_logs", df_ph_team, ["lot_id", "ngay_do", "lan_do", "ph_value"])
 
         # TAB 2: CẬP NHẬT TIẾN ĐỘ NT
         elif active_tab == "📈 Cập nhật Tiến độ":
