@@ -998,7 +998,7 @@ def render_global_data_tab(c_farm):
     lots_all = ["Tất cả"] + list(df_lots_all["lo"].dropna().unique()) if not df_lots_all.empty else ["Tất cả"]
     seasons_all = ["Tất cả"] + list(df_seasons["vu"].dropna().unique()) if not df_seasons.empty else ["Tất cả"]
 
-    def apply_filters_local(f_farm, f_vu, f_team, f_lot, df_dict):
+    def apply_filters_local(f_farm, f_vu, f_team, f_lot, f_date, df_dict):
         """Helper function to apply filters locally to a set of dataframes"""
         res = {}
         # Apply Season format
@@ -1022,6 +1022,27 @@ def render_global_data_tab(c_farm):
                 valid_ids = df_lots_all[df_lots_all["lo"] == f_lot]["lot_id"].tolist() if not df_lots_all.empty else []
                 df_filtered = df_filtered[df_filtered["lot_id"].isin(valid_ids)]
             
+            # Apply Date Range filter
+            if f_date and len(f_date) == 2:
+                start_date, end_date = f_date
+                date_col = None
+                if name == "lots" and "ngay_trong" in df_filtered.columns:
+                    date_col = "ngay_trong"
+                elif name == "stg" and "ngay_thuc_hien" in df_filtered.columns:
+                    date_col = "ngay_thuc_hien"
+                elif name == "des" and "ngay_xuat_huy" in df_filtered.columns:
+                    date_col = "ngay_xuat_huy"
+                elif name == "har" and "ngay_thu_hoach" in df_filtered.columns:
+                    date_col = "ngay_thu_hoach"
+                
+                if date_col:
+                    # Convert to datetime and then normalize to date for comparison
+                    df_filtered[date_col] = pd.to_datetime(df_filtered[date_col])
+                    df_filtered = df_filtered[
+                        (df_filtered[date_col].dt.date >= start_date) & 
+                        (df_filtered[date_col].dt.date <= end_date)
+                    ]
+            
             res[name] = df_filtered
         return res
 
@@ -1035,7 +1056,7 @@ def render_global_data_tab(c_farm):
     
     # 1. Pipeline Chart Filters
     if c_farm == "Admin":
-        cpf0, cpf1, cpf2, cpf3 = st.columns(4)
+        cpf0, cpf1, cpf2, cpf3, cpf4 = st.columns([1, 1, 1, 1, 1.5])
         with cpf0:
             pf_farm = st.selectbox("Lọc theo Farm", options=farms_all, key="pf_farm")
         with cpf1:
@@ -1044,17 +1065,21 @@ def render_global_data_tab(c_farm):
             pf_team = st.selectbox("Lọc theo Đội", options=teams_all, key="pf_team")
         with cpf3:
             pf_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="pf_lot")
+        with cpf4:
+            pf_date = st.date_input("Khoảng thời gian", value=(), key="pf_date")
     else:
         pf_farm = c_farm
-        cpf1, cpf2, cpf3 = st.columns(3)
+        cpf1, cpf2, cpf3, cpf4 = st.columns([1, 1, 1, 1.5])
         with cpf1:
             pf_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="pf_vu")
         with cpf2:
             pf_team = st.selectbox("Lọc theo Đội", options=teams_all, key="pf_team")
         with cpf3:
             pf_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="pf_lot")
+        with cpf4:
+            pf_date = st.date_input("Khoảng thời gian", value=(), key="pf_date")
         
-    filtered_pipe_dfs = apply_filters_local(pf_farm, pf_vu, pf_team, pf_lot, {
+    filtered_pipe_dfs = apply_filters_local(pf_farm, pf_vu, pf_team, pf_lot, pf_date, {
         "lots": df_lots_all, "stg": df_stg_all, "des": df_des_all, "har": df_har_all
     })
     
@@ -1127,7 +1152,7 @@ def render_global_data_tab(c_farm):
 
     # 2. Multi-line Chart Filters
     if c_farm == "Admin":
-        mlf0, mlf1, mlf2, mlf3 = st.columns(4)
+        mlf0, mlf1, mlf2, mlf3, mlf4 = st.columns([1, 1, 1, 1, 1.5])
         with mlf0:
             mlf_farm = st.selectbox("Lọc theo Farm", options=farms_all, key="mlf_farm")
         with mlf1:
@@ -1136,17 +1161,21 @@ def render_global_data_tab(c_farm):
             mlf_team = st.selectbox("Lọc theo Đội", options=teams_all, key="mlf_team")
         with mlf3:
             mlf_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="mlf_lot")
+        with mlf4:
+            mlf_date = st.date_input("Khoảng thời gian", value=(), key="mlf_date")
     else:
         mlf_farm = c_farm
-        mlf1, mlf2, mlf3 = st.columns(3)
+        mlf1, mlf2, mlf3, mlf4 = st.columns([1, 1, 1, 1.5])
         with mlf1:
             mlf_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="mlf_vu")
         with mlf2:
             mlf_team = st.selectbox("Lọc theo Đội", options=teams_all, key="mlf_team")
         with mlf3:
             mlf_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="mlf_lot")
+        with mlf4:
+            mlf_date = st.date_input("Khoảng thời gian", value=(), key="mlf_date")
         
-    filtered_ml_dfs = apply_filters_local(mlf_farm, mlf_vu, mlf_team, mlf_lot, {
+    filtered_ml_dfs = apply_filters_local(mlf_farm, mlf_vu, mlf_team, mlf_lot, mlf_date, {
         "lots": df_lots_all, "stg": df_stg_all, "des": df_des_all, "har": df_har_all
     })
 
