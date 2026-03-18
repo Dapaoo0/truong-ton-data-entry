@@ -750,7 +750,8 @@ def render_login():
         st.markdown("<p style='text-align: center; color: #888888; font-size: 0.85rem;'>💡 Vui lòng chọn đúng vai trò của mình để thao tác đúng nghiệp vụ.</p>", unsafe_allow_html=True)
 
 def generate_cut_bap_excel(df_lots, df_stg, df_des) -> bytes:
-    """Tạo file Excel báo cáo Cắt bắp theo tuần, với mỗi tuần chia theo Màu dây."""
+    """Tạo file Excel báo cáo Cắt bắp theo tuần.
+    Mỗi tuần cắt bắp có 1 màu dây duy nhất → 2 cột: CẮT BẮP + XUẤT HỦY."""
     wb = Workbook()
     ws = wb.active
     ws.title = "Báo cáo Cắt bắp"
@@ -767,22 +768,13 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des) -> bytes:
     total_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
     center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
     
-    # Bảng màu pastel nhạt cho header Màu dây (chữ đen vẫn đọc được)
+    # Bảng màu pastel nhạt cho header Màu dây
     COLOR_MAP = {
-        "đỏ": "FFB3B3",
-        "cam": "FFD9B3",
-        "vàng": "FFFFB3",
-        "xanh lá": "B3FFB3",
-        "xanh dương": "B3D9FF",
-        "tím": "D9B3FF",
-        "đen": "D9D9D9",
-        "trắng": "F5F5F5",
-        "hồng": "FFB3D9",
-        "nâu": "D9C4B3",
-        "xl": "B3FFB3",  # Xanh lá shorthand
+        "đỏ": "FFB3B3", "cam": "FFD9B3", "vàng": "FFFFB3",
+        "xanh lá": "B3FFB3", "xanh dương": "B3D9FF", "tím": "D9B3FF",
+        "đen": "D9D9D9", "trắng": "F5F5F5", "hồng": "FFB3D9", "nâu": "D9C4B3",
     }
     def get_mau_day_fill(mau_day_name):
-        """Lấy PatternFill theo tên màu dây. 'Đỏ-xl' → lấy 'Đỏ'."""
         base = mau_day_name.split("-")[0].strip().lower() if mau_day_name else ""
         hex_color = COLOR_MAP.get(base)
         if hex_color:
@@ -799,34 +791,39 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des) -> bytes:
                 lot_id_map[lo] = []
             lot_id_map[lo].append(row["lot_id"])
     
-    # Filter Cắt bắp only from stage_logs
+    # Filter Cắt bắp from stage_logs
     df_cut = df_stg[df_stg["giai_doan"] == "Cắt bắp"].copy() if not df_stg.empty and "giai_doan" in df_stg.columns else pd.DataFrame()
     
-    # All unique weeks from both cut and destruction, sorted
-    weeks = set()
-    if not df_cut.empty and "tuan" in df_cut.columns:
-        weeks.update(df_cut["tuan"].dropna().unique())
+    # Determine weeks and their mau_day (1 color per week)
+    week_color = {}  # {week_number: "Đỏ"}
+    if not df_cut.empty and "tuan" in df_cut.columns and "mau_day" in df_cut.columns:
+        for tuan_val in df_cut["tuan"].dropna().unique():
+            week_num = int(tuan_val)
+            colors_in_week = df_cut[df_cut["tuan"] == tuan_val]["mau_day"].dropna().unique()
+            week_color[week_num] = str(colors_in_week[0]) if len(colors_in_week) > 0 else ""
+    
+    # Also include destruction weeks (they share the same week/color mapping)
     if not df_des.empty and "tuan" in df_des.columns:
-        weeks.update(df_des["tuan"].dropna().unique())
-    weeks = sorted([int(w) for w in weeks])
+        for tuan_val in df_des["tuan"].dropna().unique():
+            week_num = int(tuan_val)
+            if week_num not in week_color:
+                colors_in_week = df_des[df_des["tuan"] == tuan_val]["mau_day"].dropna().unique() if "mau_day" in df_des.columns else []
+                week_color[week_num] = str(colors_in_week[0]) if len(colors_in_week) > 0 else ""
     
-    # All unique mau_day colors (merged: Đỏ, Trắng, etc.)
-    all_colors_cut = set()
-    if not df_cut.empty and "mau_day" in df_cut.columns:
-        all_colors_cut = set(df_cut["mau_day"].dropna().unique())
-    all_colors_des = set()
-    if not df_des.empty and "mau_day" in df_des.columns:
-        all_colors_des = set(df_des["mau_day"].dropna().unique())
-    all_colors = sorted(all_colors_cut.union(all_colors_des))
-    if not all_colors:
-        all_colors = ["(Không có)"]
+    weeks = sorted(week_color.keys())
     
-    n_colors = len(all_colors)
+    if not weeks:
+        # No data at all
+        ws.cell(row=1, column=1, value="Chưa có dữ liệu Cắt bắp.")
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        return output.getvalue()
     
     # === BUILD HEADER ===
-    # Row 1: "Lô" label + Week group headers
-    # Row 2: "Lô" label + "CẮT BẮP" / "XUẤT HỦY" sub-headers per week
-    # Row 3: "Lô" label + color columns per section per week
+    # Row 1: "Lô" + Week group headers (each week = 2 cols merged)
+    # Row 2: CẮT BẮP | XUẤT HỦY per week
+    # Row 3: Màu dây (colored) | Màu dây (colored) per week
     
     ws.cell(row=1, column=1, value="Lô").font = header_font
     ws.cell(row=1, column=1).fill = header_fill
@@ -834,62 +831,57 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des) -> bytes:
     ws.cell(row=1, column=1).alignment = center_align
     ws.merge_cells(start_row=1, start_column=1, end_row=3, end_column=1)
     
-    col_offset = 2  # Start after "Lô" column
-    week_col_map = {}  # {week: {"cut_start": int, "des_start": int}}
+    col_offset = 2
+    week_col_map = {}  # {week: {"cut_col": int, "des_col": int}}
     
     for week in weeks:
-        cut_start = col_offset
-        des_start = col_offset + n_colors
-        week_col_map[week] = {"cut_start": cut_start, "des_start": des_start}
-        week_end = col_offset + 2 * n_colors - 1
+        cut_col = col_offset
+        des_col = col_offset + 1
+        week_col_map[week] = {"cut_col": cut_col, "des_col": des_col}
         
-        # Row 1: Week header (merged)
-        ws.merge_cells(start_row=1, start_column=col_offset, end_row=1, end_column=week_end)
-        c = ws.cell(row=1, column=col_offset, value=f"Tuần {week}")
+        color_name = week_color.get(week, "")
+        color_fill_cell = get_mau_day_fill(color_name)
+        
+        # Row 1: Week header (merged over 2 cols)
+        ws.merge_cells(start_row=1, start_column=cut_col, end_row=1, end_column=des_col)
+        c = ws.cell(row=1, column=cut_col, value=f"Tuần {week}")
         c.font = Font(bold=True, size=11)
         c.fill = header_fill
         c.alignment = center_align
         c.border = thin_border
         
-        # Row 2: CẮT BẮP header (merged over n_colors cols)
-        ws.merge_cells(start_row=2, start_column=cut_start, end_row=2, end_column=cut_start + n_colors - 1)
-        c = ws.cell(row=2, column=cut_start, value="CẮT BẮP")
-        c.font = Font(bold=True, color="006100")
-        c.fill = cut_fill
-        c.alignment = center_align
-        c.border = thin_border
+        # Row 2: CẮT BẮP | XUẤT HỦY
+        c1 = ws.cell(row=2, column=cut_col, value="CẮT BẮP")
+        c1.font = Font(bold=True, color="006100")
+        c1.fill = cut_fill
+        c1.alignment = center_align
+        c1.border = thin_border
         
-        # Row 2: XUẤT HỦY header
-        ws.merge_cells(start_row=2, start_column=des_start, end_row=2, end_column=des_start + n_colors - 1)
-        c = ws.cell(row=2, column=des_start, value="XUẤT HỦY")
-        c.font = Font(bold=True, color="9C0006")
-        c.fill = des_fill
-        c.alignment = center_align
-        c.border = thin_border
+        c2 = ws.cell(row=2, column=des_col, value="XUẤT HỦY")
+        c2.font = Font(bold=True, color="9C0006")
+        c2.fill = des_fill
+        c2.alignment = center_align
+        c2.border = thin_border
         
-        # Row 3: Color sub-headers (tô màu theo tên màu dây)
-        for ci, color in enumerate(all_colors):
-            color_fill = get_mau_day_fill(color)
-            
-            c1 = ws.cell(row=3, column=cut_start + ci, value=color)
-            c1.font = Font(bold=True, size=9)
-            c1.fill = color_fill if color_fill else cut_fill
-            c1.alignment = center_align
-            c1.border = thin_border
-            
-            c2 = ws.cell(row=3, column=des_start + ci, value=color)
-            c2.font = Font(bold=True, size=9)
-            c2.fill = color_fill if color_fill else des_fill
-            c2.alignment = center_align
-            c2.border = thin_border
+        # Row 3: Màu dây (colored header)
+        c3 = ws.cell(row=3, column=cut_col, value=color_name)
+        c3.font = Font(bold=True, size=9)
+        c3.fill = color_fill_cell if color_fill_cell else cut_fill
+        c3.alignment = center_align
+        c3.border = thin_border
         
-        col_offset = week_end + 1
+        c4 = ws.cell(row=3, column=des_col, value=color_name)
+        c4.font = Font(bold=True, size=9)
+        c4.fill = color_fill_cell if color_fill_cell else des_fill
+        c4.alignment = center_align
+        c4.border = thin_border
+        
+        col_offset += 2
     
-    # Apply borders to empty merged cells in row 1-3
+    # Apply borders to merged header cells
     for r in range(1, 4):
         for c_idx in range(1, col_offset):
-            cell = ws.cell(row=r, column=c_idx)
-            cell.border = thin_border
+            ws.cell(row=r, column=c_idx).border = thin_border
     
     # === FILL DATA ROWS ===
     data_start_row = 4
@@ -905,30 +897,23 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des) -> bytes:
         for week in weeks:
             wm = week_col_map[week]
             
-            for ci, color in enumerate(all_colors):
-                # CẮT BẮP
-                val_cut = 0
-                if not df_cut.empty:
-                    mask = (df_cut["lot_id"].isin(valid_ids)) & (df_cut["tuan"] == week)
-                    if "mau_day" in df_cut.columns:
-                        mask = mask & (df_cut["mau_day"] == color)
-                    val_cut = int(df_cut[mask]["so_luong"].sum())
-                
-                cell = ws.cell(row=row_idx, column=wm["cut_start"] + ci, value=val_cut if val_cut > 0 else "")
-                cell.border = thin_border
-                cell.alignment = center_align
-                
-                # XUẤT HỦY
-                val_des = 0
-                if not df_des.empty:
-                    mask = (df_des["lot_id"].isin(valid_ids)) & (df_des["tuan"] == week)
-                    if "mau_day" in df_des.columns:
-                        mask = mask & (df_des["mau_day"] == color)
-                    val_des = int(df_des[mask]["so_luong"].sum())
-                
-                cell = ws.cell(row=row_idx, column=wm["des_start"] + ci, value=val_des if val_des > 0 else "")
-                cell.border = thin_border
-                cell.alignment = center_align
+            # CẮT BẮP: sum so_luong for this lot × this week
+            val_cut = 0
+            if not df_cut.empty:
+                mask = (df_cut["lot_id"].isin(valid_ids)) & (df_cut["tuan"] == week)
+                val_cut = int(df_cut[mask]["so_luong"].sum())
+            cell = ws.cell(row=row_idx, column=wm["cut_col"], value=val_cut if val_cut > 0 else "")
+            cell.border = thin_border
+            cell.alignment = center_align
+            
+            # XUẤT HỦY: sum so_luong for this lot × this week
+            val_des = 0
+            if not df_des.empty:
+                mask = (df_des["lot_id"].isin(valid_ids)) & (df_des["tuan"] == week)
+                val_des = int(df_des[mask]["so_luong"].sum())
+            cell = ws.cell(row=row_idx, column=wm["des_col"], value=val_des if val_des > 0 else "")
+            cell.border = thin_border
+            cell.alignment = center_align
     
     # === TOTAL ROW ===
     total_row = data_start_row + len(lot_names)
@@ -940,22 +925,7 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des) -> bytes:
     
     for week in weeks:
         wm = week_col_map[week]
-        for ci in range(n_colors):
-            # Sum cut
-            col_idx = wm["cut_start"] + ci
-            total = 0
-            for r in range(data_start_row, total_row):
-                v = ws.cell(row=r, column=col_idx).value
-                if v and isinstance(v, (int, float)):
-                    total += int(v)
-            c = ws.cell(row=total_row, column=col_idx, value=total if total > 0 else "")
-            c.font = Font(bold=True)
-            c.fill = total_fill
-            c.border = thin_border
-            c.alignment = center_align
-            
-            # Sum des
-            col_idx = wm["des_start"] + ci
+        for col_idx in [wm["cut_col"], wm["des_col"]]:
             total = 0
             for r in range(data_start_row, total_row):
                 v = ws.cell(row=r, column=col_idx).value
@@ -970,7 +940,7 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des) -> bytes:
     # Auto column width
     ws.column_dimensions[get_column_letter(1)].width = 8
     for c_idx in range(2, col_offset):
-        ws.column_dimensions[get_column_letter(c_idx)].width = 10
+        ws.column_dimensions[get_column_letter(c_idx)].width = 12
     
     # Save to bytes
     output = io.BytesIO()
