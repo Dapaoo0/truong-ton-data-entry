@@ -111,10 +111,16 @@ st.markdown("""
 # HÀM TIỆN ÍCH (SESSION & LOG)
 # =====================================================
 def init_session_state():
-    if "logged_in" not in st.session_state: st.session_state["logged_in"] = False
-    if "current_farm" not in st.session_state: st.session_state["current_farm"] = None
-    if "current_team" not in st.session_state: st.session_state["current_team"] = None
-    
+    if "logged_in" not in st.session_state:
+        if st.query_params.get("logged_in") == "true":
+            st.session_state["logged_in"] = True
+            st.session_state["current_farm"] = st.query_params.get("farm")
+            st.session_state["current_team"] = st.query_params.get("team")
+        else:
+            st.session_state["logged_in"] = False
+            st.session_state["current_farm"] = None
+            st.session_state["current_team"] = None
+            
     # Bulk entry queues
     for k in ["queue_stg", "queue_des", "queue_har", "queue_sm", "queue_inv", "queue_bsr"]:
         if k not in st.session_state: st.session_state[k] = []
@@ -123,6 +129,7 @@ def logout():
     st.session_state["logged_in"] = False
     st.session_state["current_farm"] = None
     st.session_state["current_team"] = None
+    st.query_params.clear()
 
 def insert_access_log(farm: str, team: str, action: str):
     try:
@@ -737,6 +744,12 @@ def render_login():
                     st.session_state["logged_in"] = True
                     st.session_state["current_farm"] = selected_farm
                     st.session_state["current_team"] = selected_team
+                    
+                    # Đăng nhập thành công -> lưu vào URL để tránh mất session khi nhấn F5
+                    st.query_params["logged_in"] = "true"
+                    st.query_params["farm"] = selected_farm
+                    st.query_params["team"] = selected_team
+                    
                     insert_access_log(selected_farm, selected_team, "Đăng nhập thành công")
                     st.success(f"✅ Đăng nhập {selected_team} - {selected_farm}!")
                     st.rerun()
