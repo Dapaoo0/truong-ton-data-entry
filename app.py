@@ -1034,6 +1034,8 @@ def render_global_data_tab(c_farm):
                     date_col = "ngay_xuat_huy"
                 elif name == "har" and "ngay_thu_hoach" in df_filtered.columns:
                     date_col = "ngay_thu_hoach"
+                elif name == "inv" and "ngay_kiem_ke" in df_filtered.columns:
+                    date_col = "ngay_kiem_ke"
                 
                 if date_col:
                     # Convert to datetime and then normalize to date for comparison
@@ -1310,7 +1312,7 @@ def render_global_data_tab(c_farm):
     
     # 3. Tree Inventory Filters
     if c_farm == "Admin":
-        tif0, tif1, tif2, tif3 = st.columns(4)
+        tif0, tif1, tif2, tif3, tif4 = st.columns([1, 1, 1, 1, 1.5])
         with tif0:
             ti_farm = st.selectbox("Lọc theo Farm", options=farms_all, key="ti_farm")
         with tif1:
@@ -1319,17 +1321,21 @@ def render_global_data_tab(c_farm):
             ti_team = st.selectbox("Lọc theo Đội", options=teams_all, key="ti_team")
         with tif3:
             ti_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="ti_lot")
+        with tif4:
+            ti_date = st.date_input("Khoảng thời gian", value=(), key="ti_date")
     else:
         ti_farm = c_farm
-        tif1, tif2, tif3 = st.columns(3)
+        tif1, tif2, tif3, tif4 = st.columns([1, 1, 1, 1.5])
         with tif1:
             ti_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="ti_vu")
         with tif2:
             ti_team = st.selectbox("Lọc theo Đội", options=teams_all, key="ti_team")
         with tif3:
             ti_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="ti_lot")
+        with tif4:
+            ti_date = st.date_input("Khoảng thời gian", value=(), key="ti_date")
 
-    filtered_ti_dfs = apply_filters_local(ti_farm, ti_vu, ti_team, ti_lot, {"inv": df_tree_inv_all})
+    filtered_ti_dfs = apply_filters_local(ti_farm, ti_vu, ti_team, ti_lot, ti_date, {"inv": df_tree_inv_all})
     ti_inv_df = filtered_ti_dfs["inv"]
     
     if not ti_inv_df.empty and "ngay_kiem_ke" in ti_inv_df.columns:
