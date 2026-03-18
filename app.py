@@ -708,8 +708,6 @@ def render_login():
         if os.path.exists("logo.png"): st.image("logo.png", use_container_width=True)
 
     st.markdown('<p class="main-title">🍌 Trường Tồn Banana Tracker</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-title">Hệ thống quản lý Phân quyền Đa cấp</p>', unsafe_allow_html=True)
-
     col1, col2, col3 = st.columns([1, 1.2, 1])
     with col2:
         st.markdown("<h3 style='text-align: center;'>🔐 Đăng nhập hệ thống</h3>", unsafe_allow_html=True)
