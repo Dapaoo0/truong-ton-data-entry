@@ -739,8 +739,8 @@ def render_login():
             elif not password:
                 st.warning("⚠️ Vui lòng nhập mật khẩu.")
             else:
-                correct_pass = RBAC_DB.get(selected_farm, {}).get(selected_team)
-                if password == correct_pass:
+                correct_pass = RBAC_DB.get(selected_farm, {}).get(selected_team, "")
+                if password.strip() == str(correct_pass).strip():
                     st.session_state["logged_in"] = True
                     st.session_state["current_farm"] = selected_farm
                     st.session_state["current_team"] = selected_team
