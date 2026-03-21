@@ -63,8 +63,8 @@ RBAC_DB = {
         "Quản lý farm": "ql126"
     },
     "Farm 157": {
-        "NT1": "456",
-        "NT2": "456",
+        "NT1": "Trung@1985",
+        "NT2": "0056",
         "Đội BVTV": "456",
         "Đội Thu Hoạch": "456",
         "Xưởng Đóng Gói": "456",
