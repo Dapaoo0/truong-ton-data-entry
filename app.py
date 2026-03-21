@@ -1394,7 +1394,7 @@ def render_main_app():
             logout()
             st.rerun()
         st.divider()
-        st.info("📌 Dữ liệu được lưu trên đám mây Supabase.")
+
 
     # --- HEADER ---
     if "toast" in st.session_state:
