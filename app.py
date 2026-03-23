@@ -12,6 +12,7 @@ import os
 from dotenv import load_dotenv
 from supabase import create_client, Client
 import plotly.express as px
+import plotly.graph_objects as go
 import io
 import uuid
 from openpyxl import Workbook
@@ -1243,23 +1244,44 @@ def render_global_data_tab(c_farm):
             
         df_pipeline = pd.DataFrame(pipeline_data)
         
-        # Color mapping
-        color_map = {
-            "1a. Trồng mới": "#4CAF50",    # Green
-            "1b. Trồng dặm": "#8BC34A",    # Light Green
-            "2. Chích bắp": "#FFC107",     # Amber
-            "3. Cắt bắp": "#FF9800",       # Orange
-            "4. Thu hoạch": "#2196F3",     # Blue
-            "5. Xuất hủy": "#F44336"       # Red
-        }
+        # Build hybrid chart: Trồng mới + Trồng dặm stacked, rest clustered
+        lots_list = list(df_pipeline["Lô"].unique())
         
-        fig_pipe = px.bar(
-            df_pipeline, x="Lô", y="Số lượng", color="Giai đoạn", barmode="stack",
-            color_discrete_map=color_map,
-            labels={"Lô": "Danh sách Lô", "Số lượng": "Số lượng cây / buồng", "Giai đoạn": "Tiến trình"}
+        fig_pipe = go.Figure()
+        
+        # --- Stacked pair: Trồng mới + Trồng dặm (same offsetgroup) ---
+        df_tm = df_pipeline[df_pipeline["Giai đoạn"] == "1a. Trồng mới"]
+        fig_pipe.add_trace(go.Bar(
+            name="1a. Trồng mới", x=df_tm["Lô"], y=df_tm["Số lượng"],
+            marker_color="#4CAF50", offsetgroup="trong"
+        ))
+        df_td = df_pipeline[df_pipeline["Giai đoạn"] == "1b. Trồng dặm"]
+        fig_pipe.add_trace(go.Bar(
+            name="1b. Trồng dặm", x=df_td["Lô"], y=df_td["Số lượng"],
+            marker_color="#8BC34A", offsetgroup="trong", base=df_tm["Số lượng"].values
+        ))
+        
+        # --- Clustered bars: each gets its own offsetgroup ---
+        cluster_stages = [
+            ("2. Chích bắp", "#FFC107"),
+            ("3. Cắt bắp", "#FF9800"),
+            ("4. Thu hoạch", "#2196F3"),
+            ("5. Xuất hủy", "#F44336"),
+        ]
+        for stage_name, color in cluster_stages:
+            df_s = df_pipeline[df_pipeline["Giai đoạn"] == stage_name]
+            fig_pipe.add_trace(go.Bar(
+                name=stage_name, x=df_s["Lô"], y=df_s["Số lượng"],
+                marker_color=color, offsetgroup=stage_name
+            ))
+        
+        fig_pipe.update_layout(
+            barmode="group",
+            plot_bgcolor="rgba(0,0,0,0)",
+            yaxis={"showgrid": True, "gridcolor": "rgba(0,0,0,0.1)", "title": "Số lượng cây / buồng"},
+            xaxis={"title": "Danh sách Lô"},
+            legend_title_text="Tiến trình"
         )
-        # Bỏ đi style rườm rà, format sang trọng
-        fig_pipe.update_layout(plot_bgcolor="rgba(0,0,0,0)", yaxis={"showgrid": True, "gridcolor": "rgba(0,0,0,0.1)"})
         st.plotly_chart(fig_pipe, use_container_width=True)
     else:
         st.info("Chưa có danh sách lô để hiển thị biểu đồ Phễu.")
