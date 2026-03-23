@@ -122,7 +122,7 @@ def init_session_state():
             st.session_state["current_team"] = None
             
     # Bulk entry queues
-    for k in ["queue_stg", "queue_des", "queue_har", "queue_sm", "queue_inv", "queue_bsr"]:
+    for k in ["queue_stg", "queue_des", "queue_har", "queue_sm", "queue_inv", "queue_bsr", "queue_fus"]:
         if k not in st.session_state: st.session_state[k] = []
 
 def logout():
@@ -450,7 +450,10 @@ def edit_stage_log_dialog(editing_row, available_lots, c_team):
             st.text_input("🏷️ Lứa (Mã hệ thống)", value=editing_row["lot_id"], disabled=True, key="dlg_lot_stg")
             lot_id = editing_row["lot_id"]
             giai_doan = st.radio("📌 Giai đoạn", options=gd_ops, index=def_gd, horizontal=True, key="dlg_gd_stg")
-            mau_day = st.text_input("🎨 Màu dây", value=def_mau, key="dlg_mau_stg", placeholder="VD: Đỏ, Xanh lá...")
+            if giai_doan != "Chích bắp":
+                mau_day = st.text_input("🎨 Màu dây", value=def_mau, key="dlg_mau_stg", placeholder="VD: Đỏ, Xanh lá...")
+            else:
+                mau_day = ""
         with col_b:
             col_b1, col_b2 = st.columns([2, 1])
             with col_b1:
@@ -461,9 +464,9 @@ def edit_stage_log_dialog(editing_row, available_lots, c_team):
         
         if st.button("✅ Cập nhật", key="btn_edit_stg", use_container_width=True, type="primary"):
             if sl <= 0: st.error("❌ Cần nhập số lượng.")
-            elif not mau_day.strip(): st.error("❌ Phải nhập màu dây định danh lứa.")
+            elif giai_doan != "Chích bắp" and not mau_day.strip(): st.error("❌ Phải nhập màu dây định danh lứa đối với Cắt bắp.")
             else:
-                mau_day_clean = mau_day.strip().capitalize()
+                mau_day_clean = mau_day.strip().capitalize() if mau_day.strip() else None
                 is_valid, msg = check_quantity_limit(lot_id, sl, "stage", giai_doan=giai_doan, exclude_id=editing_row["id"])
                 if not is_valid: st.error(msg)
                 else:
@@ -563,22 +566,17 @@ def edit_harvest_log_dialog(editing_row, available_lots):
             elif sl <= 0: st.error("❌ Số lượng buồng phải > 0")
             else:
                 mau_day_clean = mau_day.strip().capitalize()
-                res_sm = supabase.table("size_measure_logs").select("id") \
-                    .eq("lot_id", lot_id).eq("mau_day", mau_day_clean).eq("lan_do", 1).eq("is_deleted", False).execute()
-                if not res_sm.data:
-                    st.error(f"❌ Lô `{lot_id}` với màu dây `{mau_day_clean}` chưa trải qua Đo Size lần 1. Xin hãy nhắc Đội NT.")
+                is_valid, msg = check_quantity_limit(lot_id, sl, "harvest", exclude_id=editing_row["id"])
+                if not is_valid: st.error(msg)
                 else:
-                    is_valid, msg = check_quantity_limit(lot_id, sl, "harvest", exclude_id=editing_row["id"])
-                    if not is_valid: st.error(msg)
-                    else:
-                        data = {
-                            "lot_id": lot_id, "mau_day": mau_day_clean, 
-                            "ngay_thu_hoach": ngay.isoformat(), "so_luong": sl, 
-                            "hinh_thuc_thu_hoach": hinh_thuc_thu_hoach, "tuan": ngay.isocalendar()[1]
-                        }
-                        supabase.table("harvest_logs").update(data).eq("id", editing_row["id"]).execute()
-                        st.session_state["toast"] = f"✅ Lưu thu hoạch {lot_id} thành công!"
-                        st.rerun()
+                    data = {
+                        "lot_id": lot_id, "mau_day": mau_day_clean, 
+                        "ngay_thu_hoach": ngay.isoformat(), "so_luong": sl, 
+                        "hinh_thuc_thu_hoach": hinh_thuc_thu_hoach, "tuan": ngay.isocalendar()[1]
+                    }
+                    supabase.table("harvest_logs").update(data).eq("id", editing_row["id"]).execute()
+                    st.session_state["toast"] = f"✅ Lưu thu hoạch {lot_id} thành công!"
+                    st.rerun()
 
 @dialog_decorator("✏️ Chỉnh sửa BSR")
 def edit_bsr_log_dialog(editing_row, available_lots):
@@ -703,8 +701,34 @@ def edit_soil_ph_dialog(editing_row, available_lots):
             if val <= 0: st.error("❌ Cần nhập giá trị pH hợp lệ.")
             else:
                 data = {"lot_id": lot_id, "ngay_do": ngay.isoformat(), "ph_value": val, "tuan": ngay.isocalendar()[1]}
-                supabase.table("soil_ph_logs").update(data).eq("id", editing_row["id"]).execute()
                 st.session_state["toast"] = f"✅ Lưu kết quả pH lô {lot_id} thành công!"
+                st.rerun()
+
+@dialog_decorator("✏️ Chỉnh sửa Kiểm tra Fusarium")
+def edit_fusarium_log_dialog(editing_row, available_lots):
+    def_lot = available_lots.index(editing_row["lot_id"]) if editing_row["lot_id"] in available_lots else 0
+    def_ngay = pd.to_datetime(editing_row["ngay_kiem_tra"]).date()
+    def_sl = int(editing_row["so_cay_fusarium"])
+    
+    with st.container(border=True):
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.text_input("🏷️ Lứa (Mã hệ thống)", value=editing_row["lot_id"], disabled=True, key="dlg_fus_lot")
+            lot_id = editing_row["lot_id"]
+        with col_b:
+            col_b1, col_b2 = st.columns([2, 1])
+            with col_b1:
+                ngay = st.date_input("📆 Ngày kiểm tra", value=def_ngay, key="dlg_fus_ngay")
+            with col_b2:
+                st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key=f"dlg_w_fus_{ngay}")
+            sl = st.number_input("🔢 Số cây bị Fusarium", min_value=0, step=1, value=def_sl, key="dlg_fus_sl")
+
+        if st.button("✅ Cập nhật", key="btn_edit_fus", use_container_width=True, type="primary"):
+            if sl < 0: st.error("❌ Cần nhập số cây lớn hơn hoặc bằng 0.")
+            else:
+                data = {"lot_id": lot_id, "ngay_kiem_tra": ngay.isoformat(), "so_cay_fusarium": sl, "tuan": ngay.isocalendar()[1]}
+                supabase.table("fusarium_logs").update(data).eq("id", editing_row["id"]).execute()
+                st.session_state["toast"] = f"✅ Chi tiết Fusarium lô {lot_id} đã được lưu thành công!"
                 st.rerun()
 
 # MÀN HÌNH ĐĂNG NHẬP
@@ -959,6 +983,54 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des) -> bytes:
     output.seek(0)
     return output.getvalue()
 
+def generate_planting_excel(df_lots, df_seasons):
+    output = io.BytesIO()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Báo cáo Trồng mới"
+
+    headers = ["Ngày trồng", "Lô", "Số lượng cây", "Loại trồng"]
+    for col_num, header_title in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_num, value=header_title)
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = Border(
+            left=Side(style='thin'), right=Side(style='thin'),
+            top=Side(style='thin'), bottom=Side(style='thin')
+        )
+
+    if not df_lots.empty and not df_seasons.empty:
+        df_merged = pd.merge(df_lots, df_seasons[['lo', 'vu', 'farm', 'loai_trong']], on=['farm', 'lo', 'vu'], how='left')
+        df_plot = df_merged[['ngay_trong', 'lo', 'so_luong', 'loai_trong']].copy()
+        df_plot.dropna(subset=['ngay_trong'], inplace=True)
+        df_plot.sort_values(by='ngay_trong', inplace=True)
+        
+        for r_idx, row in df_plot.iterrows():
+            ngay_str = pd.to_datetime(row['ngay_trong']).strftime('%d/%m/%Y')
+            ws.append([ngay_str, row['lo'], row['so_luong'], row.get('loai_trong', 'Trồng mới')])
+            
+            # Apply borders
+            current_row = ws.max_row
+            for col_idx in range(1, 5):
+                ws.cell(row=current_row, column=col_idx).border = Border(
+                    left=Side(style='thin'), right=Side(style='thin'),
+                    top=Side(style='thin'), bottom=Side(style='thin')
+                )
+
+    for col in ws.columns:
+        max_length = 0
+        column = [cell for cell in col]
+        for cell in column:
+            try:
+                if len(str(cell.value)) > max_length: max_length = len(cell.value)
+            except: pass
+        ws.column_dimensions[get_column_letter(column[0].column)].width = (max_length + 2)
+
+    wb.save(output)
+    output.seek(0)
+    return output.getvalue()
+
 def render_global_data_tab(c_farm):
     st.markdown("### 🌐 Bảng dữ liệu Toàn cục Farm")
     st.caption("Khám phá dữ liệu tổng quan bằng các Biểu đồ phân tích và Bộ lọc.")
@@ -972,8 +1044,8 @@ def render_global_data_tab(c_farm):
     df_tree_inv_all = fetch_table_data("tree_inventory_logs", c_farm)
     df_seasons = fetch_table_data("seasons", c_farm)
 
-    # Nút Xuất Báo cáo Excel (Chứa toàn bộ dữ liệu thô)
-    col_t1, col_t2, col_t3 = st.columns([3, 1, 1])
+    # Nút Xuất Báo cáo Excel 
+    col_t1, col_t2, col_t3, col_t4 = st.columns([2, 1, 1, 1])
     with col_t2:
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -992,7 +1064,6 @@ def render_global_data_tab(c_farm):
             type="secondary"
         )
     with col_t3:
-        # Nút Xuất Báo cáo Cắt bắp
         cut_excel = generate_cut_bap_excel(df_lots_all, df_stg_all, df_des_all)
         st.download_button(
             label="✂️ Báo cáo Cắt bắp",
@@ -1002,7 +1073,17 @@ def render_global_data_tab(c_farm):
             use_container_width=True,
             type="secondary"
         )
-        
+    with col_t4:
+        plant_excel = generate_planting_excel(df_lots_all, df_seasons)
+        st.download_button(
+            label="🌱 Báo cáo Trồng mới",
+            data=plant_excel,
+            file_name=f"Bao_cao_trong_moi_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            type="secondary"
+        )
+
     st.divider()
 
     # Filter helpers
@@ -1103,16 +1184,27 @@ def render_global_data_tab(c_farm):
     pipe_har_df = filtered_pipe_dfs["har"]
     pipe_des_df = filtered_pipe_dfs["des"]
 
-    # Gom dữ liệu để vẽ grouped bar chart
+    # Gom dữ liệu để vẽ grouped/stacked bar chart
     if not pipe_lots_df.empty:
-        lots = pipe_lots_df["lo"].unique()
+        # Merge lots with seasons to get loai_trong
+        pipe_lots_merged = pipe_lots_df
+        if not df_seasons.empty:
+            pipe_lots_merged = pd.merge(pipe_lots_df, df_seasons[['lo', 'vu', 'farm', 'loai_trong']], on=['farm', 'lo', 'vu'], how='left')
+
+        lots = pipe_lots_merged["lo"].unique()
         pipeline_data = []
         for l in lots:
-            valid_ids = pipe_lots_df[pipe_lots_df["lo"] == l]["lot_id"].tolist()
+            valid_ids = pipe_lots_merged[pipe_lots_merged["lo"] == l]["lot_id"].tolist()
             
-            # 1. Trồng
-            sl_trong = pipe_lots_df[pipe_lots_df["lo"] == l]["so_luong"].sum()
-            pipeline_data.append({"Lô": l, "Giai đoạn": "1. Đã trồng", "Số lượng": sl_trong})
+            # 1. Trồng mới và Trồng dặm
+            l_lots = pipe_lots_merged[pipe_lots_merged["lo"] == l]
+            sl_trong_moi = l_lots[l_lots["loai_trong"] == "Trồng mới"]["so_luong"].sum()
+            sl_trong_dam = l_lots[l_lots["loai_trong"] == "Trồng dặm"]["so_luong"].sum()
+            # If no season match, default to 'Trồng mới'
+            sl_trong_khac = l_lots[l_lots["loai_trong"].isna()]["so_luong"].sum()
+            
+            pipeline_data.append({"Lô": l, "Giai đoạn": "1a. Trồng mới", "Số lượng": sl_trong_moi + sl_trong_khac})
+            pipeline_data.append({"Lô": l, "Giai đoạn": "1b. Trồng dặm", "Số lượng": sl_trong_dam})
             
             # 2. Chích bắp
             if not pipe_stg_df.empty:
@@ -1140,9 +1232,10 @@ def render_global_data_tab(c_farm):
             
         df_pipeline = pd.DataFrame(pipeline_data)
         
-        # Color mapping cho 5 giai đoạn
+        # Color mapping
         color_map = {
-            "1. Đã trồng": "#4CAF50",      # Green
+            "1a. Trồng mới": "#4CAF50",    # Green
+            "1b. Trồng dặm": "#8BC34A",    # Light Green
             "2. Chích bắp": "#FFC107",     # Amber
             "3. Cắt bắp": "#FF9800",       # Orange
             "4. Thu hoạch": "#2196F3",     # Blue
@@ -1150,7 +1243,7 @@ def render_global_data_tab(c_farm):
         }
         
         fig_pipe = px.bar(
-            df_pipeline, x="Lô", y="Số lượng", color="Giai đoạn", barmode="group",
+            df_pipeline, x="Lô", y="Số lượng", color="Giai đoạn", barmode="stack",
             color_discrete_map=color_map,
             labels={"Lô": "Danh sách Lô", "Số lượng": "Số lượng cây / buồng", "Giai đoạn": "Tiến trình"}
         )
@@ -1201,14 +1294,31 @@ def render_global_data_tab(c_farm):
 
     plot_dfs = []
     
-    # 1. Trồng
+    # 1. Trồng mới / Trồng dặm
     if not ml_lots_df.empty and "ngay_trong" in ml_lots_df.columns:
-        cols_to_keep = ["ngay_trong", "so_luong"]
-        if "lot_id" in ml_lots_df.columns: cols_to_keep.append("lot_id")
-        df_p = ml_lots_df[cols_to_keep].copy()
-        df_p.rename(columns={"ngay_trong": "Date"}, inplace=True)
-        df_p["Giai đoạn"] = "1. Đã trồng"
-        plot_dfs.append(df_p)
+        ml_lots_merged = ml_lots_df
+        if not df_seasons.empty:
+            ml_lots_merged = pd.merge(ml_lots_df, df_seasons[['lo', 'vu', 'farm', 'loai_trong']], on=['farm', 'lo', 'vu'], how='left')
+        
+        cols_to_keep = ["ngay_trong", "so_luong", "loai_trong"]
+        if "lot_id" in ml_lots_merged.columns: cols_to_keep.append("lot_id")
+        
+        # Missing 'loai_trong' maps to "Trồng mới"
+        ml_lots_merged["loai_trong"] = ml_lots_merged["loai_trong"].fillna("Trồng mới")
+        
+        # Trồng mới
+        df_new = ml_lots_merged[ml_lots_merged["loai_trong"] == "Trồng mới"].copy()
+        if not df_new.empty:
+            df_new.rename(columns={"ngay_trong": "Date"}, inplace=True)
+            df_new["Giai đoạn"] = "1a. Trồng mới"
+            plot_dfs.append(df_new)
+            
+        # Trồng dặm
+        df_old = ml_lots_merged[ml_lots_merged["loai_trong"] == "Trồng dặm"].copy()
+        if not df_old.empty:
+            df_old.rename(columns={"ngay_trong": "Date"}, inplace=True)
+            df_old["Giai đoạn"] = "1b. Trồng dặm"
+            plot_dfs.append(df_old)
 
     # 2. Chích bắp & Cắt bắp
     if not ml_stg_df.empty and "ngay_thuc_hien" in ml_stg_df.columns:
@@ -1279,7 +1389,8 @@ def render_global_data_tab(c_farm):
         
         # Color mapping matching the funnel defaults
         color_map = {
-            "1. Đã trồng": "#4CAF50",      # Green
+            "1a. Trồng mới": "#4CAF50",    # Green
+            "1b. Trồng dặm": "#8BC34A",    # Light Green
             "2. Chích bắp": "#FFC107",     # Amber
             "3. Cắt bắp": "#FF9800",       # Orange
             "4. Thu hoạch": "#2196F3",     # Blue
@@ -1439,9 +1550,13 @@ def render_main_app():
                     st.markdown(f"#### 🛠️ Chốt vụ: `{row['farm']}` - Lô `{row['lo']}` (Hiện tại: `{row['vu']}`)")
                     col1, col2 = st.columns(2)
                     with col1:
+                        cur_start = row.get("ngay_bat_dau")
+                        def_start_date = pd.to_datetime(cur_start).date() if cur_start else date.today()
+                        start_date = st.date_input("📆 Ngày bắt đầu", value=def_start_date)
+                        
                         cur_end = row.get("ngay_ket_thuc_thuc_te")
-                        def_date = pd.to_datetime(cur_end).date() if cur_end else date.today()
-                        end_date = st.date_input("📆 Ngày kết thúc (Thực tế)", value=def_date)
+                        def_end_date = pd.to_datetime(cur_end).date() if cur_end else date.today()
+                        end_date = st.date_input("📆 Ngày kết thúc (Thực tế)", value=def_end_date)
                     with col2:
                         curr_v = str(row["vu"])
                         try:
@@ -1456,6 +1571,7 @@ def render_main_app():
                     if st.button("💾 Lưu thay đổi & Chốt vụ", use_container_width=True, type="primary"):
                         try:
                             supabase.table("seasons").update({
+                                "ngay_bat_dau": start_date.isoformat(),
                                 "ngay_ket_thuc_thuc_te": end_date.isoformat()
                             }).eq("id", row["id"]).execute()
                             
@@ -1495,7 +1611,7 @@ def render_main_app():
         if c_team == "Đội BVTV":
             tab_opts = ["🌐 Dữ liệu toàn cục", "📈 Cập nhật Tiến độ"]
         else:
-            tab_opts = ["🌐 Dữ liệu toàn cục", "🌱 Khởi tạo Lô trồng", "📈 Cập nhật Tiến độ", "📏 Đo Size", "🗑️ Cập nhật Xuất hủy", "🌳 Kiểm kê cây", "🧪 Đo pH Đất"]
+            tab_opts = ["🌐 Dữ liệu toàn cục", "🌱 Khởi tạo Lô trồng", "📈 Cập nhật Tiến độ", "📏 Đo Size", "🗑️ Cập nhật Xuất hủy", "🌳 Kiểm kê cây", "🧪 Đo pH Đất", "🦠 Kiểm tra Fusarium"]
             
         active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_nt_menu", default=tab_opts[0])
         if active_tab is None: active_tab = tab_opts[0] # Prevent empty state
@@ -2001,6 +2117,82 @@ def render_main_app():
                     with col_e: st.caption("🔒 Quá 48h")
                     
                 render_team_dataframe("destruction_logs", df_des_team, ["lot_id", "ngay_xuat_huy", "giai_doan", "mau_day", "so_luong", "ly_do"])
+
+        # TAB 8: KIỂM TRA FUSARIUM
+        elif active_tab == "🦠 Kiểm tra Fusarium":
+            st.markdown("#### Ghi nhận số lượng cây bị bệnh Fusarium")
+            available_lots = get_lots_by_farm(c_farm)
+            if not available_lots:
+                st.warning("⚠️ Chưa có Lô trồng nào. Hãy tạo ở Tab 1.")
+            else:
+                df_fus = fetch_table_data("fusarium_logs", c_farm)
+                df_fus_team = df_fus[df_fus["team"] == c_team] if not df_fus.empty else pd.DataFrame()
+                editing_row, is_within_48h = get_editing_row("fusarium_logs", df_fus_team)
+                is_editing = editing_row is not None
+                
+                with st.container(border=True):
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        lot_id = st.selectbox("🏷️ Chọn Lô kiểm tra", options=available_lots, key="add_fus_lot")
+                    with col_b:
+                        col_b1, col_b2 = st.columns([2, 1])
+                        with col_b1:
+                            ngay_kiem_tra = st.date_input("📆 Ngày kiểm tra", value=date.today(), key="add_fus_ngay")
+                        with col_b2:
+                            st.text_input("📍 Tuần", value=str(ngay_kiem_tra.isocalendar()[1]), disabled=True, key=f"main_w_fus_{ngay_kiem_tra}")
+                        so_cay = st.number_input("🔢 Số lượng cây bị Fusarium", min_value=0, step=1, key="add_fus_cay")
+                        
+                    st.markdown("")
+                    if st.button("➕ Thêm vào Danh sách", key="btn_add_fus", use_container_width=True, type="secondary"):
+                        if so_cay < 0: st.error("❌ Số lượng cây phải >= 0.")
+                        else:
+                            st.session_state["queue_fus"].append({
+                                "Lô": lot_id, "Ngày": ngay_kiem_tra.isoformat(), "Số cây": so_cay, "Tuần": ngay_kiem_tra.isocalendar()[1]
+                            })
+                            st.rerun()
+
+                def process_fus_queue():
+                    queue = st.session_state["queue_fus"]
+                    success_count = 0
+                    for item in queue:
+                        data = {
+                            "farm": c_farm, "team": c_team, "lot_id": item["Lô"],
+                            "ngay_kiem_tra": item["Ngày"], "so_cay_fusarium": item["Số cây"], "tuan": item["Tuần"]
+                        }
+                        try:
+                            supabase.table("fusarium_logs").insert(data).execute()
+                            success_count += 1
+                        except Exception as e:
+                            st.error(f"❌ Lỗi ghi Lô {item['Lô']}: {e}")
+                            return
+                            
+                    st.session_state["queue_fus"] = []
+                    st.cache_data.clear()
+                    st.session_state["toast"] = f"✅ Ghi nhận {success_count} kết quả kiểm tra Fusarium thành công!"
+                    st.rerun()
+
+                render_queue_ui("queue_fus", ["Lô", "Số cây", "Ngày", "Tuần"], process_fus_queue)
+                
+                st.markdown("---")
+                col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
+                with col_t:
+                    st.markdown('<p class="dataframe-header" style="margin-top:0.5rem;">Dữ liệu của đội bạn (Click 1 dòng để sửa/xóa)</p>', unsafe_allow_html=True)
+                
+                if is_editing and is_within_48h:
+                    with col_e:
+                        if st.button("✏️ Chỉnh sửa", key="edit_fus_nt", use_container_width=True):
+                            edit_fusarium_log_dialog(editing_row, available_lots)
+                    with col_d:
+                        if st.button("🗑️ Xóa", key="del_fus_nt", use_container_width=True):
+                            confirm_action_dialog("DELETE", "fusarium_logs", editing_row["id"], None, "✅ Đã xóa bản ghi kiểm tra Fusarium!")
+                elif is_editing and not is_within_48h:
+                    with col_e: st.caption("🔒 Quá 48h")
+                    with col_d: st.empty()
+                else:
+                    with col_e: st.empty()
+                    with col_d: st.empty()
+                    
+                render_team_dataframe("fusarium_logs", df_fus_team, ["lot_id", "ngay_kiem_tra", "so_cay_fusarium", "tuan"])
 
         # TAB 4: DỮ LIỆU TOÀN CỤC
         elif active_tab == "🌐 Dữ liệu toàn cục":
