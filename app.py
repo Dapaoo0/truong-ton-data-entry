@@ -1000,15 +1000,25 @@ def generate_planting_excel(df_lots, df_seasons):
             top=Side(style='thin'), bottom=Side(style='thin')
         )
 
-    if not df_lots.empty and not df_seasons.empty:
-        df_merged = pd.merge(df_lots, df_seasons[['lo', 'vu', 'farm', 'loai_trong']], on=['farm', 'lo', 'vu'], how='left')
-        df_plot = df_merged[['ngay_trong', 'lo', 'so_luong', 'loai_trong']].copy()
+    if not df_lots.empty:
+        df_plot = df_lots[['ngay_trong', 'farm', 'lo', 'so_luong', 'lot_id']].copy()
         df_plot.dropna(subset=['ngay_trong'], inplace=True)
         df_plot.sort_values(by='ngay_trong', inplace=True)
         
+        # Map loai_trong from seasons (by lot_id via seasons.lo)
+        if not df_seasons.empty and 'loai_trong' in df_seasons.columns and 'lo' in df_seasons.columns:
+            # Build lot_id -> loai_trong map via lots -> seasons (on lo+farm)
+            seasons_map = df_seasons.drop_duplicates(subset=['farm', 'lo'])[['farm', 'lo', 'loai_trong']]
+            df_plot = pd.merge(df_plot, seasons_map, on=['farm', 'lo'], how='left')
+        else:
+            df_plot['loai_trong'] = None
+        
+        df_plot['loai_trong'] = df_plot['loai_trong'].fillna('Trồng mới')
+        
         for r_idx, row in df_plot.iterrows():
             ngay_str = pd.to_datetime(row['ngay_trong']).strftime('%d/%m/%Y')
-            ws.append([ngay_str, row['lo'], row['so_luong'], row.get('loai_trong', 'Trồng mới')])
+            loai = row.get('loai_trong', 'Trồng mới') or 'Trồng mới'
+            ws.append([ngay_str, row['lo'], row['so_luong'], loai])
             
             # Apply borders
             current_row = ws.max_row
@@ -1188,8 +1198,9 @@ def render_global_data_tab(c_farm):
     if not pipe_lots_df.empty:
         # Merge lots with seasons to get loai_trong
         pipe_lots_merged = pipe_lots_df
-        if not df_seasons.empty:
-            pipe_lots_merged = pd.merge(pipe_lots_df, df_seasons[['lo', 'vu', 'farm', 'loai_trong']], on=['farm', 'lo', 'vu'], how='left')
+        if not df_seasons.empty and 'loai_trong' in df_seasons.columns:
+            seasons_dedup = df_seasons.drop_duplicates(subset=['farm', 'lo'])[['farm', 'lo', 'loai_trong']]
+            pipe_lots_merged = pd.merge(pipe_lots_df, seasons_dedup, on=['farm', 'lo'], how='left')
 
         lots = pipe_lots_merged["lo"].unique()
         pipeline_data = []
@@ -1297,8 +1308,12 @@ def render_global_data_tab(c_farm):
     # 1. Trồng mới / Trồng dặm
     if not ml_lots_df.empty and "ngay_trong" in ml_lots_df.columns:
         ml_lots_merged = ml_lots_df
-        if not df_seasons.empty:
-            ml_lots_merged = pd.merge(ml_lots_df, df_seasons[['lo', 'vu', 'farm', 'loai_trong']], on=['farm', 'lo', 'vu'], how='left')
+        if not df_seasons.empty and 'loai_trong' in df_seasons.columns:
+            seasons_dedup = df_seasons.drop_duplicates(subset=['farm', 'lo'])[['farm', 'lo', 'loai_trong']]
+            ml_lots_merged = pd.merge(ml_lots_df, seasons_dedup, on=['farm', 'lo'], how='left')
+        else:
+            ml_lots_merged = ml_lots_df.copy()
+            ml_lots_merged['loai_trong'] = None
         
         cols_to_keep = ["ngay_trong", "so_luong", "loai_trong"]
         if "lot_id" in ml_lots_merged.columns: cols_to_keep.append("lot_id")
