@@ -1296,164 +1296,160 @@ def render_global_data_tab(c_farm):
     }
 
     if not lc_lots_df.empty:
-        col_ideal, col_actual = st.columns(2)
-
         # ==============================
         # CHART 1: DỰ TOÁN (LÝ TƯỞNG)
         # ==============================
-        with col_ideal:
-            st.markdown("##### 🎯 Dự toán (Lý tưởng)")
-            ideal_events = []
-            for _, lot_row in lc_lots_df.drop_duplicates(subset=["lot_id"]).iterrows():
-                lot_id = lot_row["lot_id"]
-                lo_name = lot_row["lo"]
-                sl = int(lot_row["so_luong"])
-                d_trong = pd.to_datetime(lot_row["ngay_trong"])
-                d_chich = d_trong + timedelta(days=180)
-                d_cat = d_chich + timedelta(days=14)
-                d_thu = d_cat + timedelta(days=70)
+        st.markdown("##### 🎯 Dự toán (Lý tưởng)")
+        ideal_events = []
+        for _, lot_row in lc_lots_df.drop_duplicates(subset=["lot_id"]).iterrows():
+            lot_id = lot_row["lot_id"]
+            lo_name = lot_row["lo"]
+            sl = int(lot_row["so_luong"])
+            d_trong = pd.to_datetime(lot_row["ngay_trong"])
+            d_chich = d_trong + timedelta(days=180)
+            d_cat = d_chich + timedelta(days=14)
+            d_thu = d_cat + timedelta(days=70)
 
-                ideal_events.append({"lot_id": lot_id, "lo": lo_name, "date": d_trong, "so_luong": sl, "giai_doan": "Trồng",
-                    "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Trồng<br>Ngày: {d_trong.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
-                ideal_events.append({"lot_id": lot_id, "lo": lo_name, "date": d_chich, "so_luong": sl, "giai_doan": "Chích bắp",
-                    "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Chích bắp<br>Ngày: {d_chich.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
-                ideal_events.append({"lot_id": lot_id, "lo": lo_name, "date": d_cat, "so_luong": sl, "giai_doan": "Cắt bắp",
-                    "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Cắt bắp<br>Ngày: {d_cat.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
-                ideal_events.append({"lot_id": lot_id, "lo": lo_name, "date": d_thu, "so_luong": sl, "giai_doan": "Thu hoạch",
-                    "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Thu hoạch<br>Ngày: {d_thu.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây<br><b>Sản lượng dự toán: {sl * KG_PER_TREE_CHART:,.0f} kg</b>"})
+            ideal_events.append({"lot_id": lot_id, "lo": lo_name, "date": d_trong, "so_luong": sl, "giai_doan": "Trồng",
+                "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Trồng<br>Ngày: {d_trong.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
+            ideal_events.append({"lot_id": lot_id, "lo": lo_name, "date": d_chich, "so_luong": sl, "giai_doan": "Chích bắp",
+                "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Chích bắp<br>Ngày: {d_chich.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
+            ideal_events.append({"lot_id": lot_id, "lo": lo_name, "date": d_cat, "so_luong": sl, "giai_doan": "Cắt bắp",
+                "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Cắt bắp<br>Ngày: {d_cat.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
+            ideal_events.append({"lot_id": lot_id, "lo": lo_name, "date": d_thu, "so_luong": sl, "giai_doan": "Thu hoạch",
+                "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Thu hoạch<br>Ngày: {d_thu.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây<br><b>Sản lượng dự toán: {sl * KG_PER_TREE_CHART:,.0f} kg</b>"})
 
-            df_ideal = pd.DataFrame(ideal_events)
-            fig_ideal = go.Figure()
+        df_ideal = pd.DataFrame(ideal_events)
+        fig_ideal = go.Figure()
 
-            # Đường nối mờ cho mỗi Lô
-            for lid in df_ideal["lot_id"].unique():
-                lot_data = df_ideal[df_ideal["lot_id"] == lid].sort_values("date")
+        # Đường nối mờ cho mỗi Lô
+        for lid in df_ideal["lot_id"].unique():
+            lot_data = df_ideal[df_ideal["lot_id"] == lid].sort_values("date")
+            fig_ideal.add_trace(go.Scatter(
+                x=lot_data["date"], y=lot_data["so_luong"],
+                mode="lines", line=dict(color="rgba(150,150,150,0.4)", width=1.5, dash="dot"),
+                showlegend=False, hoverinfo="skip",
+                name=lot_data["lo"].iloc[0]
+            ))
+
+        # Marker màu theo giai đoạn
+        for stage in ["Trồng", "Chích bắp", "Cắt bắp", "Thu hoạch"]:
+            stage_data = df_ideal[df_ideal["giai_doan"] == stage]
+            if not stage_data.empty:
                 fig_ideal.add_trace(go.Scatter(
-                    x=lot_data["date"], y=lot_data["so_luong"],
-                    mode="lines", line=dict(color="rgba(150,150,150,0.4)", width=1.5, dash="dot"),
-                    showlegend=False, hoverinfo="skip",
-                    name=lot_data["lo"].iloc[0]
+                    x=stage_data["date"], y=stage_data["so_luong"],
+                    mode="markers",
+                    marker=dict(size=10, color=STAGE_COLORS[stage], line=dict(width=1, color="white")),
+                    name=stage, text=stage_data["hover"],
+                    hovertemplate="%{text}<extra></extra>"
                 ))
 
-            # Marker màu theo giai đoạn
-            for stage in ["Trồng", "Chích bắp", "Cắt bắp", "Thu hoạch"]:
-                stage_data = df_ideal[df_ideal["giai_doan"] == stage]
-                if not stage_data.empty:
-                    fig_ideal.add_trace(go.Scatter(
-                        x=stage_data["date"], y=stage_data["so_luong"],
-                        mode="markers",
-                        marker=dict(size=10, color=STAGE_COLORS[stage], line=dict(width=1, color="white")),
-                        name=stage, text=stage_data["hover"],
-                        hovertemplate="%{text}<extra></extra>"
-                    ))
-
-            fig_ideal.update_layout(
-                plot_bgcolor="rgba(0,0,0,0)",
-                yaxis={"showgrid": True, "gridcolor": "rgba(0,0,0,0.1)", "title": "Số cây"},
-                xaxis={"title": "Thời gian"},
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                height=450, margin=dict(t=60)
-            )
-            st.plotly_chart(fig_ideal, use_container_width=True)
+        fig_ideal.update_layout(
+            plot_bgcolor="rgba(0,0,0,0)",
+            yaxis={"showgrid": True, "gridcolor": "rgba(0,0,0,0.1)", "title": "Số cây"},
+            xaxis={"title": "Thời gian"},
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            height=400, margin=dict(t=60)
+        )
+        st.plotly_chart(fig_ideal, use_container_width=True)
 
         # ==============================
         # CHART 2: THỰC TẾ
         # ==============================
-        with col_actual:
-            st.markdown("##### 📊 Thực tế")
-            actual_events = []
-            for _, lot_row in lc_lots_df.drop_duplicates(subset=["lot_id"]).iterrows():
-                lot_id = lot_row["lot_id"]
-                lo_name = lot_row["lo"]
-                sl_trong = int(lot_row["so_luong"])
-                ngay_trong = pd.to_datetime(lot_row["ngay_trong"])
+        st.markdown("##### 📊 Thực tế")
+        actual_events = []
+        for _, lot_row in lc_lots_df.drop_duplicates(subset=["lot_id"]).iterrows():
+            lot_id = lot_row["lot_id"]
+            lo_name = lot_row["lo"]
+            sl_trong = int(lot_row["so_luong"])
+            ngay_trong = pd.to_datetime(lot_row["ngay_trong"])
 
-                # Sự kiện Trồng
-                actual_events.append({"lot_id": lot_id, "lo": lo_name, "date": ngay_trong,
-                    "so_luong": sl_trong, "giai_doan": "Trồng",
-                    "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Trồng<br>Ngày: {ngay_trong.strftime('%d/%m/%Y')}<br>Số lượng: {sl_trong:,} cây"})
+            # Sự kiện Trồng
+            actual_events.append({"lot_id": lot_id, "lo": lo_name, "date": ngay_trong,
+                "so_luong": sl_trong, "giai_doan": "Trồng",
+                "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Trồng<br>Ngày: {ngay_trong.strftime('%d/%m/%Y')}<br>Số lượng: {sl_trong:,} cây"})
 
-                # Sự kiện Chích bắp
-                if not lc_stg_df.empty:
-                    cb_data = lc_stg_df[(lc_stg_df["lot_id"] == lot_id) & (lc_stg_df["giai_doan"] == "Chích bắp")]
-                    if not cb_data.empty:
-                        for _, row in cb_data.groupby("ngay_thuc_hien")["so_luong"].sum().reset_index().iterrows():
-                            d = pd.to_datetime(row["ngay_thuc_hien"])
-                            sl = int(row["so_luong"])
-                            actual_events.append({"lot_id": lot_id, "lo": lo_name, "date": d,
-                                "so_luong": sl, "giai_doan": "Chích bắp",
-                                "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Chích bắp<br>Ngày: {d.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
+            # Sự kiện Chích bắp
+            if not lc_stg_df.empty:
+                cb_data = lc_stg_df[(lc_stg_df["lot_id"] == lot_id) & (lc_stg_df["giai_doan"] == "Chích bắp")]
+                if not cb_data.empty:
+                    for _, row in cb_data.groupby("ngay_thuc_hien")["so_luong"].sum().reset_index().iterrows():
+                        d = pd.to_datetime(row["ngay_thuc_hien"])
+                        sl = int(row["so_luong"])
+                        actual_events.append({"lot_id": lot_id, "lo": lo_name, "date": d,
+                            "so_luong": sl, "giai_doan": "Chích bắp",
+                            "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Chích bắp<br>Ngày: {d.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
 
-                # Sự kiện Cắt bắp
-                if not lc_stg_df.empty:
-                    cat_data = lc_stg_df[(lc_stg_df["lot_id"] == lot_id) & (lc_stg_df["giai_doan"] == "Cắt bắp")]
-                    if not cat_data.empty:
-                        for _, row in cat_data.groupby("ngay_thuc_hien")["so_luong"].sum().reset_index().iterrows():
-                            d = pd.to_datetime(row["ngay_thuc_hien"])
-                            sl = int(row["so_luong"])
-                            actual_events.append({"lot_id": lot_id, "lo": lo_name, "date": d,
-                                "so_luong": sl, "giai_doan": "Cắt bắp",
-                                "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Cắt bắp<br>Ngày: {d.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
+            # Sự kiện Cắt bắp
+            if not lc_stg_df.empty:
+                cat_data = lc_stg_df[(lc_stg_df["lot_id"] == lot_id) & (lc_stg_df["giai_doan"] == "Cắt bắp")]
+                if not cat_data.empty:
+                    for _, row in cat_data.groupby("ngay_thuc_hien")["so_luong"].sum().reset_index().iterrows():
+                        d = pd.to_datetime(row["ngay_thuc_hien"])
+                        sl = int(row["so_luong"])
+                        actual_events.append({"lot_id": lot_id, "lo": lo_name, "date": d,
+                            "so_luong": sl, "giai_doan": "Cắt bắp",
+                            "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Cắt bắp<br>Ngày: {d.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
 
-                # Sự kiện Thu hoạch
-                if not lc_har_df.empty:
-                    har_data = lc_har_df[lc_har_df["lot_id"] == lot_id]
-                    if not har_data.empty:
-                        for _, row in har_data.groupby("ngay_thu_hoach")["so_luong"].sum().reset_index().iterrows():
-                            d = pd.to_datetime(row["ngay_thu_hoach"])
-                            sl = int(row["so_luong"])
-                            actual_events.append({"lot_id": lot_id, "lo": lo_name, "date": d,
-                                "so_luong": sl, "giai_doan": "Thu hoạch",
-                                "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Thu hoạch<br>Ngày: {d.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} buồng<br><b>Sản lượng dự toán: {sl * KG_PER_TREE_CHART:,.0f} kg</b>"})
+            # Sự kiện Thu hoạch
+            if not lc_har_df.empty:
+                har_data = lc_har_df[lc_har_df["lot_id"] == lot_id]
+                if not har_data.empty:
+                    for _, row in har_data.groupby("ngay_thu_hoach")["so_luong"].sum().reset_index().iterrows():
+                        d = pd.to_datetime(row["ngay_thu_hoach"])
+                        sl = int(row["so_luong"])
+                        actual_events.append({"lot_id": lot_id, "lo": lo_name, "date": d,
+                            "so_luong": sl, "giai_doan": "Thu hoạch",
+                            "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Thu hoạch<br>Ngày: {d.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} buồng<br><b>Sản lượng dự toán: {sl * KG_PER_TREE_CHART:,.0f} kg</b>"})
 
-                # Sự kiện Xuất hủy (điểm rời, không nối line)
-                if not lc_des_df.empty:
-                    des_data = lc_des_df[lc_des_df["lot_id"] == lot_id]
-                    if not des_data.empty:
-                        for _, row in des_data.groupby("ngay_xuat_huy")["so_luong"].sum().reset_index().iterrows():
-                            d = pd.to_datetime(row["ngay_xuat_huy"])
-                            sl = int(row["so_luong"])
-                            actual_events.append({"lot_id": lot_id, "lo": lo_name, "date": d,
-                                "so_luong": sl, "giai_doan": "Xuất hủy",
-                                "hover": f"<b>Lô {lo_name}</b><br>🗑️ Xuất hủy<br>Ngày: {d.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
+            # Sự kiện Xuất hủy (điểm rời, không nối line)
+            if not lc_des_df.empty:
+                des_data = lc_des_df[lc_des_df["lot_id"] == lot_id]
+                if not des_data.empty:
+                    for _, row in des_data.groupby("ngay_xuat_huy")["so_luong"].sum().reset_index().iterrows():
+                        d = pd.to_datetime(row["ngay_xuat_huy"])
+                        sl = int(row["so_luong"])
+                        actual_events.append({"lot_id": lot_id, "lo": lo_name, "date": d,
+                            "so_luong": sl, "giai_doan": "Xuất hủy",
+                            "hover": f"<b>Lô {lo_name}</b><br>🗑️ Xuất hủy<br>Ngày: {d.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
 
-            fig_actual = go.Figure()
-            if actual_events:
-                df_actual = pd.DataFrame(actual_events)
+        fig_actual = go.Figure()
+        if actual_events:
+            df_actual = pd.DataFrame(actual_events)
 
-                # Đường nối mờ cho mỗi Lô (chỉ nối các giai đoạn chính, BỎ QUA Xuất hủy)
-                for lid in df_actual["lot_id"].unique():
-                    lot_data = df_actual[(df_actual["lot_id"] == lid) & (df_actual["giai_doan"] != "Xuất hủy")].sort_values("date")
-                    if len(lot_data) > 1:
-                        fig_actual.add_trace(go.Scatter(
-                            x=lot_data["date"], y=lot_data["so_luong"],
-                            mode="lines", line=dict(color="rgba(150,150,150,0.4)", width=1.5, dash="dot"),
-                            showlegend=False, hoverinfo="skip",
-                            name=lot_data["lo"].iloc[0]
-                        ))
+            # Đường nối mờ cho mỗi Lô (chỉ nối các giai đoạn chính, BỎ QUA Xuất hủy)
+            for lid in df_actual["lot_id"].unique():
+                lot_data = df_actual[(df_actual["lot_id"] == lid) & (df_actual["giai_doan"] != "Xuất hủy")].sort_values("date")
+                if len(lot_data) > 1:
+                    fig_actual.add_trace(go.Scatter(
+                        x=lot_data["date"], y=lot_data["so_luong"],
+                        mode="lines", line=dict(color="rgba(150,150,150,0.4)", width=1.5, dash="dot"),
+                        showlegend=False, hoverinfo="skip",
+                        name=lot_data["lo"].iloc[0]
+                    ))
 
-                # Marker màu theo giai đoạn
-                for stage, color in STAGE_COLORS.items():
-                    stage_data = df_actual[df_actual["giai_doan"] == stage]
-                    if not stage_data.empty:
-                        marker_symbol = "x" if stage == "Xuất hủy" else "circle"
-                        marker_size = 12 if stage == "Xuất hủy" else 10
-                        fig_actual.add_trace(go.Scatter(
-                            x=stage_data["date"], y=stage_data["so_luong"],
-                            mode="markers",
-                            marker=dict(size=marker_size, color=color, symbol=marker_symbol, line=dict(width=1, color="white")),
-                            name=stage, text=stage_data["hover"],
-                            hovertemplate="%{text}<extra></extra>"
-                        ))
+            # Marker màu theo giai đoạn
+            for stage, color in STAGE_COLORS.items():
+                stage_data = df_actual[df_actual["giai_doan"] == stage]
+                if not stage_data.empty:
+                    marker_symbol = "x" if stage == "Xuất hủy" else "circle"
+                    marker_size = 12 if stage == "Xuất hủy" else 10
+                    fig_actual.add_trace(go.Scatter(
+                        x=stage_data["date"], y=stage_data["so_luong"],
+                        mode="markers",
+                        marker=dict(size=marker_size, color=color, symbol=marker_symbol, line=dict(width=1, color="white")),
+                        name=stage, text=stage_data["hover"],
+                        hovertemplate="%{text}<extra></extra>"
+                    ))
 
-            fig_actual.update_layout(
-                plot_bgcolor="rgba(0,0,0,0)",
-                yaxis={"showgrid": True, "gridcolor": "rgba(0,0,0,0.1)", "title": "Số cây"},
-                xaxis={"title": "Thời gian"},
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                height=450, margin=dict(t=60)
-            )
-            st.plotly_chart(fig_actual, use_container_width=True)
+        fig_actual.update_layout(
+            plot_bgcolor="rgba(0,0,0,0)",
+            yaxis={"showgrid": True, "gridcolor": "rgba(0,0,0,0.1)", "title": "Số cây"},
+            xaxis={"title": "Thời gian"},
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            height=400, margin=dict(t=60)
+        )
+        st.plotly_chart(fig_actual, use_container_width=True)
     else:
         st.info("Chưa có dữ liệu Lô trồng để hiển thị biểu đồ tiến độ.")
 
