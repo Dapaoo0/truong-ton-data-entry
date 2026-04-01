@@ -48,39 +48,29 @@ st.set_page_config(
 )
 
 # =====================================================
-# MẢNG MẬT KHẨU CỨNG & QUYỀN (RBAC)
+# QUYỀN TRUY CẬP (RBAC) — ĐỌC TỪ DATABASE
 # =====================================================
-# Cấu trúc: RBAC_DB[Farm][Team] = Password
-RBAC_DB = {
-    "Admin": {
-        "Quản trị viên": "admin123"
-    },
-    "Farm 126": {
-        "NT1": "6677028",
-        "NT2": "040187",
-        "Đội BVTV": "123",
-        "Đội Thu Hoạch": "123",
-        "Xưởng Đóng Gói": "123",
-        "Quản lý farm": "ql126"
-    },
-    "Farm 157": {
-        "NT1": "Trung@1985",
-        "NT2": "0056",
-        "Đội BVTV": "456",
-        "Đội Thu Hoạch": "456",
-        "Xưởng Đóng Gói": "456",
-        "Quản lý farm": "ql157"
-    },
-    "Farm 195": {
-        "NT1": "789",
-        "NT2": "789",
-        "Đội BVTV": "789",
-        "Đội Thu Hoạch": "789",
-        "Xưởng Đóng Gói": "789",
-        "Quản lý farm": "ql195"
-    }
-}
+# Cấu trúc trả về: RBAC_DB[Farm][Team] = Password
 
+@st.cache_data(ttl=300)  # Cache 5 phút
+def fetch_rbac_from_db():
+    """Đọc bảng user_roles từ Supabase, trả về dict {farm: {team: password}}."""
+    try:
+        res = supabase.table("user_roles").select("farm, team, password").eq("is_active", True).execute()
+        rbac = {}
+        for row in res.data:
+            farm = row["farm"]
+            team = row["team"]
+            pw = row["password"]
+            if farm not in rbac:
+                rbac[farm] = {}
+            rbac[farm][team] = pw
+        return rbac
+    except Exception as e:
+        st.error(f"❌ Không thể tải dữ liệu phân quyền: {e}")
+        return {}
+
+RBAC_DB = fetch_rbac_from_db()
 FARMS = list(RBAC_DB.keys())
 TEAMS = ["NT1", "NT2", "Đội BVTV", "Đội Thu Hoạch", "Xưởng Đóng Gói", "Quản lý farm"]
 
@@ -1154,6 +1144,106 @@ def render_global_data_tab(c_farm):
         return res
 
     st.divider()
+
+    # --- DỰ TOÁN SẢN LƯỢNG THU HOẠCH (KG) ---
+    KG_PER_TREE = 18
+
+    st.markdown("#### ⚖️ Dự toán Sản lượng Thu hoạch (Kg)")
+    st.caption(f"Ước tính sản lượng dựa trên số cây ở giai đoạn gần nhất × **{KG_PER_TREE} kg/cây**.")
+
+    # Bộ lọc riêng (cùng pattern với các chart khác)
+    if c_farm == "Admin":
+        ekf0, ekf1, ekf2, ekf3 = st.columns([1, 1, 1, 1])
+        with ekf0:
+            ek_farm = st.selectbox("Lọc theo Farm", options=farms_all, key="ek_farm")
+        with ekf1:
+            ek_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="ek_vu")
+        with ekf2:
+            ek_team = st.selectbox("Lọc theo Đội", options=teams_all, key="ek_team")
+        with ekf3:
+            ek_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="ek_lot")
+    else:
+        ek_farm = c_farm
+        ekf1, ekf2, ekf3 = st.columns([1, 1, 1])
+        with ekf1:
+            ek_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="ek_vu")
+        with ekf2:
+            ek_team = st.selectbox("Lọc theo Đội", options=teams_all, key="ek_team")
+        with ekf3:
+            ek_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="ek_lot")
+
+    filtered_ek_dfs = apply_filters_local(ek_farm, ek_vu, ek_team, ek_lot, None, {
+        "lots": df_lots_all, "stg": df_stg_all, "des": df_des_all, "har": df_har_all
+    })
+
+    ek_lots_df = filtered_ek_dfs["lots"]
+    ek_stg_df = filtered_ek_dfs["stg"]
+    ek_har_df = filtered_ek_dfs["har"]
+    ek_des_df = filtered_ek_dfs["des"]
+
+    if not ek_lots_df.empty:
+        estimation_rows = []
+        lot_ids = ek_lots_df["lot_id"].unique()
+
+        total_cay_co_so = 0
+        total_da_thu = 0
+        total_xuat_huy = 0
+
+        for lot_id in lot_ids:
+            lot_row = ek_lots_df[ek_lots_df["lot_id"] == lot_id].iloc[0]
+            lo_name = lot_row["lo"]
+            so_luong_trong = int(lot_row["so_luong"])
+
+            so_chich_bap = int(ek_stg_df[(ek_stg_df["lot_id"] == lot_id) & (ek_stg_df["giai_doan"] == "Chích bắp")]["so_luong"].sum()) if not ek_stg_df.empty else 0
+            so_cat_bap = int(ek_stg_df[(ek_stg_df["lot_id"] == lot_id) & (ek_stg_df["giai_doan"] == "Cắt bắp")]["so_luong"].sum()) if not ek_stg_df.empty else 0
+            so_thu_hoach = int(ek_har_df[ek_har_df["lot_id"] == lot_id]["so_luong"].sum()) if not ek_har_df.empty else 0
+            so_xuat_huy = int(ek_des_df[ek_des_df["lot_id"] == lot_id]["so_luong"].sum()) if not ek_des_df.empty else 0
+
+            if so_cat_bap > 0:
+                giai_doan = "Cắt bắp"
+                so_cay_co_so = so_cat_bap
+            elif so_chich_bap > 0:
+                giai_doan = "Chích bắp"
+                so_cay_co_so = so_chich_bap
+            else:
+                giai_doan = "Đã trồng"
+                so_cay_co_so = so_luong_trong
+
+            so_cay_con_lai = max(so_cay_co_so - so_thu_hoach - so_xuat_huy, 0)
+
+            total_cay_co_so += so_cay_co_so
+            total_da_thu += so_thu_hoach
+            total_xuat_huy += so_xuat_huy
+
+            estimation_rows.append({
+                "Lô": lo_name,
+                "Giai đoạn": giai_doan,
+                "Cây cơ sở": f"{so_cay_co_so:,}",
+                "Thu hoạch": f"{so_thu_hoach:,}",
+                "Xuất hủy": f"{so_xuat_huy:,}",
+                "Còn lại": f"{so_cay_con_lai:,}",
+                "Kg dự toán": f"{so_cay_con_lai * KG_PER_TREE:,.0f}",
+            })
+
+        total_con_lai = max(total_cay_co_so - total_da_thu - total_xuat_huy, 0)
+
+        # Metric cards
+        m1, m2, m3, m4 = st.columns(4)
+        with m1:
+            st.metric("🌱 Tổng cây cơ sở", f"{total_cay_co_so:,}")
+        with m2:
+            st.metric("✅ Đã thu hoạch", f"{total_da_thu:,} cây", delta=f"{total_da_thu * KG_PER_TREE:,.0f} kg")
+        with m3:
+            st.metric("🗑️ Xuất hủy", f"{total_xuat_huy:,} cây")
+        with m4:
+            st.metric("📦 Kg dự toán còn lại", f"{total_con_lai * KG_PER_TREE:,.0f} kg")
+
+        # Chi tiết trong expander
+        with st.expander("📋 Xem chi tiết theo từng Lô"):
+            df_estimation = pd.DataFrame(estimation_rows)
+            st.dataframe(df_estimation, use_container_width=True, hide_index=True)
+    else:
+        st.info("Chưa có dữ liệu Lô trồng để dự toán.")
 
     st.divider()
 
