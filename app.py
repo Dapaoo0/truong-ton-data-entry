@@ -177,9 +177,8 @@ def fetch_table_data(table_name: str, farm: str) -> pd.DataFrame:
         df["farm"] = df["dim_lo"].apply(lambda x: x.get("dim_farm", {}).get("farm_name") if isinstance(x, dict) else None)
         df["team"] = df["dim_lo"].apply(lambda x: x.get("dim_doi", {}).get("doi_name") if isinstance(x, dict) else None)
         df["lo"] = df["dim_lo"].apply(lambda x: x.get("lo_name") if isinstance(x, dict) else None)
-        if table_name != "base_lots":
-            df["dien_tich"] = df["dim_lo"].apply(lambda x: x.get("area_ha") if isinstance(x, dict) else None)
-            df["lot_id"] = df["lo"]
+        df["dien_tich"] = df["dim_lo"].apply(lambda x: x.get("area_ha") if isinstance(x, dict) else None)
+        df["lot_id"] = df["lo"]
             
         # Optional: we can drop dim_lo if needed, but it shouldn't hurt
         # df = df.drop(columns=["dim_lo"])
