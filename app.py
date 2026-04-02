@@ -146,97 +146,140 @@ def get_lots_by_farm(farm: str) -> list:
 
 def fetch_table_data(table_name: str, farm: str) -> pd.DataFrame:
     """Hàm chung lấy dữ liệu. Quản trị viên (Admin) sẽ lấy của tất cả các farm."""
-    query = supabase.table(table_name).select("*").eq("is_deleted", False)
-    if farm != "Admin":
-        query = query.eq("farm", farm)
-    res = query.order("created_at", desc=True).execute()
-    return pd.DataFrame(res.data) if res.data else pd.DataFrame()
+    tables_with_lo = [
+        "stage_logs", "harvest_logs", "destruction_logs", "bsr_logs", 
+        "size_measure_logs", "tree_inventory_logs", "soil_ph_logs", 
+        "fusarium_logs", "seasons", "base_lots"
+    ]
+    
+    if table_name in tables_with_lo:
+        query = supabase.table(table_name).select("*, dim_lo!inner(lo_name, area_ha, dim_doi!inner(doi_name), dim_farm!inner(farm_name))").eq("is_deleted", False)
+        if farm != "Admin" and farm:
+            query = query.eq("dim_lo.dim_farm.farm_name", farm)
+    else:
+        query = supabase.table(table_name).select("*")
+        if table_name != "user_roles":
+            query = query.eq("is_deleted", False)
+            if farm != "Admin" and farm:
+                query = query.eq("farm", farm)
+
+    if table_name != "user_roles":
+        res = query.order("created_at", desc=True).execute()
+    else:
+        res = query.execute()
+
+    if not res.data:
+        return pd.DataFrame()
+        
+    df = pd.DataFrame(res.data)
+    
+    if table_name in tables_with_lo:
+        df["farm"] = df["dim_lo"].apply(lambda x: x.get("dim_farm", {}).get("farm_name") if isinstance(x, dict) else None)
+        df["team"] = df["dim_lo"].apply(lambda x: x.get("dim_doi", {}).get("doi_name") if isinstance(x, dict) else None)
+        df["lo"] = df["dim_lo"].apply(lambda x: x.get("lo_name") if isinstance(x, dict) else None)
+        if table_name != "base_lots":
+            df["dien_tich"] = df["dim_lo"].apply(lambda x: x.get("area_ha") if isinstance(x, dict) else None)
+            df["lot_id"] = df["lo"]
+            
+        # Optional: we can drop dim_lo if needed, but it shouldn't hurt
+        # df = df.drop(columns=["dim_lo"])
+
+    return df
+@st.cache_data(ttl=60)
+def get_dim_lo_id(farm_name: str, lo_name: str):
+    if not farm_name or not lo_name: return None
+    res = supabase.table("dim_lo").select("lo_id, dim_farm!inner(farm_name)").eq("lo_name", lo_name).eq("dim_farm.farm_name", farm_name).limit(1).execute()
+    return res.data[0]["lo_id"] if res.data else None
 
 def insert_to_db(table_name: str, data: dict) -> bool:
     try:
+        tables_with_lo = [
+            "stage_logs", "harvest_logs", "destruction_logs", "bsr_logs", 
+            "size_measure_logs", "tree_inventory_logs", "soil_ph_logs", 
+            "fusarium_logs", "seasons", "base_lots"
+        ]
+        if table_name in tables_with_lo:
+            dim_id = None
+            if "dim_lo_id" not in data:
+                if "lot_id" in data and "farm" in data:
+                    dim_id = get_dim_lo_id(data["farm"], data["lot_id"])
+                elif "lo" in data and "farm" in data:
+                    dim_id = get_dim_lo_id(data["farm"], data["lo"])
+                if dim_id:
+                    data["dim_lo_id"] = dim_id
+            
+            # Remove denormalized fields so insert to Supabase doesn't fail
+            for col in ["farm", "team", "lot_id", "lo"]:
+                data.pop(col, None)
+
         supabase.table(table_name).insert(data).execute()
         return True
     except Exception as e:
         if 'duplicate key value violates unique constraint' in str(e):
             if table_name == "base_lots":
-                lot_id = data.get("lot_id")
-                # Kiểm tra xem lô này đã tồn tại nhưng có đang bị xóa mềm không
-                check_res = supabase.table("base_lots").select("is_deleted").eq("lot_id", lot_id).execute()
+                dim_lo_id = data.get("dim_lo_id")
+                check_res = supabase.table("base_lots").select("is_deleted").eq("dim_lo_id", dim_lo_id).execute()
                 if check_res.data and check_res.data[0].get("is_deleted") is True:
-                    # Lô đã bị xóa mềm, tiến hành "Khôi phục" và đè dữ liệu mới
                     data["is_deleted"] = False
-                    supabase.table("base_lots").update(data).eq("lot_id", lot_id).execute()
+                    supabase.table("base_lots").update(data).eq("dim_lo_id", dim_lo_id).execute()
                     return True
-            st.error(f"❌ Mã Lô '{data.get('lot_id')}' đã tồn tại trong hệ thống. Vui lòng kiểm tra lại!")
+            st.error(f"❌ Mã Lô đã tồn tại trong hệ thống. Vui lòng kiểm tra lại!")
         else:
             st.error(f"❌ Lỗi khi lưu vào {table_name}: {e}")
         return False
 
-def get_available_capacity_for_lot(lot_id, log_type, giai_doan=None, exclude_id=None):
-    res_lot = supabase.table("base_lots").select("so_luong, so_luong_con_lai").eq("lot_id", lot_id).eq("is_deleted", False).execute()
+def get_available_capacity_for_lot(farm_name, lot_id_str, log_type, giai_doan=None, exclude_id=None):
+    dim_id = get_dim_lo_id(farm_name, lot_id_str)
+    if not dim_id: return 0, 0
+    
+    res_lot = supabase.table("base_lots").select("so_luong, so_luong_con_lai").eq("dim_lo_id", dim_id).eq("is_deleted", False).execute()
     if not res_lot.data: return 0, 0
-    val_con_lai = res_lot.data[0].get("so_luong_con_lai")
-    total_planted = int(val_con_lai) if val_con_lai is not None else int(res_lot.data[0].get("so_luong", 0))
+    total_planted = sum(int(row.get("so_luong_con_lai")) if row.get("so_luong_con_lai") is not None else int(row.get("so_luong", 0)) for row in res_lot.data)
 
     max_allowed = total_planted
 
     if log_type == "stage" and giai_doan == "Cắt bắp":
-        res_cb = supabase.table("stage_logs").select("so_luong").eq("lot_id", lot_id).eq("giai_doan", "Chích bắp").eq("is_deleted", False).execute()
+        res_cb = supabase.table("stage_logs").select("so_luong").eq("dim_lo_id", dim_id).eq("giai_doan", "Chích bắp").eq("is_deleted", False).execute()
         max_allowed = sum(int(r["so_luong"]) for r in res_cb.data)
     elif log_type == "harvest":
-        res_cut = supabase.table("stage_logs").select("so_luong").eq("lot_id", lot_id).eq("giai_doan", "Cắt bắp").eq("is_deleted", False).execute()
+        res_cut = supabase.table("stage_logs").select("so_luong").eq("dim_lo_id", dim_id).eq("giai_doan", "Cắt bắp").eq("is_deleted", False).execute()
         max_allowed = sum(int(r["so_luong"]) for r in res_cut.data)
 
     total_used = 0
     if log_type == "stage":
-        res = supabase.table("stage_logs").select("id, so_luong").eq("lot_id", lot_id).eq("giai_doan", giai_doan).eq("is_deleted", False).execute()
+        res = supabase.table("stage_logs").select("id, so_luong").eq("dim_lo_id", dim_id).eq("giai_doan", giai_doan).eq("is_deleted", False).execute()
         total_used = sum(int(r["so_luong"]) for r in res.data if r["id"] != exclude_id)
     elif log_type == "harvest":
-        res = supabase.table("harvest_logs").select("id, so_luong").eq("lot_id", lot_id).eq("is_deleted", False).execute()
+        res = supabase.table("harvest_logs").select("id, so_luong").eq("dim_lo_id", dim_id).eq("is_deleted", False).execute()
         total_used = sum(int(r["so_luong"]) for r in res.data if r["id"] != exclude_id)
     elif log_type == "destruction":
-        res = supabase.table("destruction_logs").select("id, so_luong").eq("lot_id", lot_id).eq("is_deleted", False).execute()
+        res = supabase.table("destruction_logs").select("id, so_luong").eq("dim_lo_id", dim_id).eq("is_deleted", False).execute()
         total_used = sum(int(r["so_luong"]) for r in res.data if r["id"] != exclude_id)
         
     return max_allowed, total_used
 
 
 def allocate_fifo_quantity(farm_name, lo_name, new_sl, log_type, target_date, action_type, giai_doan=None):
-    res_lots = supabase.table("base_lots").select("lot_id").eq("farm", farm_name).eq("lo", lo_name).eq("is_deleted", False).order("ngay_trong").execute()
-    if not res_lots.data:
+    dim_id = get_dim_lo_id(farm_name, lo_name)
+    if not dim_id:
         return False, f"❌ Lỗi: Không tìm thấy lô {lo_name} hoặc đã bị xóa.", []
         
-    remaining_to_allocate = int(new_sl)
-    allocations = []
-    total_available_all = 0
-    
-    for lot_row in res_lots.data:
-        lot_id = lot_row["lot_id"]
-        
-        is_time_valid, _ = validate_timeline_logic(lot_id, target_date, action_type)
-        if not is_time_valid:
-            continue
+    is_time_valid, msg_time = validate_timeline_logic(farm_name, lo_name, target_date, action_type)
+    if not is_time_valid:
+        return False, msg_time, []
             
-        max_allowed, total_used = get_available_capacity_for_lot(lot_id, log_type, giai_doan)
-        remain = max_allowed - total_used
-        
-        if remain > 0:
-            total_available_all += remain
-            if remaining_to_allocate > 0:
-                consume = min(remaining_to_allocate, remain)
-                allocations.append({"lot_id": lot_id, "so_luong": consume})
-                remaining_to_allocate -= consume
-                
-    if remaining_to_allocate > 0:
-        action_name = giai_doan.lower() if log_type == "stage" else ("xuất hủy" if log_type == "destruction" else "thu hoạch")
-        return False, f"❌ Yêu cầu {new_sl} nhưng tổng số lượng cho phép của nhánh '{lo_name}' chỉ còn {total_available_all}.", []
-        
-    return True, "", allocations
+    max_allowed, total_used = get_available_capacity_for_lot(farm_name, lo_name, log_type, giai_doan)
+    remain = max_allowed - total_used
+    
+    if remain >= int(new_sl):
+        return True, "", [{"dim_lo_id": dim_id, "so_luong": int(new_sl), "lot_id": lo_name}]
+    else:
+        return False, f"❌ Yêu cầu {new_sl} nhưng tổng số lượng cho phép của nhánh '{lo_name}' chỉ còn {remain}.", []
 
-def check_quantity_limit(lot_id, new_sl, log_type, giai_doan=None, exclude_id=None):
-    max_allowed, total_used = get_available_capacity_for_lot(lot_id, log_type, giai_doan, exclude_id)
+
+def check_quantity_limit(farm_name, lot_id_str, new_sl, log_type, giai_doan=None, exclude_id=None):
+    max_allowed, total_used = get_available_capacity_for_lot(farm_name, lot_id_str, log_type, giai_doan, exclude_id)
     unit = "buồng" if log_type == "harvest" else "cây"
-    action_name = giai_doan.lower() if log_type == "stage" else ("xuất hủy" if log_type == "destruction" else "thu hoạch")
 
     if log_type == "destruction":
         if int(new_sl) > (max_allowed - total_used):
@@ -248,18 +291,23 @@ def check_quantity_limit(lot_id, new_sl, log_type, giai_doan=None, exclude_id=No
         return False, f"❌ Bạn đã nhập {new_sl} {unit}, nhưng lứa này chỉ có {remain} {unit} cho phép."
     return True, ""
 
-def validate_timeline_logic(lot_id, target_date, action_type):
+def validate_timeline_logic(farm_name, lot_id_str, target_date, action_type):
+    dim_id = get_dim_lo_id(farm_name, lot_id_str)
+    if not dim_id: return False, "Lỗi không tìm thấy lô."
+    
     target_dt = pd.to_datetime(target_date).tz_localize(None)
     
     if action_type == "Chích bắp":
-        res = supabase.table("base_lots").select("ngay_trong").eq("lot_id", lot_id).eq("is_deleted", False).execute()
-        if res.data and res.data[0].get("ngay_trong"):
-            ngay_trong = pd.to_datetime(res.data[0]["ngay_trong"]).tz_localize(None)
-            if target_dt < ngay_trong:
-                return False, f"❌ Ngày Chích bắp ({target_dt.date()}) không thể trước Ngày Trồng ({ngay_trong.date()})."
+        res = supabase.table("base_lots").select("ngay_trong").eq("dim_lo_id", dim_id).eq("is_deleted", False).execute()
+        if res.data and any(r.get("ngay_trong") for r in res.data):
+            valid_dates = [pd.to_datetime(r["ngay_trong"]).tz_localize(None) for r in res.data if r.get("ngay_trong")]
+            if valid_dates:
+                earliest_trong = min(valid_dates)
+                if target_dt < earliest_trong:
+                    return False, f"❌ Ngày Chích bắp ({target_dt.date()}) không thể trước Ngày Trồng ({earliest_trong.date()})."
                 
     elif action_type == "Cắt bắp":
-        res = supabase.table("stage_logs").select("ngay_thuc_hien").eq("lot_id", lot_id).eq("giai_doan", "Chích bắp").eq("is_deleted", False).execute()
+        res = supabase.table("stage_logs").select("ngay_thuc_hien").eq("dim_lo_id", dim_id).eq("giai_doan", "Chích bắp").eq("is_deleted", False).execute()
         if res.data:
             earliest_cb = min([pd.to_datetime(r["ngay_thuc_hien"]).tz_localize(None) for r in res.data])
             if target_dt < earliest_cb:
@@ -268,7 +316,7 @@ def validate_timeline_logic(lot_id, target_date, action_type):
             return False, "❌ Lô này chưa được ghi nhận Chích bắp, không thể Cắt bắp!"
             
     elif action_type == "Thu hoạch":
-        res = supabase.table("stage_logs").select("ngay_thuc_hien").eq("lot_id", lot_id).eq("giai_doan", "Cắt bắp").eq("is_deleted", False).execute()
+        res = supabase.table("stage_logs").select("ngay_thuc_hien").eq("dim_lo_id", dim_id).eq("giai_doan", "Cắt bắp").eq("is_deleted", False).execute()
         if res.data:
             earliest_cut = min([pd.to_datetime(r["ngay_thuc_hien"]).tz_localize(None) for r in res.data])
             if target_dt < earliest_cut:
@@ -458,11 +506,11 @@ def edit_stage_log_dialog(editing_row, available_lots, c_team):
             elif giai_doan != "Chích bắp" and not mau_day.strip(): st.error("❌ Phải nhập màu dây định danh lứa đối với Cắt bắp.")
             else:
                 mau_day_clean = mau_day.strip().capitalize() if mau_day.strip() else None
-                is_valid, msg = check_quantity_limit(lot_id, sl, "stage", giai_doan=giai_doan, exclude_id=editing_row["id"])
+                is_valid, msg = check_quantity_limit(editing_row["farm"], lot_id, sl, "stage", giai_doan=giai_doan, exclude_id=editing_row["id"])
                 if not is_valid: st.error(msg)
                 else:
                     data = {
-                        "lot_id": lot_id, "giai_doan": giai_doan, 
+                        "giai_doan": giai_doan, 
                         "ngay_thuc_hien": ngay_th.isoformat(), "so_luong": sl, "mau_day": mau_day_clean,
                         "tuan": ngay_th.isocalendar()[1]
                     }
@@ -518,10 +566,10 @@ def edit_destruction_log_dialog(editing_row, available_lots):
             elif not ly_do.strip(): st.error("❌ Cần ghi rõ lý do chi tiết.")
             else:
                 mau_day_clean = mau_day.strip().capitalize() if mau_day.strip() else None
-                is_valid, msg = check_quantity_limit(lot_id, sl, "destruction", exclude_id=editing_row["id"])
+                is_valid, msg = check_quantity_limit(editing_row["farm"], lot_id, sl, "destruction", exclude_id=editing_row["id"])
                 if not is_valid: st.error(msg)
                 else:
-                    data = {"lot_id": lot_id, "ngay_xuat_huy": ngay.isoformat(), "giai_doan": gxh, "ly_do": ly_do.strip(), "so_luong": sl, "tuan": ngay.isocalendar()[1], "mau_day": mau_day_clean}
+                    data = {"ngay_xuat_huy": ngay.isoformat(), "giai_doan": gxh, "ly_do": ly_do.strip(), "so_luong": sl, "tuan": ngay.isocalendar()[1], "mau_day": mau_day_clean}
                     supabase.table("destruction_logs").update(data).eq("id", editing_row["id"]).execute()
                     st.session_state["toast"] = "✅ Đã cập nhật!"
                     st.rerun()
@@ -557,11 +605,11 @@ def edit_harvest_log_dialog(editing_row, available_lots):
             elif sl <= 0: st.error("❌ Số lượng buồng phải > 0")
             else:
                 mau_day_clean = mau_day.strip().capitalize()
-                is_valid, msg = check_quantity_limit(lot_id, sl, "harvest", exclude_id=editing_row["id"])
+                is_valid, msg = check_quantity_limit(editing_row["farm"], lot_id, sl, "harvest", exclude_id=editing_row["id"])
                 if not is_valid: st.error(msg)
                 else:
                     data = {
-                        "lot_id": lot_id, "mau_day": mau_day_clean, 
+                        "mau_day": mau_day_clean, 
                         "ngay_thu_hoach": ngay.isoformat(), "so_luong": sl, 
                         "hinh_thuc_thu_hoach": hinh_thuc_thu_hoach, "tuan": ngay.isocalendar()[1]
                     }
@@ -591,7 +639,7 @@ def edit_bsr_log_dialog(editing_row, available_lots):
         if st.button("✅ Cập nhật", key="btn_edit_bsr", use_container_width=True, type="primary"):
             if bsr_val <= 0: st.error("❌ Tỷ lệ BSR phải > 0")
             else:
-                data = {"lot_id": lot_id, "ngay_nhap": ngay.isoformat(), "bsr": bsr_val, "tuan": ngay.isocalendar()[1]}
+                data = {"ngay_nhap": ngay.isoformat(), "bsr": bsr_val, "tuan": ngay.isocalendar()[1]}
                 supabase.table("bsr_logs").update(data).eq("id", editing_row["id"]).execute()
                 st.session_state["toast"] = f"✅ Lưu BSR lô {lot_id} thành công!"
                 st.rerun()
@@ -632,7 +680,7 @@ def edit_size_measure_dialog(editing_row, available_lots):
             else:
                 mau_day_clean = mau_day.strip().capitalize()
                 data = {
-                    "lot_id": lot_id, "mau_day": mau_day_clean, "lan_do": lan_do,
+                    "mau_day": mau_day_clean, "lan_do": lan_do,
                     "ngay_do": ngay.isoformat(), "so_luong_mau": sl, "tuan": ngay.isocalendar()[1],
                     "hang_kiem_tra": hang_kiem_tra.strip(), "size_cal": size_cal
                 }
@@ -662,7 +710,7 @@ def edit_tree_inventory_dialog(editing_row, available_lots):
         if st.button("✅ Cập nhật", key="btn_edit_inv", use_container_width=True, type="primary"):
             if sl <= 0: st.error("❌ Cần nhập Số lượng cây lớn hơn 0.")
             else:
-                data = {"lot_id": lot_id, "ngay_kiem_ke": ngay.isoformat(), "so_luong_cay_thuc_te": sl, "tuan": ngay.isocalendar()[1]}
+                data = {"ngay_kiem_ke": ngay.isoformat(), "so_luong_cay_thuc_te": sl, "tuan": ngay.isocalendar()[1]}
                 supabase.table("tree_inventory_logs").update(data).eq("id", editing_row["id"]).execute()
                 st.session_state["toast"] = f"✅ Lưu kiểm kê cây lô {lot_id} thành công!"
                 st.rerun()
@@ -691,7 +739,8 @@ def edit_soil_ph_dialog(editing_row, available_lots):
         if st.button("✅ Cập nhật", key="btn_edit_ph", use_container_width=True, type="primary"):
             if val <= 0: st.error("❌ Cần nhập giá trị pH hợp lệ.")
             else:
-                data = {"lot_id": lot_id, "ngay_do": ngay.isoformat(), "ph_value": val, "tuan": ngay.isocalendar()[1]}
+                data = {"ngay_do": ngay.isoformat(), "ph_value": val, "tuan": ngay.isocalendar()[1]}
+                supabase.table("soil_ph_logs").update(data).eq("id", editing_row["id"]).execute()
                 st.session_state["toast"] = f"✅ Lưu kết quả pH lô {lot_id} thành công!"
                 st.rerun()
 
@@ -717,7 +766,7 @@ def edit_fusarium_log_dialog(editing_row, available_lots):
         if st.button("✅ Cập nhật", key="btn_edit_fus", use_container_width=True, type="primary"):
             if sl < 0: st.error("❌ Cần nhập số cây lớn hơn hoặc bằng 0.")
             else:
-                data = {"lot_id": lot_id, "ngay_kiem_tra": ngay.isoformat(), "so_cay_fusarium": sl, "tuan": ngay.isocalendar()[1]}
+                data = {"ngay_kiem_tra": ngay.isoformat(), "so_cay_fusarium": sl, "tuan": ngay.isocalendar()[1]}
                 supabase.table("fusarium_logs").update(data).eq("id", editing_row["id"]).execute()
                 st.session_state["toast"] = f"✅ Chi tiết Fusarium lô {lot_id} đã được lưu thành công!"
                 st.rerun()
@@ -2123,11 +2172,10 @@ def render_main_app():
                             "ngay_do": item["Ngày đo"], "tuan": item["Tuần"],
                             "hang_kiem_tra": item["Hàng KT"], "size_cal": item["Size"]
                         }
-                        try:
-                            supabase.table("size_measure_logs").insert(data).execute()
+                        if insert_to_db("size_measure_logs", data):
                             success_count += 1
-                        except Exception as e:
-                            st.error(f"❌ Lỗi ghi: {e}")
+                        else:
+                            st.error(f"❌ Lỗi ghi lô {item['Lô']}")
                             return
                     st.session_state["queue_sm"] = []
                     st.session_state["toast"] = f"✅ Đã lưu {success_count} dòng Đo Size!"
@@ -2193,11 +2241,10 @@ def render_main_app():
                             "so_luong_cay_thuc_te": item["Số lượng"], "ngay_kiem_ke": item["Ngày"],
                             "tuan": item["Tuần"]
                         }
-                        try:
-                            supabase.table("tree_inventory_logs").insert(data).execute()
+                        if insert_to_db("tree_inventory_logs", data):
                             success_count += 1
-                        except Exception as e:
-                            st.error(f"❌ Lỗi ghi: {e}")
+                        else:
+                            st.error(f"❌ Lỗi ghi lô {item['Lô']}")
                             return
                     st.session_state["queue_inv"] = []
                     st.cache_data.clear()
@@ -2348,7 +2395,7 @@ def render_main_app():
                         elif not mau_day.strip(): st.error("❌ Phải nhập màu dây định danh lứa.")
                         else:
                             mau_day_clean = mau_day.strip().capitalize()
-                            is_time_valid, msg_time = validate_timeline_logic(lot_id, ngay_th, giai_doan)
+                            is_time_valid, msg_time = validate_timeline_logic(c_farm, lot_id, ngay_th, giai_doan)
                             if not is_time_valid:
                                 st.error(msg_time)
                             else:
@@ -2365,7 +2412,7 @@ def render_main_app():
                         k = (item["Lô"], item["Giai đoạn"])
                         lot_reqs[k] = lot_reqs.get(k, 0) + item["Số lượng"]
                     for (l_id, g_doan), req_sl in lot_reqs.items():
-                        valid, msg = check_quantity_limit(l_id, req_sl, "stage", giai_doan=g_doan)
+                        valid, msg = check_quantity_limit(c_farm, l_id, req_sl, "stage", giai_doan=g_doan)
                         if not valid:
                             st.error(f"❌ Lỗi tổng số lượng ở Lô {l_id} - {g_doan}: {msg}")
                             return
@@ -2375,10 +2422,8 @@ def render_main_app():
                         if is_valid:
                             for alloc in allocations:
                                 data = {"farm": c_farm, "team": c_team, "giai_doan": item["Giai đoạn"], "ngay_thuc_hien": item["Ngày"], "mau_day": item["Màu dây"], "tuan": item["Tuần"], "lot_id": alloc["lot_id"], "so_luong": alloc["so_luong"]}
-                                try:
-                                    supabase.table("stage_logs").insert(data).execute()
-                                except Exception as e:
-                                    st.error(f"❌ Lỗi ghi phân rã {alloc['lot_id']}: {e}")
+                                if not insert_to_db("stage_logs", data):
+                                    st.error(f"❌ Lỗi ghi phân rã {alloc['lot_id']}")
                                     return
                             success_count += 1
                         else:
@@ -2464,7 +2509,7 @@ def render_main_app():
                     for item in queue:
                         lot_reqs[item["Lô"]] = lot_reqs.get(item["Lô"], 0) + item["Số lượng"]
                     for l_id, req_sl in lot_reqs.items():
-                        valid, msg = check_quantity_limit(l_id, req_sl, "destruction")
+                        valid, msg = check_quantity_limit(c_farm, l_id, req_sl, "destruction")
                         if not valid:
                             st.error(f"❌ Lỗi tổng số lượng ở Lô {l_id}: {msg}")
                             return
@@ -2474,10 +2519,8 @@ def render_main_app():
                         if is_valid:
                             for alloc in allocations:
                                 data = {"farm": c_farm, "team": c_team, "ngay_xuat_huy": item["Ngày"], "giai_doan": item["Giai đoạn"], "mau_day": item.get("Màu dây", "") or None, "ly_do": item["Lý do"], "tuan": item["Tuần"], "lot_id": alloc["lot_id"], "so_luong": alloc["so_luong"]}
-                                try:
-                                    supabase.table("destruction_logs").insert(data).execute()
-                                except Exception as e:
-                                    st.error(f"❌ Lỗi ghi phân rã {alloc['lot_id']}: {e}")
+                                if not insert_to_db("destruction_logs", data):
+                                    st.error(f"❌ Lỗi ghi phân rã {alloc['lot_id']}")
                                     return
                             success_count += 1
                         else:
@@ -2644,7 +2687,7 @@ def render_main_app():
                     for item in queue:
                         lot_reqs[item["Lô"]] = lot_reqs.get(item["Lô"], 0) + item["Số lượng"]
                     for l_id, req_sl in lot_reqs.items():
-                        valid, msg = check_quantity_limit(l_id, req_sl, "harvest")
+                        valid, msg = check_quantity_limit(c_farm, l_id, req_sl, "harvest")
                         if not valid:
                             st.error(f"❌ Lỗi tổng số lượng ở Lô {l_id}: {msg}")
                             return
@@ -2657,10 +2700,8 @@ def render_main_app():
                                     "farm": c_farm, "team": c_team, "ngay_thu_hoach": item["Ngày"], "mau_day": item["Màu dây"],
                                     "hinh_thuc_thu_hoach": item["Hình thức"], "tuan": item["Tuần"], "lot_id": alloc["lot_id"], "so_luong": alloc["so_luong"]
                                 }
-                                try:
-                                    supabase.table("harvest_logs").insert(data).execute()
-                                except Exception as e:
-                                    st.error(f"❌ Lỗi ghi phân rã {alloc['lot_id']}: {e}")
+                                if not insert_to_db("harvest_logs", data):
+                                    st.error(f"❌ Lỗi ghi phân rã {alloc['lot_id']}")
                                     return
                             success_count += 1
                         else:
@@ -2740,11 +2781,10 @@ def render_main_app():
                             "farm": c_farm, "team": c_team, "lot_id": item["Lô"],
                             "ngay_nhap": item["Ngày"], "bsr": item["BSR"], "tuan": item["Tuần"]
                         }
-                        try:
-                            supabase.table("bsr_logs").insert(data).execute()
+                        if insert_to_db("bsr_logs", data):
                             success_count += 1
-                        except Exception as e:
-                            st.error(f"❌ Lỗi ghi: {e}")
+                        else:
+                            st.error(f"❌ Lỗi ghi lô {item['Lô']}")
                             return
                     st.session_state["queue_bsr"] = []
                     st.cache_data.clear()
