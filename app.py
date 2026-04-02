@@ -1207,6 +1207,30 @@ def render_global_data_tab(c_farm):
             res[name] = df_filtered
         return res
 
+    def show_season_info(f_vu, f_lot):
+        """Hiển thị thông tin khoảng thời gian vụ khi chọn cả Vụ và Lô cụ thể."""
+        if f_vu == "Tất cả" or f_lot == "Tất cả" or df_seasons.empty:
+            return
+        matched = df_seasons[(df_seasons["vu"] == f_vu) & (df_seasons["lo"] == f_lot)]
+        if matched.empty:
+            return
+        row = matched.iloc[0]
+        start = pd.to_datetime(row.get("ngay_bat_dau"))
+        end_actual = row.get("ngay_ket_thuc_thuc_te")
+        end_planned = row.get("ngay_ket_thuc_du_kien")
+        end = pd.to_datetime(end_actual) if pd.notna(end_actual) else pd.to_datetime(end_planned) if pd.notna(end_planned) else None
+        loai = row.get("loai_trong", "")
+        
+        start_str = start.strftime("%d/%m/%Y") if pd.notna(start) else "—"
+        if end:
+            end_label = "Kết thúc" if pd.notna(end_actual) else "Dự kiến KT"
+            end_str = end.strftime("%d/%m/%Y")
+        else:
+            end_label, end_str = "Kết thúc", "Chưa xác định"
+        
+        loai_str = f" · Loại: **{loai}**" if loai else ""
+        st.info(f"📅 Vụ **{f_vu}** — Lô **{f_lot}**{loai_str} · Bắt đầu: **{start_str}** · {end_label}: **{end_str}**", icon="ℹ️")
+
     st.divider()
 
     # --- DỰ TOÁN SẢN LƯỢNG THU HOẠCH (KG) ---
@@ -1238,6 +1262,7 @@ def render_global_data_tab(c_farm):
             ek_lot_opts = get_dynamic_lot_options(df_lots_all, df_seasons, c_farm, ek_team, ek_vu)
             ek_lot = st.selectbox("Lọc theo Lô", options=ek_lot_opts, key="ek_lot")
 
+    show_season_info(ek_vu, ek_lot)
     filtered_ek_dfs = apply_filters_local(ek_farm, ek_vu, ek_team, ek_lot, None, {
         "lots": df_lots_all, "stg": df_stg_all, "des": df_des_all, "har": df_har_all
     })
@@ -1346,6 +1371,7 @@ def render_global_data_tab(c_farm):
         with lcf4:
             lc_date = st.date_input("Khoảng thời gian", value=(), key="lc_date")
 
+    show_season_info(lc_vu, lc_lot)
     filtered_lc_dfs = apply_filters_local(lc_farm, lc_vu, lc_team, lc_lot, lc_date, {
         "lots": df_lots_all, "stg": df_stg_all, "des": df_des_all, "har": df_har_all
     })
@@ -1571,6 +1597,7 @@ def render_global_data_tab(c_farm):
         with cpf4:
             pf_date = st.date_input("Khoảng thời gian", value=(), key="pf_date")
         
+    show_season_info(pf_vu, pf_lot)
     filtered_pipe_dfs = apply_filters_local(pf_farm, pf_vu, pf_team, pf_lot, pf_date, {
         "lots": df_lots_all, "stg": df_stg_all, "des": df_des_all, "har": df_har_all
     })
@@ -1708,6 +1735,7 @@ def render_global_data_tab(c_farm):
         with mlf4:
             mlf_date = st.date_input("Khoảng thời gian", value=(), key="mlf_date")
         
+    show_season_info(mlf_vu, mlf_lot)
     filtered_ml_dfs = apply_filters_local(mlf_farm, mlf_vu, mlf_team, mlf_lot, mlf_date, {
         "lots": df_lots_all, "stg": df_stg_all, "des": df_des_all, "har": df_har_all
     })
@@ -1898,6 +1926,7 @@ def render_global_data_tab(c_farm):
         with tif4:
             ti_date = st.date_input("Khoảng thời gian", value=(), key="ti_date")
 
+    show_season_info(ti_vu, ti_lot)
     filtered_ti_dfs = apply_filters_local(ti_farm, ti_vu, ti_team, ti_lot, ti_date, {"inv": df_tree_inv_all})
     ti_inv_df = filtered_ti_dfs["inv"]
     
