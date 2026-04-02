@@ -1093,6 +1093,22 @@ def render_global_data_tab(c_farm):
     lots_all = ["Tất cả"] + list(df_lots_all["lo"].dropna().unique()) if not df_lots_all.empty else ["Tất cả"]
     seasons_all = ["Tất cả"] + list(df_seasons["vu"].dropna().unique()) if not df_seasons.empty else ["Tất cả"]
 
+    def get_dynamic_lot_options(df_lots, df_seasons, f_farm, f_team, f_vu):
+        df_filtered = df_lots.copy()
+        if not df_filtered.empty:
+            if f_farm != "Tất cả" and "farm" in df_filtered.columns:
+                df_filtered = df_filtered[df_filtered["farm"] == f_farm]
+            if f_team != "Tất cả" and "team" in df_filtered.columns:
+                df_filtered = df_filtered[df_filtered["team"] == f_team]
+            if f_vu != "Tất cả" and not df_seasons.empty:
+                valid_lots = df_seasons[df_seasons["vu"] == f_vu]["lo"].tolist()
+                # we don't have lot_id in df_seasons directly linked sometimes, so match by lot ID
+                # Actually, df_seasons has 'lo' or 'lot_id', but in app.py we saw: `valid_lots = df_seasons[df_seasons["vu"] == f_vu]["lo"].tolist()`. Let's match df_lots_all's 'lo' with that. 
+                # Oh wait, earlier the code did: df_filtered["lot_id"].isin(valid_lots_season) but valid_lots_season was a list of "lo". Wait, that might be a bug in the old code. base_lots 'lo' should match seasons 'lo'.
+                if "lo" in df_filtered.columns:
+                    df_filtered = df_filtered[df_filtered["lo"].isin(valid_lots)]
+        return ["Tất cả"] + list(df_filtered["lo"].dropna().unique()) if not df_filtered.empty else ["Tất cả"]
+
     def apply_filters_local(f_farm, f_vu, f_team, f_lot, f_date, df_dict):
         """Helper function to apply filters locally to a set of dataframes"""
         res = {}
@@ -1161,7 +1177,8 @@ def render_global_data_tab(c_farm):
         with ekf2:
             ek_team = st.selectbox("Lọc theo Đội", options=teams_all, key="ek_team")
         with ekf3:
-            ek_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="ek_lot")
+            ek_lot_opts = get_dynamic_lot_options(df_lots_all, df_seasons, ek_farm, ek_team, ek_vu)
+            ek_lot = st.selectbox("Lọc theo Lô", options=ek_lot_opts, key="ek_lot")
     else:
         ek_farm = c_farm
         ekf1, ekf2, ekf3 = st.columns([1, 1, 1])
@@ -1170,7 +1187,8 @@ def render_global_data_tab(c_farm):
         with ekf2:
             ek_team = st.selectbox("Lọc theo Đội", options=teams_all, key="ek_team")
         with ekf3:
-            ek_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="ek_lot")
+            ek_lot_opts = get_dynamic_lot_options(df_lots_all, df_seasons, c_farm, ek_team, ek_vu)
+            ek_lot = st.selectbox("Lọc theo Lô", options=ek_lot_opts, key="ek_lot")
 
     filtered_ek_dfs = apply_filters_local(ek_farm, ek_vu, ek_team, ek_lot, None, {
         "lots": df_lots_all, "stg": df_stg_all, "des": df_des_all, "har": df_har_all
@@ -1263,7 +1281,8 @@ def render_global_data_tab(c_farm):
         with lcf2:
             lc_team = st.selectbox("Lọc theo Đội", options=teams_all, key="lc_team")
         with lcf3:
-            lc_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="lc_lot")
+            lc_lot_opts = get_dynamic_lot_options(df_lots_all, df_seasons, lc_farm, lc_team, lc_vu)
+            lc_lot = st.selectbox("Lọc theo Lô", options=lc_lot_opts, key="lc_lot")
         with lcf4:
             lc_date = st.date_input("Khoảng thời gian", value=(), key="lc_date")
     else:
@@ -1274,7 +1293,8 @@ def render_global_data_tab(c_farm):
         with lcf2:
             lc_team = st.selectbox("Lọc theo Đội", options=teams_all, key="lc_team")
         with lcf3:
-            lc_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="lc_lot")
+            lc_lot_opts = get_dynamic_lot_options(df_lots_all, df_seasons, lc_farm, lc_team, lc_vu)
+            lc_lot = st.selectbox("Lọc theo Lô", options=lc_lot_opts, key="lc_lot")
         with lcf4:
             lc_date = st.date_input("Khoảng thời gian", value=(), key="lc_date")
 
@@ -1469,7 +1489,8 @@ def render_global_data_tab(c_farm):
         with cpf2:
             pf_team = st.selectbox("Lọc theo Đội", options=teams_all, key="pf_team")
         with cpf3:
-            pf_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="pf_lot")
+            pf_lot_opts = get_dynamic_lot_options(df_lots_all, df_seasons, pf_farm, pf_team, pf_vu)
+            pf_lot = st.selectbox("Lọc theo Lô", options=pf_lot_opts, key="pf_lot")
         with cpf4:
             pf_date = st.date_input("Khoảng thời gian", value=(), key="pf_date")
     else:
@@ -1480,7 +1501,8 @@ def render_global_data_tab(c_farm):
         with cpf2:
             pf_team = st.selectbox("Lọc theo Đội", options=teams_all, key="pf_team")
         with cpf3:
-            pf_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="pf_lot")
+            pf_lot_opts = get_dynamic_lot_options(df_lots_all, df_seasons, pf_farm, pf_team, pf_vu)
+            pf_lot = st.selectbox("Lọc theo Lô", options=pf_lot_opts, key="pf_lot")
         with cpf4:
             pf_date = st.date_input("Khoảng thời gian", value=(), key="pf_date")
         
@@ -1599,7 +1621,8 @@ def render_global_data_tab(c_farm):
         with mlf2:
             mlf_team = st.selectbox("Lọc theo Đội", options=teams_all, key="mlf_team")
         with mlf3:
-            mlf_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="mlf_lot")
+            mlf_lot_opts = get_dynamic_lot_options(df_lots_all, df_seasons, mlf_farm, mlf_team, mlf_vu)
+            mlf_lot = st.selectbox("Lọc theo Lô", options=mlf_lot_opts, key="mlf_lot")
         with mlf4:
             mlf_date = st.date_input("Khoảng thời gian", value=(), key="mlf_date")
     else:
@@ -1610,7 +1633,8 @@ def render_global_data_tab(c_farm):
         with mlf2:
             mlf_team = st.selectbox("Lọc theo Đội", options=teams_all, key="mlf_team")
         with mlf3:
-            mlf_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="mlf_lot")
+            mlf_lot_opts = get_dynamic_lot_options(df_lots_all, df_seasons, mlf_farm, mlf_team, mlf_vu)
+            mlf_lot = st.selectbox("Lọc theo Lô", options=mlf_lot_opts, key="mlf_lot")
         with mlf4:
             mlf_date = st.date_input("Khoảng thời gian", value=(), key="mlf_date")
         
