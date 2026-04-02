@@ -1325,19 +1325,21 @@ def render_global_data_tab(c_farm):
             lot_id = lot_row["lot_id"]
             lo_name = lot_row["lo"]
             sl = int(lot_row["so_luong"])
+            dt = lot_row.get("dien_tich", 0)
+            if pd.isna(dt): dt = 0
             d_trong = pd.to_datetime(lot_row["ngay_trong"])
             d_chich = d_trong + timedelta(days=180)
             d_cat = d_chich + timedelta(days=14)
             d_thu = d_cat + timedelta(days=70)
 
             ideal_events.append({"lot_id": lot_id, "lo": lo_name, "date": d_trong, "so_luong": sl, "giai_doan": "Trồng",
-                "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Trồng<br>Ngày: {d_trong.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
+                "hover": f"<b>Lô {lo_name}</b><br>Diện tích: {dt:.2f} ha<br>Giai đoạn: Trồng<br>Ngày: {d_trong.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
             ideal_events.append({"lot_id": lot_id, "lo": lo_name, "date": d_chich, "so_luong": sl, "giai_doan": "Chích bắp",
-                "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Chích bắp<br>Ngày: {d_chich.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
+                "hover": f"<b>Lô {lo_name}</b><br>Diện tích: {dt:.2f} ha<br>Giai đoạn: Chích bắp<br>Ngày: {d_chich.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
             ideal_events.append({"lot_id": lot_id, "lo": lo_name, "date": d_cat, "so_luong": sl, "giai_doan": "Cắt bắp",
-                "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Cắt bắp<br>Ngày: {d_cat.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
+                "hover": f"<b>Lô {lo_name}</b><br>Diện tích: {dt:.2f} ha<br>Giai đoạn: Cắt bắp<br>Ngày: {d_cat.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
             ideal_events.append({"lot_id": lot_id, "lo": lo_name, "date": d_thu, "so_luong": sl, "giai_doan": "Thu hoạch",
-                "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Thu hoạch<br>Ngày: {d_thu.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây<br><b>Sản lượng dự toán: {sl * KG_PER_TREE_CHART:,.0f} kg</b>"})
+                "hover": f"<b>Lô {lo_name}</b><br>Diện tích: {dt:.2f} ha<br>Giai đoạn: Thu hoạch<br>Ngày: {d_thu.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây<br><b>Sản lượng dự toán: {sl * KG_PER_TREE_CHART:,.0f} kg</b>"})
 
         df_ideal = pd.DataFrame(ideal_events)
         fig_ideal = go.Figure()
@@ -1382,12 +1384,14 @@ def render_global_data_tab(c_farm):
             lot_id = lot_row["lot_id"]
             lo_name = lot_row["lo"]
             sl_trong = int(lot_row["so_luong"])
+            dt = lot_row.get("dien_tich", 0)
+            if pd.isna(dt): dt = 0
             ngay_trong = pd.to_datetime(lot_row["ngay_trong"])
 
             # Sự kiện Trồng
             actual_events.append({"lot_id": lot_id, "lo": lo_name, "date": ngay_trong,
                 "so_luong": sl_trong, "giai_doan": "Trồng",
-                "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Trồng<br>Ngày: {ngay_trong.strftime('%d/%m/%Y')}<br>Số lượng: {sl_trong:,} cây"})
+                "hover": f"<b>Lô {lo_name}</b><br>Diện tích: {dt:.2f} ha<br>Giai đoạn: Trồng<br>Ngày: {ngay_trong.strftime('%d/%m/%Y')}<br>Số lượng: {sl_trong:,} cây"})
 
             # Sự kiện Chích bắp
             if not lc_stg_df.empty:
@@ -1398,7 +1402,7 @@ def render_global_data_tab(c_farm):
                         sl = int(row["so_luong"])
                         actual_events.append({"lot_id": lot_id, "lo": lo_name, "date": d,
                             "so_luong": sl, "giai_doan": "Chích bắp",
-                            "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Chích bắp<br>Ngày: {d.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
+                            "hover": f"<b>Lô {lo_name}</b><br>Diện tích: {dt:.2f} ha<br>Giai đoạn: Chích bắp<br>Ngày: {d.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
 
             # Sự kiện Cắt bắp
             if not lc_stg_df.empty:
@@ -1409,7 +1413,7 @@ def render_global_data_tab(c_farm):
                         sl = int(row["so_luong"])
                         actual_events.append({"lot_id": lot_id, "lo": lo_name, "date": d,
                             "so_luong": sl, "giai_doan": "Cắt bắp",
-                            "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Cắt bắp<br>Ngày: {d.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
+                            "hover": f"<b>Lô {lo_name}</b><br>Diện tích: {dt:.2f} ha<br>Giai đoạn: Cắt bắp<br>Ngày: {d.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
 
             # Sự kiện Thu hoạch
             if not lc_har_df.empty:
@@ -1420,7 +1424,7 @@ def render_global_data_tab(c_farm):
                         sl = int(row["so_luong"])
                         actual_events.append({"lot_id": lot_id, "lo": lo_name, "date": d,
                             "so_luong": sl, "giai_doan": "Thu hoạch",
-                            "hover": f"<b>Lô {lo_name}</b><br>Giai đoạn: Thu hoạch<br>Ngày: {d.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} buồng<br><b>Sản lượng dự toán: {sl * KG_PER_TREE_CHART:,.0f} kg</b>"})
+                            "hover": f"<b>Lô {lo_name}</b><br>Diện tích: {dt:.2f} ha<br>Giai đoạn: Thu hoạch<br>Ngày: {d.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} buồng<br><b>Sản lượng dự toán: {sl * KG_PER_TREE_CHART:,.0f} kg</b>"})
 
             # Sự kiện Xuất hủy (điểm rời, không nối line)
             if not lc_des_df.empty:
@@ -1431,7 +1435,7 @@ def render_global_data_tab(c_farm):
                         sl = int(row["so_luong"])
                         actual_events.append({"lot_id": lot_id, "lo": lo_name, "date": d,
                             "so_luong": sl, "giai_doan": "Xuất hủy",
-                            "hover": f"<b>Lô {lo_name}</b><br>🗑️ Xuất hủy<br>Ngày: {d.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
+                            "hover": f"<b>Lô {lo_name}</b><br>Diện tích: {dt:.2f} ha<br>🗑️ Xuất hủy<br>Ngày: {d.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
 
         fig_actual = go.Figure()
         if actual_events:
@@ -1534,33 +1538,35 @@ def render_global_data_tab(c_farm):
             sl_trong_dam = l_lots[l_lots["loai_trong"] == "Trồng dặm"]["so_luong"].sum()
             # If no season match, default to 'Trồng mới'
             sl_trong_khac = l_lots[l_lots["loai_trong"].isna()]["so_luong"].sum()
+            dt = l_lots["dien_tich"].max()
+            if pd.isna(dt): dt = 0
             
-            pipeline_data.append({"Lô": l, "Giai đoạn": "1a. Trồng mới", "Số lượng": sl_trong_moi + sl_trong_khac})
-            pipeline_data.append({"Lô": l, "Giai đoạn": "1b. Trồng dặm", "Số lượng": sl_trong_dam})
+            pipeline_data.append({"Lô": l, "Giai đoạn": "1a. Trồng mới", "Số lượng": sl_trong_moi + sl_trong_khac, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
+            pipeline_data.append({"Lô": l, "Giai đoạn": "1b. Trồng dặm", "Số lượng": sl_trong_dam, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
             
             # 2. Chích bắp
             if not pipe_stg_df.empty:
                 sl_cb = pipe_stg_df[(pipe_stg_df["lot_id"].isin(valid_ids)) & (pipe_stg_df["giai_doan"] == "Chích bắp")]["so_luong"].sum()
-                pipeline_data.append({"Lô": l, "Giai đoạn": "2. Chích bắp", "Số lượng": sl_cb})
-            else: pipeline_data.append({"Lô": l, "Giai đoạn": "2. Chích bắp", "Số lượng": 0})
+                pipeline_data.append({"Lô": l, "Giai đoạn": "2. Chích bắp", "Số lượng": sl_cb, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
+            else: pipeline_data.append({"Lô": l, "Giai đoạn": "2. Chích bắp", "Số lượng": 0, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
             
             # 3. Cắt bắp
             if not pipe_stg_df.empty:
                 sl_cut = pipe_stg_df[(pipe_stg_df["lot_id"].isin(valid_ids)) & (pipe_stg_df["giai_doan"] == "Cắt bắp")]["so_luong"].sum()
-                pipeline_data.append({"Lô": l, "Giai đoạn": "3. Cắt bắp", "Số lượng": sl_cut})
-            else: pipeline_data.append({"Lô": l, "Giai đoạn": "3. Cắt bắp", "Số lượng": 0})
+                pipeline_data.append({"Lô": l, "Giai đoạn": "3. Cắt bắp", "Số lượng": sl_cut, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
+            else: pipeline_data.append({"Lô": l, "Giai đoạn": "3. Cắt bắp", "Số lượng": 0, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
             
             # 4. Thu hoạch (Buồng ~ Cây)
             if not pipe_har_df.empty:
                 sl_har = pipe_har_df[pipe_har_df["lot_id"].isin(valid_ids)]["so_luong"].sum()
-                pipeline_data.append({"Lô": l, "Giai đoạn": "4. Thu hoạch", "Số lượng": sl_har})
-            else: pipeline_data.append({"Lô": l, "Giai đoạn": "4. Thu hoạch", "Số lượng": 0})
+                pipeline_data.append({"Lô": l, "Giai đoạn": "4. Thu hoạch", "Số lượng": sl_har, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
+            else: pipeline_data.append({"Lô": l, "Giai đoạn": "4. Thu hoạch", "Số lượng": 0, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
                 
             # 5. Xuất hủy
             if not pipe_des_df.empty:
                 sl_des = pipe_des_df[pipe_des_df["lot_id"].isin(valid_ids)]["so_luong"].sum()
-                pipeline_data.append({"Lô": l, "Giai đoạn": "5. Xuất hủy", "Số lượng": sl_des})
-            else: pipeline_data.append({"Lô": l, "Giai đoạn": "5. Xuất hủy", "Số lượng": 0})
+                pipeline_data.append({"Lô": l, "Giai đoạn": "5. Xuất hủy", "Số lượng": sl_des, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
+            else: pipeline_data.append({"Lô": l, "Giai đoạn": "5. Xuất hủy", "Số lượng": 0, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
             
         df_pipeline = pd.DataFrame(pipeline_data)
         
@@ -1573,12 +1579,14 @@ def render_global_data_tab(c_farm):
         df_tm = df_pipeline[df_pipeline["Giai đoạn"] == "1a. Trồng mới"]
         fig_pipe.add_trace(go.Bar(
             name="1a. Trồng mới", x=df_tm["Lô"], y=df_tm["Số lượng"],
-            marker_color="#4CAF50", offsetgroup="trong"
+            marker_color="#4CAF50", offsetgroup="trong",
+            customdata=df_tm["hover"], hovertemplate="%{customdata}<br>Giai đoạn: 1a. Trồng mới<br>Số lượng: %{y:,}<extra></extra>"
         ))
         df_td = df_pipeline[df_pipeline["Giai đoạn"] == "1b. Trồng dặm"]
         fig_pipe.add_trace(go.Bar(
             name="1b. Trồng dặm", x=df_td["Lô"], y=df_td["Số lượng"],
-            marker_color="#8BC34A", offsetgroup="trong", base=df_tm["Số lượng"].values
+            marker_color="#8BC34A", offsetgroup="trong", base=df_tm["Số lượng"].values,
+            customdata=df_td["hover"], hovertemplate="%{customdata}<br>Giai đoạn: 1b. Trồng dặm<br>Số lượng: %{y:,}<extra></extra>"
         ))
         
         # --- Clustered bars: each gets its own offsetgroup ---
@@ -1592,7 +1600,8 @@ def render_global_data_tab(c_farm):
             df_s = df_pipeline[df_pipeline["Giai đoạn"] == stage_name]
             fig_pipe.add_trace(go.Bar(
                 name=stage_name, x=df_s["Lô"], y=df_s["Số lượng"],
-                marker_color=color, offsetgroup=stage_name
+                marker_color=color, offsetgroup=stage_name,
+                customdata=df_s["hover"], hovertemplate=f"%{{customdata}}<br>Giai đoạn: {stage_name}<br>Số lượng: %{{y:,}}<extra></extra>"
             ))
         
         fig_pipe.update_layout(
@@ -1712,20 +1721,30 @@ def render_global_data_tab(c_farm):
         df_combined["Date"] = pd.to_datetime(df_combined["Date"])
 
         # --- Breakdown text: số lượng theo từng Lô, dùng cho tooltip ---
-        # Lấy tên lô từ lot_id nếu có (join base_lots)
+        # Lấy tên lô và diện tích từ lot_id nếu có (join base_lots)
         lot_name_map = {}
-        if not ml_lots_df.empty and "lot_id" in ml_lots_df.columns and "lo" in ml_lots_df.columns:
-            lot_name_map = ml_lots_df.set_index("lot_id")["lo"].to_dict()
+        lot_dt_map = {}
+        if not ml_lots_df.empty and "lot_id" in ml_lots_df.columns:
+            if "lo" in ml_lots_df.columns:
+                lot_name_map = ml_lots_df.set_index("lot_id")["lo"].to_dict()
+            if "dien_tich" in ml_lots_df.columns:
+                lot_dt_map = ml_lots_df.set_index("lot_id")["dien_tich"].to_dict()
         
         if "lot_id" in df_combined.columns:
             df_combined["Tên Lô"] = df_combined["lot_id"].map(lot_name_map).fillna(df_combined.get("lot_id", ""))
+            df_combined["Diện tích"] = df_combined["lot_id"].map(lot_dt_map).fillna(0)
             df_breakdown = (
-                df_combined.groupby(["Date", "Giai đoạn", "Tên Lô"], as_index=False)["so_luong"]
+                df_combined.groupby(["Date", "Giai đoạn", "Tên Lô", "Diện tích"], as_index=False)["so_luong"]
                 .sum()
                 .sort_values("so_luong", ascending=False)
             )
             def make_breakdown(grp):
-                return "<br>".join(f"&nbsp;&nbsp;• {row['Tên Lô']}: {int(row['so_luong']):,}" for _, row in grp.iterrows())
+                lines = []
+                for _, r in grp.iterrows():
+                    dt = r['Diện tích']
+                    dt_str = f" ({dt:.2f} ha)" if pd.notna(dt) and dt != 0 else ""
+                    lines.append(f"&nbsp;&nbsp;• Lô {r['Tên Lô']}{dt_str}: {int(r['so_luong']):,}")
+                return "<br>".join(lines)
             df_bd_text = (
                 df_breakdown.groupby(["Date", "Giai đoạn"])
                 .apply(make_breakdown)
@@ -1824,19 +1843,29 @@ def render_global_data_tab(c_farm):
     if not ti_inv_df.empty and "ngay_kiem_ke" in ti_inv_df.columns:
         df_inv = ti_inv_df.copy()
         
-        # Ánh xạ lot_id sang lo gốc
-        mapped_dict = df_lots_all.set_index("lot_id")["lo"].to_dict() if not df_lots_all.empty else {}
-        df_inv["Tên Lô"] = df_inv["lot_id"].map(lambda x: mapped_dict.get(x, x))
+        # Ánh xạ lot_id sang lo và dien_tich
+        if not df_lots_all.empty:
+            mapped_dict_lo = df_lots_all.set_index("lot_id")["lo"].to_dict()
+            mapped_dict_dt = df_lots_all.set_index("lot_id")["dien_tich"].to_dict()
+        else:
+            mapped_dict_lo, mapped_dict_dt = {}, {}
+            
+        df_inv["Tên Lô"] = df_inv["lot_id"].map(lambda x: mapped_dict_lo.get(x, x))
+        df_inv["Diện tích"] = df_inv["lot_id"].map(lambda x: mapped_dict_dt.get(x, 0))
         
         df_inv["Ngày"] = pd.to_datetime(df_inv["ngay_kiem_ke"])
-        df_inv_grouped = df_inv.groupby(["Ngày", "Tên Lô"], as_index=False)["so_luong_cay_thuc_te"].sum()
+        df_inv_grouped = df_inv.groupby(["Ngày", "Tên Lô", "Diện tích"], as_index=False)["so_luong_cay_thuc_te"].sum()
         df_inv_grouped.sort_values(by="Ngày", inplace=True)
-        
+        # Tạo chuỗi hover tuỳ chỉnh
+        df_inv_grouped["hover"] = df_inv_grouped.apply(lambda r: f"<b>Lô {r['Tên Lô']}</b><br>Diện tích: {r['Diện tích']:.2f} ha<br>Ngày: {r['Ngày'].strftime('%d/%m/%Y')}<br>Số lượng: {int(r['so_luong_cay_thuc_te']):,} cây", axis=1)
+
         fig_inv = px.line(
             df_inv_grouped, x="Ngày", y="so_luong_cay_thuc_te", color="Tên Lô", 
             markers=True, line_shape="linear",
+            custom_data=["hover"],
             labels={"Ngày": "Ngày Kiểm Kê", "so_luong_cay_thuc_te": "Số lượng cây", "Tên Lô": "Lô"},
         )
+        fig_inv.update_traces(hovertemplate="%{customdata[0]}<extra></extra>")
         fig_inv.update_layout(plot_bgcolor="rgba(0,0,0,0)", yaxis={"showgrid": True, "gridcolor": "rgba(0,0,0,0.1)"}, hovermode="x unified")
         st.plotly_chart(fig_inv, use_container_width=True)
     else:
