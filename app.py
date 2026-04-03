@@ -1281,24 +1281,25 @@ def render_global_data_tab(c_farm):
         total_xuat_huy = 0
 
         for lot_id in lot_ids:
-            lot_row = ek_lots_df[ek_lots_df["lot_id"] == lot_id].iloc[0]
-            lo_name = lot_row["lo"]
-            so_luong_trong = int(lot_row["so_luong"])
+            # Tổng cây trồng gồm tất cả đợt của lô này
+            so_luong_trong = int(ek_lots_df[ek_lots_df["lot_id"] == lot_id]["so_luong"].sum())
+            lo_name = ek_lots_df[ek_lots_df["lot_id"] == lot_id].iloc[0]["lo"]
 
             so_chich_bap = int(ek_stg_df[(ek_stg_df["lot_id"] == lot_id) & (ek_stg_df["giai_doan"] == "Chích bắp")]["so_luong"].sum()) if not ek_stg_df.empty else 0
             so_cat_bap = int(ek_stg_df[(ek_stg_df["lot_id"] == lot_id) & (ek_stg_df["giai_doan"] == "Cắt bắp")]["so_luong"].sum()) if not ek_stg_df.empty else 0
             so_thu_hoach = int(ek_har_df[ek_har_df["lot_id"] == lot_id]["so_luong"].sum()) if not ek_har_df.empty else 0
             so_xuat_huy = int(ek_des_df[ek_des_df["lot_id"] == lot_id]["so_luong"].sum()) if not ek_des_df.empty else 0
 
+            # Giai đoạn chỉ để hiển thị tiến độ hiện tại
             if so_cat_bap > 0:
                 giai_doan = "Cắt bắp"
-                so_cay_co_so = so_cat_bap
             elif so_chich_bap > 0:
                 giai_doan = "Chích bắp"
-                so_cay_co_so = so_chich_bap
             else:
                 giai_doan = "Đã trồng"
-                so_cay_co_so = so_luong_trong
+
+            # Cây cơ sở = tổng cây trồng ban đầu (không phải từ giai đoạn)
+            so_cay_co_so = so_luong_trong
 
             so_cay_con_lai = max(so_cay_co_so - so_thu_hoach - so_xuat_huy, 0)
 
