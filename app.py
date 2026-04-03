@@ -1276,7 +1276,7 @@ def render_global_data_tab(c_farm):
         estimation_rows = []
         lot_ids = ek_lots_df["lot_id"].unique()
 
-        total_cay_co_so = 0
+        total_cay_da_trong = 0
         total_da_thu = 0
         total_xuat_huy = 0
 
@@ -1298,31 +1298,30 @@ def render_global_data_tab(c_farm):
             else:
                 giai_doan = "Đã trồng"
 
-            # Cây cơ sở = tổng cây trồng ban đầu (không phải từ giai đoạn)
-            so_cay_co_so = so_luong_trong
+            so_cay_da_trong = so_luong_trong
 
-            so_cay_con_lai = max(so_cay_co_so - so_thu_hoach - so_xuat_huy, 0)
+            so_cay_con_lai = max(so_cay_da_trong - so_thu_hoach - so_xuat_huy, 0)
 
-            total_cay_co_so += so_cay_co_so
+            total_cay_da_trong += so_cay_da_trong
             total_da_thu += so_thu_hoach
             total_xuat_huy += so_xuat_huy
 
             estimation_rows.append({
                 "Lô": lo_name,
                 "Giai đoạn": giai_doan,
-                "Cây cơ sở": f"{so_cay_co_so:,}",
+                "Cây đã trồng": f"{so_cay_da_trong:,}",
                 "Thu hoạch": f"{so_thu_hoach:,}",
                 "Xuất hủy": f"{so_xuat_huy:,}",
                 "Còn lại": f"{so_cay_con_lai:,}",
                 "Kg dự toán": f"{so_cay_con_lai * KG_PER_TREE:,.0f}",
             })
 
-        total_con_lai = max(total_cay_co_so - total_da_thu - total_xuat_huy, 0)
+        total_con_lai = max(total_cay_da_trong - total_da_thu - total_xuat_huy, 0)
 
         # Metric cards
         m1, m2, m3, m4 = st.columns(4)
         with m1:
-            st.metric("🌱 Tổng cây hiện tại", f"{total_cay_co_so:,}")
+            st.metric("🌱 Tổng cây đã trồng", f"{total_cay_da_trong:,}")
         with m2:
             st.metric("✅ Đã thu hoạch", f"{total_da_thu:,} cây", delta=f"{total_da_thu * KG_PER_TREE:,.0f} kg")
         with m3:
