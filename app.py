@@ -1290,16 +1290,7 @@ def render_global_data_tab(c_farm):
             so_thu_hoach = int(ek_har_df[ek_har_df["lot_id"] == lot_id]["so_luong"].sum()) if not ek_har_df.empty else 0
             so_xuat_huy = int(ek_des_df[ek_des_df["lot_id"] == lot_id]["so_luong"].sum()) if not ek_des_df.empty else 0
 
-            # Giai đoạn chỉ để hiển thị tiến độ hiện tại
-            if so_cat_bap > 0:
-                giai_doan = "Cắt bắp"
-            elif so_chich_bap > 0:
-                giai_doan = "Chích bắp"
-            else:
-                giai_doan = "Đã trồng"
-
             so_cay_da_trong = so_luong_trong
-
             so_cay_con_lai = max(so_cay_da_trong - so_thu_hoach - so_xuat_huy, 0)
 
             total_cay_da_trong += so_cay_da_trong
@@ -1308,7 +1299,6 @@ def render_global_data_tab(c_farm):
 
             estimation_rows.append({
                 "Lô": lo_name,
-                "Giai đoạn": giai_doan,
                 "Cây đã trồng": f"{so_cay_da_trong:,}",
                 "Thu hoạch": f"{so_thu_hoach:,}",
                 "Xuất hủy": f"{so_xuat_huy:,}",
