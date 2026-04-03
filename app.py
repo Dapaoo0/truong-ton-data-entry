@@ -1395,7 +1395,8 @@ def render_global_data_tab(c_farm):
         # ==============================
         st.markdown("##### 🎯 Dự toán (Lý tưởng)")
         ideal_events = []
-        # Đánh số đợt trồng cho mỗi lô (mỗi base_lots record = 1 đợt)
+        # Sort theo ngày trồng trước khi đánh số đợt (đợt 1 = trồng sớm nhất)
+        lc_lots_df = lc_lots_df.sort_values(["lo", "ngay_trong"]).reset_index(drop=True)
         _batch_counts = lc_lots_df.groupby("lo").cumcount() + 1
         _batch_totals = lc_lots_df.groupby("lo")["lo"].transform("count")
         for idx, (_, lot_row) in enumerate(lc_lots_df.iterrows()):
@@ -1460,7 +1461,7 @@ def render_global_data_tab(c_farm):
         # ==============================
         st.markdown("##### 📊 Thực tế")
         actual_events = []
-        # Đánh số đợt trồng cho chart Thực tế
+        # Dùng lại lc_lots_df đã sort ở trên
         _batch_counts2 = lc_lots_df.groupby("lo").cumcount() + 1
         _batch_totals2 = lc_lots_df.groupby("lo")["lo"].transform("count")
         for idx, (_, lot_row) in enumerate(lc_lots_df.iterrows()):
