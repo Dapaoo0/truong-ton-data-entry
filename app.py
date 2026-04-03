@@ -1447,6 +1447,9 @@ def render_global_data_tab(c_farm):
                     hovertemplate="%{text}<extra></extra>"
                 ))
 
+        # Lưu phạm vi thời gian của chart Dự toán
+        _ideal_dates = df_ideal["date"]
+
         fig_ideal.update_layout(
             plot_bgcolor="rgba(0,0,0,0)",
             yaxis={"showgrid": True, "gridcolor": "rgba(0,0,0,0.1)", "title": "Số cây"},
@@ -1454,12 +1457,11 @@ def render_global_data_tab(c_farm):
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             height=400, margin=dict(t=60)
         )
-        st.plotly_chart(fig_ideal, use_container_width=True)
+        # Chưa render chart Dự toán, đợi tính shared range với Thực tế
 
         # ==============================
         # CHART 2: THỰC TẾ
         # ==============================
-        st.markdown("##### 📊 Thực tế")
         actual_events = []
         # Dùng lại lc_lots_df đã sort ở trên
         _batch_counts2 = lc_lots_df.groupby("lo").cumcount() + 1
@@ -1561,6 +1563,20 @@ def render_global_data_tab(c_farm):
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             height=400, margin=dict(t=60)
         )
+
+        # Đồng bộ khung thời gian 2 chart
+        all_dates = list(_ideal_dates)
+        if actual_events:
+            all_dates += list(df_actual["date"])
+        if all_dates:
+            x_min = pd.to_datetime(min(all_dates)) - timedelta(days=14)
+            x_max = pd.to_datetime(max(all_dates)) + timedelta(days=14)
+            shared_range = [x_min, x_max]
+            fig_ideal.update_layout(xaxis_range=shared_range)
+            fig_actual.update_layout(xaxis_range=shared_range)
+
+        st.plotly_chart(fig_ideal, use_container_width=True)
+        st.markdown("##### 📊 Thực tế")
         st.plotly_chart(fig_actual, use_container_width=True)
     else:
         st.info("Chưa có dữ liệu Lô trồng để hiển thị biểu đồ tiến độ.")
