@@ -1280,6 +1280,124 @@ def render_global_data_tab(c_farm):
 
     st.divider()
 
+    # --- BẢNG CHI TIẾT THÔNG TIN CÁC LÔ ---
+    KG_PER_TREE_DETAIL = 18
+    st.markdown("#### 📋 Bảng chi tiết thông tin các lô (Theo Vụ)")
+    st.caption("Xem thông tin chi tiết từng lô phân loại theo vụ (Season). Các cột dữ liệu dự toán và thực tế được tính toán trong phạm vi khoảng thời gian của mục tiêu.")
+
+    if c_farm == "Admin":
+        dtf0, dtf1, dtf2, dtf3 = st.columns([1, 1, 1, 1])
+        with dtf0:
+            dt_farm = st.selectbox("Lọc theo Farm", options=farms_all, key="dt_farm")
+        with dtf1:
+            dt_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="dt_vu")
+        with dtf2:
+            dt_team = st.selectbox("Lọc theo Đội", options=teams_all, key="dt_team")
+        with dtf3:
+            dt_lot_opts = get_dynamic_lot_options(df_lots_all, df_seasons, dt_farm, dt_team, dt_vu)
+            dt_lot = st.selectbox("Lọc theo Lô", options=dt_lot_opts, key="dt_lot")
+    else:
+        dt_farm = c_farm
+        dtf1, dtf2, dtf3 = st.columns([1, 1, 1])
+        with dtf1:
+            dt_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="dt_vu")
+        with dtf2:
+            dt_team = st.selectbox("Lọc theo Đội", options=teams_all, key="dt_team")
+        with dtf3:
+            dt_lot_opts = get_dynamic_lot_options(df_lots_all, df_seasons, c_farm, dt_team, dt_vu)
+            dt_lot = st.selectbox("Lọc theo Lô", options=dt_lot_opts, key="dt_lot")
+
+    df_dt_seasons = df_seasons.copy()
+    if not df_dt_seasons.empty:
+        if dt_farm != "Tất cả" and "farm" in df_dt_seasons.columns:
+            df_dt_seasons = df_dt_seasons[df_dt_seasons["farm"] == dt_farm]
+        if dt_vu != "Tất cả" and "vu" in df_dt_seasons.columns:
+            df_dt_seasons = df_dt_seasons[df_dt_seasons["vu"] == dt_vu]
+        if dt_team != "Tất cả" and "team" in df_dt_seasons.columns:
+            df_dt_seasons = df_dt_seasons[df_dt_seasons["team"] == dt_team]
+        if dt_lot != "Tất cả" and "lo" in df_dt_seasons.columns:
+            df_dt_seasons = df_dt_seasons[df_dt_seasons["lo"] == dt_lot]
+
+    if not df_dt_seasons.empty:
+        detail_rows = []
+        for idx, row in df_dt_seasons.iterrows():
+            f_vu = row.get("vu")
+            lo_name = row.get("lo")
+            lot_id = row.get("lot_id") or row.get("dim_lo_id")
+            dien_tich = float(row.get("dien_tich", 0)) if pd.notna(row.get("dien_tich")) else 0.0
+
+            start = pd.to_datetime(row.get("ngay_bat_dau"))
+            end_actual = row.get("ngay_ket_thuc_thuc_te")
+            end_planned = row.get("ngay_ket_thuc_du_kien")
+            end = pd.to_datetime(end_actual) if pd.notna(end_actual) else pd.to_datetime(end_planned) if pd.notna(end_planned) else None
+
+            start_str = start.strftime("%d/%m/%Y") if pd.notna(start) else "—"
+            if pd.notna(end):
+                end_str = end.strftime("%d/%m/%Y")
+            else:
+                end_str = "Hiện tại"
+            thoi_gian_vu = f"{start_str} - {end_str}"
+
+            sub_lots = df_lots_all[df_lots_all["lot_id"] == lot_id] if not df_lots_all.empty else pd.DataFrame()
+            sub_stg = df_stg_all[df_stg_all["lot_id"] == lot_id] if not df_stg_all.empty else pd.DataFrame()
+            sub_har = df_har_all[df_har_all["lot_id"] == lot_id] if not df_har_all.empty else pd.DataFrame()
+            sub_des = df_des_all[df_des_all["lot_id"] == lot_id] if not df_des_all.empty else pd.DataFrame()
+
+            if pd.notna(start):
+                if not sub_lots.empty and "ngay_trong" in sub_lots.columns:
+                    sub_lots = sub_lots[pd.to_datetime(sub_lots["ngay_trong"]).dt.date >= start.date()]
+                if not sub_stg.empty and "ngay_thuc_hien" in sub_stg.columns:
+                    sub_stg = sub_stg[pd.to_datetime(sub_stg["ngay_thuc_hien"]).dt.date >= start.date()]
+                if not sub_har.empty and "ngay_thu_hoach" in sub_har.columns:
+                    sub_har = sub_har[pd.to_datetime(sub_har["ngay_thu_hoach"]).dt.date >= start.date()]
+                if not sub_des.empty and "ngay_xuat_huy" in sub_des.columns:
+                    sub_des = sub_des[pd.to_datetime(sub_des["ngay_xuat_huy"]).dt.date >= start.date()]
+            if pd.notna(end):
+                if not sub_lots.empty and "ngay_trong" in sub_lots.columns:
+                    sub_lots = sub_lots[pd.to_datetime(sub_lots["ngay_trong"]).dt.date <= end.date()]
+                if not sub_stg.empty and "ngay_thuc_hien" in sub_stg.columns:
+                    sub_stg = sub_stg[pd.to_datetime(sub_stg["ngay_thuc_hien"]).dt.date <= end.date()]
+                if not sub_har.empty and "ngay_thu_hoach" in sub_har.columns:
+                    sub_har = sub_har[pd.to_datetime(sub_har["ngay_thu_hoach"]).dt.date <= end.date()]
+                if not sub_des.empty and "ngay_xuat_huy" in sub_des.columns:
+                    sub_des = sub_des[pd.to_datetime(sub_des["ngay_xuat_huy"]).dt.date <= end.date()]
+
+            so_luong_trong = int(sub_lots["so_luong"].sum()) if not sub_lots.empty else 0
+            so_chich_bap = int(sub_stg[sub_stg["giai_doan"] == "Chích bắp"]["so_luong"].sum()) if not sub_stg.empty else 0
+            so_cat_bap = int(sub_stg[sub_stg["giai_doan"] == "Cắt bắp"]["so_luong"].sum()) if not sub_stg.empty else 0
+            so_thu_hoach = int(sub_har["so_luong"].sum()) if not sub_har.empty else 0
+
+            detail_rows.append({
+                ("Thông tin", "Vụ"): f_vu,
+                ("Thông tin", "Thời gian vụ"): thoi_gian_vu,
+                ("Thông tin", "Tên lô"): lo_name,
+                ("Thông tin", "Diện tích (ha)"): dien_tich,
+                ("Thông tin", "Cây đã trồng"): so_luong_trong,
+                ("Chích bắp", "Dự toán"): so_luong_trong,
+                ("Chích bắp", "Thực tế"): so_chich_bap,
+                ("Cắt bắp", "Dự toán"): so_luong_trong,
+                ("Cắt bắp", "Thực tế"): so_cat_bap,
+                ("Thu hoạch", "Dự toán"): so_luong_trong,
+                ("Thu hoạch", "Thực tế"): so_thu_hoach,
+                ("Tổng khối lượng (kg)", "Dự toán"): so_luong_trong * KG_PER_TREE_DETAIL,
+                ("Tổng khối lượng (kg)", "Thực tế"): so_thu_hoach * KG_PER_TREE_DETAIL
+            })
+            
+        with st.expander("📋 Xem toàn bộ thông tin", expanded=True):
+            df_detail = pd.DataFrame(detail_rows)
+            if not isinstance(df_detail.columns, pd.MultiIndex):
+                df_detail.columns = pd.MultiIndex.from_tuples(df_detail.columns)
+            
+            # Căn giữa MultiIndex Header và các ô
+            styled_df = df_detail.style.set_properties(**{'text-align': 'center'})
+            styled_df = styled_df.set_table_styles([{"selector": "th", "props": [("text-align", "center")]}])
+            
+            st.dataframe(styled_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("Chưa có cấu hình Vụ/Lô nào để hiển thị bảng chi tiết.")
+
+    st.divider()
+
     # --- DỰ TOÁN SẢN LƯỢNG THU HOẠCH (KG) ---
     KG_PER_TREE = 18
 
@@ -1319,70 +1437,21 @@ def render_global_data_tab(c_farm):
     ek_har_df = filtered_ek_dfs["har"]
     ek_des_df = filtered_ek_dfs["des"]
 
-    if not ek_lots_df.empty:
-        estimation_rows = []
-        lot_ids = ek_lots_df["lot_id"].unique()
+    total_cay_da_trong = int(ek_lots_df["so_luong"].sum()) if not ek_lots_df.empty else 0
+    total_da_thu = int(ek_har_df["so_luong"].sum()) if not ek_har_df.empty else 0
+    total_xuat_huy = int(ek_des_df["so_luong"].sum()) if not ek_des_df.empty else 0
+    total_con_lai = max(total_cay_da_trong - total_da_thu - total_xuat_huy, 0)
 
-        total_cay_da_trong = 0
-        total_da_thu = 0
-        total_xuat_huy = 0
-
-        for lot_id in lot_ids:
-            # Tổng cây trồng gồm tất cả đợt của lô này
-            so_luong_trong = int(ek_lots_df[ek_lots_df["lot_id"] == lot_id]["so_luong"].sum())
-            lo_name = ek_lots_df[ek_lots_df["lot_id"] == lot_id].iloc[0]["lo"]
-            
-            dien_tich = ek_lots_df[ek_lots_df["lot_id"] == lot_id].iloc[0].get("dien_tich")
-            dien_tich = float(dien_tich) if pd.notna(dien_tich) else 0.0
-
-            so_chich_bap = int(ek_stg_df[(ek_stg_df["lot_id"] == lot_id) & (ek_stg_df["giai_doan"] == "Chích bắp")]["so_luong"].sum()) if not ek_stg_df.empty else 0
-            so_cat_bap = int(ek_stg_df[(ek_stg_df["lot_id"] == lot_id) & (ek_stg_df["giai_doan"] == "Cắt bắp")]["so_luong"].sum()) if not ek_stg_df.empty else 0
-            so_thu_hoach = int(ek_har_df[ek_har_df["lot_id"] == lot_id]["so_luong"].sum()) if not ek_har_df.empty else 0
-            so_xuat_huy = int(ek_des_df[ek_des_df["lot_id"] == lot_id]["so_luong"].sum()) if not ek_des_df.empty else 0
-
-            so_cay_da_trong = so_luong_trong
-            so_cay_con_lai = max(so_cay_da_trong - so_thu_hoach - so_xuat_huy, 0)
-
-            total_cay_da_trong += so_cay_da_trong
-            total_da_thu += so_thu_hoach
-            total_xuat_huy += so_xuat_huy
-
-            estimation_rows.append({
-                ("Thông tin", "Tên lô"): lo_name,
-                ("Thông tin", "Diện tích (ha)"): dien_tich,
-                ("Thông tin", "Cây đã trồng"): so_cay_da_trong,
-                ("Chích bắp", "Dự toán"): so_cay_da_trong,
-                ("Chích bắp", "Thực tế"): so_chich_bap,
-                ("Cắt bắp", "Dự toán"): so_cay_da_trong,
-                ("Cắt bắp", "Thực tế"): so_cat_bap,
-                ("Thu hoạch", "Dự toán"): so_cay_da_trong,
-                ("Thu hoạch", "Thực tế"): so_thu_hoach,
-                ("Tổng khối lượng (kg)", "Dự toán"): so_cay_da_trong * KG_PER_TREE,
-                ("Tổng khối lượng (kg)", "Thực tế"): so_thu_hoach * KG_PER_TREE
-            })
-
-        total_con_lai = max(total_cay_da_trong - total_da_thu - total_xuat_huy, 0)
-
-        # Metric cards
-        m1, m2, m3, m4 = st.columns(4)
-        with m1:
-            st.metric("🌱 Tổng cây đã trồng", f"{total_cay_da_trong:,}")
-        with m2:
-            st.metric("✅ Đã thu hoạch", f"{total_da_thu:,} cây", delta=f"{total_da_thu * KG_PER_TREE:,.0f} kg")
-        with m3:
-            st.metric("🗑️ Xuất hủy", f"{total_xuat_huy:,} cây")
-        with m4:
-            st.metric("📦 Kg dự toán còn lại", f"{total_con_lai * KG_PER_TREE:,.0f} kg")
-
-        # Chi tiết trong expander
-        with st.expander("📋 Bảng chi tiết thông tin các lô", expanded=True):
-            df_estimation = pd.DataFrame(estimation_rows)
-            # Create a MultiIndex if pandas does not automatically do it from tuples
-            if not isinstance(df_estimation.columns, pd.MultiIndex):
-                df_estimation.columns = pd.MultiIndex.from_tuples(df_estimation.columns)
-            st.dataframe(df_estimation, use_container_width=True, hide_index=True)
-    else:
-        st.info("Chưa có dữ liệu Lô trồng để hiển thị bảng chi tiết.")
+    # Metric cards
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
+        st.metric("🌱 Tổng cây đã trồng", f"{total_cay_da_trong:,}")
+    with m2:
+        st.metric("✅ Đã thu hoạch", f"{total_da_thu:,} cây", delta=f"{total_da_thu * KG_PER_TREE:,.0f} kg")
+    with m3:
+        st.metric("🗑️ Xuất hủy", f"{total_xuat_huy:,} cây")
+    with m4:
+        st.metric("📦 Kg dự toán còn lại", f"{total_con_lai * KG_PER_TREE:,.0f} kg")
 
     st.divider()
 
