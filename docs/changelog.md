@@ -3,16 +3,11 @@
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
 
 ## [2026-04-06]
-### Thay đổi quy trình (Docs/Rules)
-- Cập nhật `.agents/rules/rule.md` bắt buộc duy trì 6 file theo dõi tiến độ trong thư mục `docs/`.
-- Khởi tạo thư mục `docs/` cùng cấu trúc markdown cơ bản sửa lỗi font UTF-8.
+## [Version 24.3 - Refactoring & Fix UI] - 2026-04-06
 
-### Tính năng mới (Features)
-- [app.py] Tạo bảng chi tiết thông tin các lô và tích hợp tính toán (Tổng cây trồng, chích bắp thực tế/dự kiến, cắt bắp thực tế/dự kiến, harvest, tổng khối lượng).
-- [app.py] Phân loại, tách biệt bảng chi tiết theo nhóm Vụ (F0, F1...) qua expander giao diện.
-- [app.py] Thêm bộ filter độc lập (Trang trại, Vụ, Đội, Lô) cấu hình riêng cho bảng chi tiết lô ở "Global Data".
-
-### Tinh chỉnh UI/UX (Fixes / Improvements)
-- Căn giữa (align center) nội dung cho các bảng theo MultiIndex headers.
-- Giới hạn rút ngắn số thập phân bị trôi ở cột "Diện tích (ha)" xuống còn 2 chữ số (sử dụng format chuỗi `f"{dien_tich:.2f}"` thay vì lệnh `round()` để giữ ổn định số 0 đuôi).
-- Refactor tiến trình tách bảng bằng cách gom nhóm dữ liệu dictionary `detail_rows_by_vu` theo "Vụ", loại bỏ việc phải dùng pandas drop cột, từ đó tránh warning và lỗi form.
+#### Refactor (`app.py`)
+- **[Fix UI/Data Formatter]**: Sửa lỗi giao diện hiển thị bảng "Toàn bộ thông tin vụ". Thay đổi `st.dataframe` sang render bằng `st.markdown` với chuỗi `df.to_html()`. Xử lý đồng thời 2 lỗi: 
+  1. Header (`Thông tin`, `Cắt bắp`...) bị căn trái (Do Streamlit sử dụng Glide Data Grid không hỗ trợ nhận HTML css text-align từ Styler).
+  2. Trường `Diện tích` dù đã ép kiểu String Formatter `f-str` nhưng vẫn bị Streamlit Arrow backend ép ngược lại thành Object numbers (hiển thị 6 chữ số 0 dư).
+- **[Logic Code]**: Loại bỏ phương thức `.drop()` của Pandas (tránh các warning khi gọi trên MultiIndex DataFrame) khi truy xuất dữ liệu danh sách `detail_rows`. Chuyển sang thu thập dictionary collection độc lập từng trường theo `{"Vụ" : rows_dict_list}`, tối ưu memory mapping.
+- **[Layout Table]**: Áp dụng Styler `set_properties(**{'text-align': 'center'})` và ép f-string formatting `f"{dien_tich:.2f}"` ở phần tử diện tích để chốt cứng display UI. Mặc dù mất ưu thế Sortable by values của `st.dataframe()`, bù lại đem về thẩm mỹ tối ưu cho Dashboard.

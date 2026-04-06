@@ -1387,6 +1387,18 @@ def render_global_data_tab(c_farm):
             
         with st.expander("📋 Xem toàn bộ thông tin", expanded=True):
             if detail_rows_by_vu:
+                # Đẩy CSS override thẳng vào markdown để đảm bảo mọi table được xuất từ to_html() đều căn giữa tuyệt đối
+                st.markdown("""
+                    <style>
+                    .centered-table-wrapper table th, .centered-table-wrapper table td {
+                        text-align: center !important;
+                    }
+                    .centered-table-wrapper table {
+                        width: 100%;
+                    }
+                    </style>
+                """, unsafe_allow_html=True)
+
                 for vu_val, rows in detail_rows_by_vu.items():
                     st.markdown(f"##### 🌿 Vụ {vu_val}")
                     df_detail = pd.DataFrame(rows)
@@ -1395,9 +1407,18 @@ def render_global_data_tab(c_farm):
                     
                     # Căn giữa MultiIndex Header và các ô
                     styled_df = df_detail.style.set_properties(**{'text-align': 'center'})
-                    styled_df = styled_df.set_table_styles([{"selector": "th", "props": [("text-align", "center")]}])
+                    styled_df = styled_df.set_table_styles([
+                        {"selector": "th", "props": [("text-align", "center")]},
+                        {"selector": "th.col_heading", "props": [("text-align", "center")]},
+                        {"selector": "td", "props": [("text-align", "center")]}
+                    ])
+                    # Xoá index mặc định bằng Pandas Styler
+                    styled_df = styled_df.hide(axis="index")
                     
-                    st.dataframe(styled_df, use_container_width=True, hide_index=True)
+                    # Render bằng HTML thuần để xử lý triệt để bug của Streamlit Arrow
+                    # (Arrow tự convert string format thành chuỗi dư 0 & làm mất CSS center header)
+                    table_html = styled_df.to_html(escape=False)
+                    st.markdown(f'<div class="centered-table-wrapper" style="overflow-x: auto; margin-bottom: 2rem;">{table_html}</div>', unsafe_allow_html=True)
             else:
                 st.info("Chưa có cấu hình Vụ/Lô nào để hiển thị bảng chi tiết.")
     else:
