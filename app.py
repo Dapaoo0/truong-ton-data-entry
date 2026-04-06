@@ -1371,7 +1371,7 @@ def render_global_data_tab(c_farm):
                 ("Thông tin", "Vụ"): f_vu,
                 ("Thông tin", "Thời gian vụ"): thoi_gian_vu,
                 ("Thông tin", "Tên lô"): lo_name,
-                ("Thông tin", "Diện tích (ha)"): dien_tich,
+                ("Thông tin", "Diện tích (ha)"): round(dien_tich, 2),
                 ("Thông tin", "Cây đã trồng"): so_luong_trong,
                 ("Chích bắp", "Dự toán"): so_luong_trong,
                 ("Chích bắp", "Thực tế"): so_chich_bap,
@@ -1393,6 +1393,7 @@ def render_global_data_tab(c_farm):
                 for vu_val in unique_vus:
                     st.markdown(f"##### 🌿 Vụ {vu_val}")
                     sub_df = df_detail[df_detail[("Thông tin", "Vụ")] == vu_val]
+                    sub_df = sub_df.drop(columns=[("Thông tin", "Vụ")], errors='ignore')
                     
                     # Căn giữa MultiIndex Header và các ô
                     styled_df = sub_df.style.set_properties(**{'text-align': 'center'})
