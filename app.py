@@ -132,17 +132,12 @@ def insert_access_log(farm: str, team: str, action: str):
 # HÀM TƯƠNG TÁC DB (SUPABASE DATA FETCHERS)
 # =====================================================
 def get_lots_by_farm(farm: str) -> list:
-    """Lấy danh sách Tên Lô gốc của nguyen Farm."""
-    res = supabase.table("base_lots").select("lo").eq("farm", farm).eq("is_deleted", False).order("created_at").execute()
-    seen = set()
-    lots = []
+    """Lấy danh sách Tên Lô gốc từ dim_lo (đã chuẩn hóa)."""
+    res = supabase.table("dim_lo").select("lo_name, dim_farm!inner(farm_name)") \
+        .eq("dim_farm.farm_name", farm).eq("is_active", True).order("lo_name").execute()
     if res.data:
-        for row in res.data:
-            l = row["lo"]
-            if l not in seen:
-                seen.add(l)
-                lots.append(l)
-    return lots
+        return list(dict.fromkeys(r["lo_name"] for r in res.data))  # unique, preserve order
+    return []
 
 def fetch_table_data(table_name: str, farm: str) -> pd.DataFrame:
     """Hàm chung lấy dữ liệu. Quản trị viên (Admin) sẽ lấy của tất cả các farm."""
@@ -2010,14 +2005,18 @@ def render_main_app():
             st.markdown("## 👑 Admin Dashboard - Quản trị Mùa Vụ & Hệ Thống")
             st.info("👋 Chào mừng Quản trị viên. Tại đây bạn có thể quản lý lịch sử Vụ cho từng lô.")
             
-            res = supabase.table("seasons").select("*").eq("is_deleted", False).order("created_at", desc=True).execute()
+            res = supabase.table("seasons").select("*, dim_lo!inner(lo_name, dim_farm!inner(farm_name))").eq("is_deleted", False).order("created_at", desc=True).execute()
             df_seasons = pd.DataFrame(res.data) if res.data else pd.DataFrame()
             
             if df_seasons.empty:
                 st.warning("Hiện tại hệ thống chưa có dữ liệu Vụ (Seasons). Vui lòng tạo lô ở Nông trường trước!")
                 return
+            
+            # Flatten dim_lo join
+            df_seasons["farm"] = df_seasons["dim_lo"].apply(lambda x: x.get("dim_farm", {}).get("farm_name") if isinstance(x, dict) else None)
+            df_seasons["lo"] = df_seasons["dim_lo"].apply(lambda x: x.get("lo_name") if isinstance(x, dict) else None)
                 
-            f_farm = st.selectbox("Lọc Farm", options=["Tất cả"] + list(df_seasons["farm"].unique()))
+            f_farm = st.selectbox("Lọc Farm", options=["Tất cả"] + list(df_seasons["farm"].dropna().unique()))
             if f_farm != "Tất cả":
                 df_seasons = df_seasons[df_seasons["farm"] == f_farm]
                 
@@ -2062,8 +2061,7 @@ def render_main_app():
                             
                             if auto_next and not cur_end:
                                 new_season = {
-                                    "farm": row["farm"],
-                                    "lo": row["lo"],
+                                    "dim_lo_id": row["dim_lo_id"],
                                     "vu": next_v,
                                     "loai_trong": row["loai_trong"],
                                     "ngay_bat_dau": end_date.isoformat()
@@ -2200,11 +2198,13 @@ def render_main_app():
                             mau_day_clean = mau_day.strip().capitalize()
                             # Validation: Nếu chọn là Lần 2, phải kiểm tra xem Lần 1 đã có chưa.
                             if lan_do == 2:
-                                res_lan1 = supabase.table("size_measure_logs") \
-                                    .select("id").eq("lot_id", lot_id).eq("mau_day", mau_day_clean).eq("lan_do", 1).eq("is_deleted", False).execute()
-                                if not res_lan1.data:
-                                    st.error(f"❌ Không thể đo Lần 2. Lô `{lot_id}` với màu dây `{mau_day_clean}` chưa được đo Lần 1.")
-                                    st.stop()
+                                _dim_id = get_dim_lo_id(c_farm, lot_id)
+                                if _dim_id:
+                                    res_lan1 = supabase.table("size_measure_logs") \
+                                        .select("id").eq("dim_lo_id", _dim_id).eq("mau_day", mau_day_clean).eq("lan_do", 1).eq("is_deleted", False).execute()
+                                    if not res_lan1.data:
+                                        st.error(f"❌ Không thể đo Lần 2. Lô `{lot_id}` với màu dây `{mau_day_clean}` chưa được đo Lần 1.")
+                                        st.stop()
                                     
                             st.session_state["queue_sm"].append({
                                 "Lô": lot_id, "Màu dây": mau_day_clean, "Lần đo": lan_do, "Số lượng": sl,
@@ -2720,11 +2720,13 @@ def render_main_app():
                         else:
                             mau_day_clean = mau_day.strip().capitalize()
                             # Validation: Bắt buộc đã đo size lần 1 cho lô và màu dây này
-                            res_sm = supabase.table("size_measure_logs").select("id") \
-                                .eq("lot_id", lot_id).eq("mau_day", mau_day_clean).eq("lan_do", 1).eq("is_deleted", False).execute()
-                            if not res_sm.data:
-                                st.error(f"❌ Cảnh báo: Lô `{lot_id}` với màu dây `{mau_day_clean}` chưa qua Đo Size lần 1. Hãy nhắc NT.")
-                                st.stop()
+                            _dim_id_har = get_dim_lo_id(c_farm, lot_id)
+                            if _dim_id_har:
+                                res_sm = supabase.table("size_measure_logs").select("id") \
+                                    .eq("dim_lo_id", _dim_id_har).eq("mau_day", mau_day_clean).eq("lan_do", 1).eq("is_deleted", False).execute()
+                                if not res_sm.data:
+                                    st.error(f"❌ Cảnh báo: Lô `{lot_id}` với màu dây `{mau_day_clean}` chưa qua Đo Size lần 1. Hãy nhắc NT.")
+                                    st.stop()
                                 
                             st.session_state["queue_har"].append({
                                 "Lô": lot_id, "Màu dây": mau_day_clean, "Hình thức": hinh_thuc_thu_hoach,
