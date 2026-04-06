@@ -1319,7 +1319,7 @@ def render_global_data_tab(c_farm):
             df_dt_seasons = df_dt_seasons[df_dt_seasons["lo"] == dt_lot]
 
     if not df_dt_seasons.empty:
-        detail_rows = []
+        detail_rows_by_vu = {}
         for idx, row in df_dt_seasons.iterrows():
             f_vu = row.get("vu")
             lo_name = row.get("lo")
@@ -1367,11 +1367,13 @@ def render_global_data_tab(c_farm):
             so_cat_bap = int(sub_stg[sub_stg["giai_doan"] == "Cắt bắp"]["so_luong"].sum()) if not sub_stg.empty else 0
             so_thu_hoach = int(sub_har["so_luong"].sum()) if not sub_har.empty else 0
 
-            detail_rows.append({
-                ("Thông tin", "Vụ"): f_vu,
+            if f_vu not in detail_rows_by_vu:
+                detail_rows_by_vu[f_vu] = []
+
+            detail_rows_by_vu[f_vu].append({
                 ("Thông tin", "Thời gian vụ"): thoi_gian_vu,
                 ("Thông tin", "Tên lô"): lo_name,
-                ("Thông tin", "Diện tích (ha)"): round(dien_tich, 2),
+                ("Thông tin", "Diện tích (ha)"): f"{dien_tich:.2f}",
                 ("Thông tin", "Cây đã trồng"): so_luong_trong,
                 ("Chích bắp", "Dự toán"): so_luong_trong,
                 ("Chích bắp", "Thực tế"): so_chich_bap,
@@ -1384,19 +1386,15 @@ def render_global_data_tab(c_farm):
             })
             
         with st.expander("📋 Xem toàn bộ thông tin", expanded=True):
-            df_detail = pd.DataFrame(detail_rows)
-            if not isinstance(df_detail.columns, pd.MultiIndex):
-                df_detail.columns = pd.MultiIndex.from_tuples(df_detail.columns)
-            
-            if not df_detail.empty:
-                unique_vus = df_detail[("Thông tin", "Vụ")].unique()
-                for vu_val in unique_vus:
+            if detail_rows_by_vu:
+                for vu_val, rows in detail_rows_by_vu.items():
                     st.markdown(f"##### 🌿 Vụ {vu_val}")
-                    sub_df = df_detail[df_detail[("Thông tin", "Vụ")] == vu_val]
-                    sub_df = sub_df.drop(columns=[("Thông tin", "Vụ")], errors='ignore')
+                    df_detail = pd.DataFrame(rows)
+                    if not isinstance(df_detail.columns, pd.MultiIndex):
+                        df_detail.columns = pd.MultiIndex.from_tuples(df_detail.columns)
                     
                     # Căn giữa MultiIndex Header và các ô
-                    styled_df = sub_df.style.set_properties(**{'text-align': 'center'})
+                    styled_df = df_detail.style.set_properties(**{'text-align': 'center'})
                     styled_df = styled_df.set_table_styles([{"selector": "th", "props": [("text-align", "center")]}])
                     
                     st.dataframe(styled_df, use_container_width=True, hide_index=True)
