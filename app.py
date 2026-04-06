@@ -148,8 +148,12 @@ def fetch_table_data(table_name: str, farm: str) -> pd.DataFrame:
     ]
     
     if table_name in tables_with_lo:
-        query = supabase.table(table_name).select("*, dim_lo!inner(lo_name, area_ha, dim_doi!inner(doi_name), dim_farm!inner(farm_name))").eq("is_deleted", False)
+        # Use left join (not !inner) so records with dim_lo_id=NULL still appear
+        query = supabase.table(table_name).select("*, dim_lo(lo_name, area_ha, dim_doi(doi_name), dim_farm(farm_name))").eq("is_deleted", False)
         if farm != "Admin" and farm:
+            # For non-admin, we need dim_lo to exist for farm filtering to work
+            # But we still show orphan records to avoid silent data loss
+            query = supabase.table(table_name).select("*, dim_lo!inner(lo_name, area_ha, dim_doi!inner(doi_name), dim_farm!inner(farm_name))").eq("is_deleted", False)
             query = query.eq("dim_lo.dim_farm.farm_name", farm)
     else:
         query = supabase.table(table_name).select("*")
@@ -169,10 +173,10 @@ def fetch_table_data(table_name: str, farm: str) -> pd.DataFrame:
     df = pd.DataFrame(res.data)
     
     if table_name in tables_with_lo:
-        df["farm"] = df["dim_lo"].apply(lambda x: x.get("dim_farm", {}).get("farm_name") if isinstance(x, dict) else None)
-        df["team"] = df["dim_lo"].apply(lambda x: x.get("dim_doi", {}).get("doi_name") if isinstance(x, dict) else None)
-        df["lo"] = df["dim_lo"].apply(lambda x: x.get("lo_name") if isinstance(x, dict) else None)
-        df["dien_tich"] = df["dim_lo"].apply(lambda x: x.get("area_ha") if isinstance(x, dict) else None)
+        df["farm"] = df["dim_lo"].apply(lambda x: x.get("dim_farm", {}).get("farm_name") if isinstance(x, dict) and x else None)
+        df["team"] = df["dim_lo"].apply(lambda x: x.get("dim_doi", {}).get("doi_name") if isinstance(x, dict) and x else None)
+        df["lo"] = df["dim_lo"].apply(lambda x: x.get("lo_name") if isinstance(x, dict) and x else None)
+        df["dien_tich"] = df["dim_lo"].apply(lambda x: x.get("area_ha") if isinstance(x, dict) and x else None)
         df["lot_id"] = df["lo"]
             
         # Optional: we can drop dim_lo if needed, but it shouldn't hurt
@@ -205,6 +209,11 @@ def insert_to_db(table_name: str, data: dict) -> bool:
             # Remove denormalized fields so insert to Supabase doesn't fail
             for col in ["farm", "team", "lot_id", "lo"]:
                 data.pop(col, None)
+            
+            # GUARD: Block insert if dim_lo_id is still missing
+            if not data.get("dim_lo_id"):
+                st.error("❌ Lỗi hệ thống: Không tìm thấy Lô trong danh mục (dim_lo_id = null). Vui lòng kiểm tra tên Lô.")
+                return False
 
         supabase.table(table_name).insert(data).execute()
         return True
