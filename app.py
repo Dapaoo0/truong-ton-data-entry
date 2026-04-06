@@ -2129,19 +2129,22 @@ def render_main_app():
                         ten_lo_goc = lo.strip().upper()
                         ngay_trong_str = ngay_trong.strftime('%d%m%Y')
                         lot_id = f"{ten_lo_goc}_{ngay_trong_str}"
-                        data_base = {
-                            "farm": c_farm, "team": c_team, "lo": ten_lo_goc,
-                            "lot_id": lot_id,
-                            "ngay_trong": ngay_trong.isoformat(), "so_luong": so_luong,
-                            "so_luong_con_lai": so_luong,
-                            "tuan": ngay_trong.isocalendar()[1]
-                        }
-                        data_season = {
-                            "farm": c_farm, "lo": lot_id, "vu": "F0",
-                            "loai_trong": loai_trong,
-                            "ngay_bat_dau": ngay_trong.isoformat()
-                        }
-                        confirm_action_dialog("INSERT_BASE", "base_lots", None, (data_base, data_season), f"✅ Tạo Lô {lot_id} thành công!")
+                        dim_lo_id = get_dim_lo_id(c_farm, ten_lo_goc)
+                        if not dim_lo_id:
+                            st.error(f"❌ Không tìm thấy Lô '{ten_lo_goc}' trong danh mục Farm '{c_farm}'. Vui lòng tạo Lô trong dim_lo trước.")
+                        else:
+                            data_base = {
+                                "dim_lo_id": dim_lo_id,
+                                "ngay_trong": ngay_trong.isoformat(), "so_luong": so_luong,
+                                "so_luong_con_lai": so_luong,
+                                "tuan": ngay_trong.isocalendar()[1]
+                            }
+                            data_season = {
+                                "dim_lo_id": dim_lo_id, "vu": "F0",
+                                "loai_trong": loai_trong,
+                                "ngay_bat_dau": ngay_trong.isoformat()
+                            }
+                            confirm_action_dialog("INSERT_BASE", "base_lots", None, (data_base, data_season), f"✅ Tạo Lô {lot_id} thành công!")
 
             st.markdown("---")
             col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
