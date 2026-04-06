@@ -1388,11 +1388,19 @@ def render_global_data_tab(c_farm):
             if not isinstance(df_detail.columns, pd.MultiIndex):
                 df_detail.columns = pd.MultiIndex.from_tuples(df_detail.columns)
             
-            # Căn giữa MultiIndex Header và các ô
-            styled_df = df_detail.style.set_properties(**{'text-align': 'center'})
-            styled_df = styled_df.set_table_styles([{"selector": "th", "props": [("text-align", "center")]}])
-            
-            st.dataframe(styled_df, use_container_width=True, hide_index=True)
+            if not df_detail.empty:
+                unique_vus = df_detail[("Thông tin", "Vụ")].unique()
+                for vu_val in unique_vus:
+                    st.markdown(f"##### 🌿 Vụ {vu_val}")
+                    sub_df = df_detail[df_detail[("Thông tin", "Vụ")] == vu_val]
+                    
+                    # Căn giữa MultiIndex Header và các ô
+                    styled_df = sub_df.style.set_properties(**{'text-align': 'center'})
+                    styled_df = styled_df.set_table_styles([{"selector": "th", "props": [("text-align", "center")]}])
+                    
+                    st.dataframe(styled_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("Chưa có cấu hình Vụ/Lô nào để hiển thị bảng chi tiết.")
     else:
         st.info("Chưa có cấu hình Vụ/Lô nào để hiển thị bảng chi tiết.")
 
