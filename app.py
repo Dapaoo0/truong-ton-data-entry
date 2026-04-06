@@ -1331,6 +1331,9 @@ def render_global_data_tab(c_farm):
             # Tổng cây trồng gồm tất cả đợt của lô này
             so_luong_trong = int(ek_lots_df[ek_lots_df["lot_id"] == lot_id]["so_luong"].sum())
             lo_name = ek_lots_df[ek_lots_df["lot_id"] == lot_id].iloc[0]["lo"]
+            
+            dien_tich = ek_lots_df[ek_lots_df["lot_id"] == lot_id].iloc[0].get("dien_tich")
+            dien_tich = float(dien_tich) if pd.notna(dien_tich) else 0.0
 
             so_chich_bap = int(ek_stg_df[(ek_stg_df["lot_id"] == lot_id) & (ek_stg_df["giai_doan"] == "Chích bắp")]["so_luong"].sum()) if not ek_stg_df.empty else 0
             so_cat_bap = int(ek_stg_df[(ek_stg_df["lot_id"] == lot_id) & (ek_stg_df["giai_doan"] == "Cắt bắp")]["so_luong"].sum()) if not ek_stg_df.empty else 0
@@ -1345,12 +1348,17 @@ def render_global_data_tab(c_farm):
             total_xuat_huy += so_xuat_huy
 
             estimation_rows.append({
-                "Lô": lo_name,
-                "Cây đã trồng": f"{so_cay_da_trong:,}",
-                "Thu hoạch": f"{so_thu_hoach:,}",
-                "Xuất hủy": f"{so_xuat_huy:,}",
-                "Còn lại": f"{so_cay_con_lai:,}",
-                "Kg dự toán": f"{so_cay_con_lai * KG_PER_TREE:,.0f}",
+                ("Thông tin", "Tên lô"): lo_name,
+                ("Thông tin", "Diện tích (ha)"): dien_tich,
+                ("Thông tin", "Cây đã trồng"): so_cay_da_trong,
+                ("Chích bắp", "Dự toán"): so_cay_da_trong,
+                ("Chích bắp", "Thực tế"): so_chich_bap,
+                ("Cắt bắp", "Dự toán"): so_cay_da_trong,
+                ("Cắt bắp", "Thực tế"): so_cat_bap,
+                ("Thu hoạch", "Dự toán"): so_cay_da_trong,
+                ("Thu hoạch", "Thực tế"): so_thu_hoach,
+                ("Tổng khối lượng (kg)", "Dự toán"): so_cay_da_trong * KG_PER_TREE,
+                ("Tổng khối lượng (kg)", "Thực tế"): so_thu_hoach * KG_PER_TREE
             })
 
         total_con_lai = max(total_cay_da_trong - total_da_thu - total_xuat_huy, 0)
@@ -1367,11 +1375,14 @@ def render_global_data_tab(c_farm):
             st.metric("📦 Kg dự toán còn lại", f"{total_con_lai * KG_PER_TREE:,.0f} kg")
 
         # Chi tiết trong expander
-        with st.expander("📋 Xem chi tiết theo từng Lô"):
+        with st.expander("📋 Bảng chi tiết thông tin các lô", expanded=True):
             df_estimation = pd.DataFrame(estimation_rows)
+            # Create a MultiIndex if pandas does not automatically do it from tuples
+            if not isinstance(df_estimation.columns, pd.MultiIndex):
+                df_estimation.columns = pd.MultiIndex.from_tuples(df_estimation.columns)
             st.dataframe(df_estimation, use_container_width=True, hide_index=True)
     else:
-        st.info("Chưa có dữ liệu Lô trồng để dự toán.")
+        st.info("Chưa có dữ liệu Lô trồng để hiển thị bảng chi tiết.")
 
     st.divider()
 
