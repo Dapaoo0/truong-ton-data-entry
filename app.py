@@ -189,6 +189,49 @@ def get_dim_lo_id(farm_name: str, lo_name: str):
     res = supabase.table("dim_lo").select("lo_id, dim_farm!inner(farm_name)").eq("lo_name", lo_name).eq("dim_farm.farm_name", farm_name).limit(1).execute()
     return res.data[0]["lo_id"] if res.data else None
 
+def get_or_create_dim_lo(farm_name: str, lo_name: str, team_name: str = None):
+    """Tìm dim_lo_id. Nếu lô chưa tồn tại → tự động tạo mới trong dim_lo."""
+    existing = get_dim_lo_id(farm_name, lo_name)
+    if existing:
+        return existing
+    
+    # Lô chưa có → tạo mới
+    # 1. Tìm farm_id
+    farm_res = supabase.table("dim_farm").select("farm_id").eq("farm_name", farm_name).limit(1).execute()
+    if not farm_res.data:
+        st.error(f"❌ Không tìm thấy Farm '{farm_name}' trong hệ thống.")
+        return None
+    farm_id = farm_res.data[0]["farm_id"]
+    
+    # 2. Tìm doi_id (team)
+    doi_id = None
+    if team_name:
+        doi_res = supabase.table("dim_doi").select("doi_id").eq("farm_id", farm_id).eq("doi_name", team_name).limit(1).execute()
+        if doi_res.data:
+            doi_id = doi_res.data[0]["doi_id"]
+    
+    # 3. Insert vào dim_lo
+    new_lo = {
+        "farm_id": farm_id,
+        "lo_code": lo_name,
+        "lo_name": lo_name,
+        "lo_type": "Lô thực",
+        "is_active": True
+    }
+    if doi_id:
+        new_lo["doi_id"] = doi_id
+    
+    try:
+        res = supabase.table("dim_lo").insert(new_lo).execute()
+        if res.data:
+            new_id = res.data[0]["lo_id"]
+            # Clear cache so subsequent calls see the new lot
+            get_dim_lo_id.clear()
+            return new_id
+    except Exception as e:
+        st.error(f"❌ Lỗi khi tạo Lô mới trong danh mục: {e}")
+    return None
+
 def insert_to_db(table_name: str, data: dict) -> bool:
     try:
         tables_with_lo = [
@@ -2136,9 +2179,10 @@ def render_main_app():
                         ten_lo_goc = lo.strip().upper()
                         ngay_trong_str = ngay_trong.strftime('%d%m%Y')
                         lot_id = f"{ten_lo_goc}_{ngay_trong_str}"
-                        dim_lo_id = get_dim_lo_id(c_farm, ten_lo_goc)
+                        # Auto-create lô trong dim_lo nếu chưa tồn tại
+                        dim_lo_id = get_or_create_dim_lo(c_farm, ten_lo_goc, c_team)
                         if not dim_lo_id:
-                            st.error(f"❌ Không tìm thấy Lô '{ten_lo_goc}' trong danh mục Farm '{c_farm}'. Vui lòng tạo Lô trong dim_lo trước.")
+                            st.error(f"❌ Không thể khởi tạo Lô '{ten_lo_goc}'. Vui lòng thử lại hoặc liên hệ quản trị viên.")
                         else:
                             data_base = {
                                 "dim_lo_id": dim_lo_id,
