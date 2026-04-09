@@ -1538,6 +1538,25 @@ def render_global_data_tab(c_farm):
                 ("Tổng khối lượng (kg)", "Thực tế"): so_thu_hoach * KG_PER_TREE_DETAIL
             })
             
+        # ─── Sort bảng theo tên lô tự nhiên (3B < 4A < 12A) rồi đợt trồng ───
+        import re
+        def _lo_sort_key(row_dict):
+            name = row_dict.get(("Thông tin", "Tên lô"), "")
+            # Tách: "3B (đợt 2)" → base="3B", batch=2
+            m_batch = re.match(r"^(.+?)\s*\(đợt\s*(\d+)\)$", name)
+            if m_batch:
+                base_name, batch_num = m_batch.group(1), int(m_batch.group(2))
+            else:
+                base_name, batch_num = name, 0
+            # Natural sort: "3B" → (3, "B"), "12A" → (12, "A")
+            m_num = re.match(r"^(\d+)(.*)", base_name)
+            if m_num:
+                return (int(m_num.group(1)), m_num.group(2), batch_num)
+            return (9999, base_name, batch_num)
+
+        for vu_key in detail_rows_by_vu:
+            detail_rows_by_vu[vu_key].sort(key=_lo_sort_key)
+
         with st.expander("📋 Xem toàn bộ thông tin", expanded=True):
             if detail_rows_by_vu:
                 # Đẩy CSS override thẳng vào markdown để đảm bảo mọi table được xuất từ to_html() đều căn giữa tuyệt đối
