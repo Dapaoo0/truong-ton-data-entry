@@ -1427,11 +1427,42 @@ def render_global_data_tab(c_farm):
 
     if not df_dt_seasons.empty:
         detail_rows_by_vu = {}
+        
+        # ─── Xây dựng label "đợt X" cho các lô có nhiều đợt trồng ───
+        batch_label_map = {}  # {base_lot_id: "Tên lô (đợt N)" hoặc "Tên lô"}
+        if not df_lots_all.empty and "id" in df_lots_all.columns and "lo" in df_lots_all.columns:
+            lot_groups = df_lots_all.groupby("lo")
+            for lo_name_grp, grp_df in lot_groups:
+                if len(grp_df) > 1:
+                    # Nhiều đợt → sort theo ngày trồng, đánh số
+                    sorted_grp = grp_df.sort_values("ngay_trong") if "ngay_trong" in grp_df.columns else grp_df
+                    for i, (_, b_row) in enumerate(sorted_grp.iterrows(), 1):
+                        batch_label_map[b_row["id"]] = f"{lo_name_grp} (đợt {i})"
+                else:
+                    # Chỉ 1 đợt → giữ nguyên tên lô
+                    for _, b_row in grp_df.iterrows():
+                        batch_label_map[b_row["id"]] = lo_name_grp
+
+        # ─── Dedup: bỏ season trùng (vu, base_lot_id) ───
+        # Sort: ưu tiên season đã kết thúc (có ngay_ket_thuc_thuc_te), rồi ngay_bat_dau mới nhất
+        df_dt_seasons = df_dt_seasons.copy()
+        df_dt_seasons["_has_end"] = df_dt_seasons["ngay_ket_thuc_thuc_te"].notna().astype(int)
+        df_dt_seasons = df_dt_seasons.sort_values(["_has_end", "ngay_bat_dau"], ascending=[False, False])
+        seen_vu_blid = set()
+
         for idx, row in df_dt_seasons.iterrows():
             f_vu = row.get("vu")
             lo_name = row.get("lo")
             lot_id = row.get("lot_id") or row.get("dim_lo_id")
+            season_blid = row.get("base_lot_id")
             dien_tich = float(row.get("dien_tich", 0)) if pd.notna(row.get("dien_tich")) else 0.0
+
+            # Skip duplicate (vu, base_lot_id) - giữ dòng đầu tiên
+            if pd.notna(season_blid):
+                dedup_key = (f_vu, int(season_blid))
+                if dedup_key in seen_vu_blid:
+                    continue
+                seen_vu_blid.add(dedup_key)
 
             start = pd.to_datetime(row.get("ngay_bat_dau"))
             end_actual = row.get("ngay_ket_thuc_thuc_te")
@@ -1445,41 +1476,56 @@ def render_global_data_tab(c_farm):
                 end_str = "Hiện tại"
             thoi_gian_vu = f"{start_str} - {end_str}"
 
-            sub_lots = df_lots_all[df_lots_all["lot_id"] == lot_id] if not df_lots_all.empty else pd.DataFrame()
-            sub_stg = df_stg_all[df_stg_all["lot_id"] == lot_id] if not df_stg_all.empty else pd.DataFrame()
-            sub_har = df_har_all[df_har_all["lot_id"] == lot_id] if not df_har_all.empty else pd.DataFrame()
-            sub_des = df_des_all[df_des_all["lot_id"] == lot_id] if not df_des_all.empty else pd.DataFrame()
+            # ─── Lọc dữ liệu theo base_lot_id (chính xác theo đợt trồng) ───
+            has_blid_col = (not df_stg_all.empty and "base_lot_id" in df_stg_all.columns) or \
+                           (not df_har_all.empty and "base_lot_id" in df_har_all.columns)
+            
+            if pd.notna(season_blid) and has_blid_col:
+                # ✅ NEW: Filter chính xác theo đợt trồng
+                sub_lots = df_lots_all[df_lots_all["id"] == season_blid] if "id" in df_lots_all.columns else pd.DataFrame()
+                sub_stg = df_stg_all[df_stg_all["base_lot_id"] == season_blid] if not df_stg_all.empty else pd.DataFrame()
+                sub_har = df_har_all[df_har_all["base_lot_id"] == season_blid] if not df_har_all.empty else pd.DataFrame()
+                sub_des = df_des_all[df_des_all["base_lot_id"] == season_blid] if not df_des_all.empty else pd.DataFrame()
+            else:
+                # ⚠️ FALLBACK: Lô chưa có base_lot_id → dùng date-range cũ
+                sub_lots = df_lots_all[df_lots_all["lot_id"] == lot_id] if not df_lots_all.empty else pd.DataFrame()
+                sub_stg = df_stg_all[df_stg_all["lot_id"] == lot_id] if not df_stg_all.empty else pd.DataFrame()
+                sub_har = df_har_all[df_har_all["lot_id"] == lot_id] if not df_har_all.empty else pd.DataFrame()
+                sub_des = df_des_all[df_des_all["lot_id"] == lot_id] if not df_des_all.empty else pd.DataFrame()
 
-            if pd.notna(start):
-                if not sub_lots.empty and "ngay_trong" in sub_lots.columns:
-                    sub_lots = sub_lots[pd.to_datetime(sub_lots["ngay_trong"]).dt.date >= start.date()]
-                if not sub_stg.empty and "ngay_thuc_hien" in sub_stg.columns:
-                    sub_stg = sub_stg[pd.to_datetime(sub_stg["ngay_thuc_hien"]).dt.date >= start.date()]
-                if not sub_har.empty and "ngay_thu_hoach" in sub_har.columns:
-                    sub_har = sub_har[pd.to_datetime(sub_har["ngay_thu_hoach"]).dt.date >= start.date()]
-                if not sub_des.empty and "ngay_xuat_huy" in sub_des.columns:
-                    sub_des = sub_des[pd.to_datetime(sub_des["ngay_xuat_huy"]).dt.date >= start.date()]
-            if pd.notna(end):
-                if not sub_lots.empty and "ngay_trong" in sub_lots.columns:
-                    sub_lots = sub_lots[pd.to_datetime(sub_lots["ngay_trong"]).dt.date <= end.date()]
-                if not sub_stg.empty and "ngay_thuc_hien" in sub_stg.columns:
-                    sub_stg = sub_stg[pd.to_datetime(sub_stg["ngay_thuc_hien"]).dt.date <= end.date()]
-                if not sub_har.empty and "ngay_thu_hoach" in sub_har.columns:
-                    sub_har = sub_har[pd.to_datetime(sub_har["ngay_thu_hoach"]).dt.date <= end.date()]
-                if not sub_des.empty and "ngay_xuat_huy" in sub_des.columns:
-                    sub_des = sub_des[pd.to_datetime(sub_des["ngay_xuat_huy"]).dt.date <= end.date()]
+                if pd.notna(start):
+                    if not sub_lots.empty and "ngay_trong" in sub_lots.columns:
+                        sub_lots = sub_lots[pd.to_datetime(sub_lots["ngay_trong"]).dt.date >= start.date()]
+                    if not sub_stg.empty and "ngay_thuc_hien" in sub_stg.columns:
+                        sub_stg = sub_stg[pd.to_datetime(sub_stg["ngay_thuc_hien"]).dt.date >= start.date()]
+                    if not sub_har.empty and "ngay_thu_hoach" in sub_har.columns:
+                        sub_har = sub_har[pd.to_datetime(sub_har["ngay_thu_hoach"]).dt.date >= start.date()]
+                    if not sub_des.empty and "ngay_xuat_huy" in sub_des.columns:
+                        sub_des = sub_des[pd.to_datetime(sub_des["ngay_xuat_huy"]).dt.date >= start.date()]
+                if pd.notna(end):
+                    if not sub_lots.empty and "ngay_trong" in sub_lots.columns:
+                        sub_lots = sub_lots[pd.to_datetime(sub_lots["ngay_trong"]).dt.date <= end.date()]
+                    if not sub_stg.empty and "ngay_thuc_hien" in sub_stg.columns:
+                        sub_stg = sub_stg[pd.to_datetime(sub_stg["ngay_thuc_hien"]).dt.date <= end.date()]
+                    if not sub_har.empty and "ngay_thu_hoach" in sub_har.columns:
+                        sub_har = sub_har[pd.to_datetime(sub_har["ngay_thu_hoach"]).dt.date <= end.date()]
+                    if not sub_des.empty and "ngay_xuat_huy" in sub_des.columns:
+                        sub_des = sub_des[pd.to_datetime(sub_des["ngay_xuat_huy"]).dt.date <= end.date()]
 
             so_luong_trong = int(sub_lots["so_luong"].sum()) if not sub_lots.empty else 0
             so_chich_bap = int(sub_stg[sub_stg["giai_doan"] == "Chích bắp"]["so_luong"].sum()) if not sub_stg.empty else 0
             so_cat_bap = int(sub_stg[sub_stg["giai_doan"] == "Cắt bắp"]["so_luong"].sum()) if not sub_stg.empty else 0
             so_thu_hoach = int(sub_har["so_luong"].sum()) if not sub_har.empty else 0
 
+            # Tên lô: gắn "(đợt X)" nếu lô có nhiều đợt trồng
+            display_lo = batch_label_map.get(season_blid, lo_name) if pd.notna(season_blid) else lo_name
+
             if f_vu not in detail_rows_by_vu:
                 detail_rows_by_vu[f_vu] = []
 
             detail_rows_by_vu[f_vu].append({
                 ("Thông tin", "Thời gian vụ"): thoi_gian_vu,
-                ("Thông tin", "Tên lô"): lo_name,
+                ("Thông tin", "Tên lô"): display_lo,
                 ("Thông tin", "Diện tích (ha)"): f"{dien_tich:.2f}",
                 ("Thông tin", "Cây đã trồng"): so_luong_trong,
                 ("Chích bắp", "Dự toán"): so_luong_trong,
