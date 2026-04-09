@@ -245,6 +245,7 @@ Tài liệu này ghi lại chi tiết toàn bộ cấu trúc cơ sở dữ liệ
 | tuan | integer | Không | - |
 | is_deleted | boolean | Không | Cờ đánh dấu soft delete (True=Đã xóa) |
 | dim_lo_id | integer | Không | ID định danh/Khóa ngoại |
+| base_lot_id | integer | Không | FK → base_lots.id — Đợt trồng tương ứng, auto-resolved bằng timeline sinh trưởng |
 
 ## public.destruction_logs
 **Ý nghĩa:** Log lưu quá trình xuất hủy cây chuối.
@@ -261,6 +262,7 @@ Tài liệu này ghi lại chi tiết toàn bộ cấu trúc cơ sở dữ liệ
 | is_deleted | boolean | Không | Cờ đánh dấu soft delete (True=Đã xóa) |
 | mau_day | text | Không | - |
 | dim_lo_id | integer | Không | ID định danh/Khóa ngoại |
+| base_lot_id | integer | Không | FK → base_lots.id — Đợt trồng tương ứng, auto-resolved bằng timeline sinh trưởng |
 
 ## public.harvest_logs
 **Ý nghĩa:** Log lưu quá trình thu hoạch chuối.
@@ -276,6 +278,7 @@ Tài liệu này ghi lại chi tiết toàn bộ cấu trúc cơ sở dữ liệ
 | hinh_thuc_thu_hoach | text | Không | - |
 | mau_day | text | Không | - |
 | dim_lo_id | integer | Không | ID định danh/Khóa ngoại |
+| base_lot_id | integer | Không | FK → base_lots.id — Đợt trồng tương ứng, auto-resolved bằng timeline sinh trưởng |
 
 ## public.bsr_logs
 **Ý nghĩa:** Log đo lường chỉ số BSR.
@@ -315,6 +318,7 @@ Tài liệu này ghi lại chi tiết toàn bộ cấu trúc cơ sở dữ liệ
 | created_at | timestamp with time zone | Không | Thời gian tạo record |
 | is_deleted | boolean | Không | Cờ đánh dấu soft delete (True=Đã xóa) |
 | dim_lo_id | integer | Không | ID định danh/Khóa ngoại |
+| base_lot_id | integer | Không | FK → base_lots.id — Đợt trồng gốc tương ứng (F0 exact match, Fn timeline match) |
 
 ## public.size_measure_logs
 **Ý nghĩa:** Log đo kích thước / độ dày của nải/bắp.

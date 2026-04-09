@@ -2,6 +2,23 @@
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
 
+## [2026-04-09]
+## [Version 25.0 - Auto Batch Mapping] - 2026-04-09
+
+#### Database Migration
+- **[DDL]**: Thêm cột `base_lot_id` (FK → base_lots.id) vào 4 bảng: `seasons`, `stage_logs`, `harvest_logs`, `destruction_logs`. Mục đích: liên kết trực tiếp từng record với đợt trồng cụ thể.
+
+#### Logic nghiệp vụ (`app.py`)
+- **[Auto-resolve base_lot_id]**: Triển khai hàm `resolve_base_lot_id()` sử dụng thuật toán closest-match dựa trên timeline sinh trưởng chuối:
+  - F0: 180d (Chích bắp) → 194d (Cắt bắp) → 264d (Thu hoạch) tính từ ngày trồng.
+  - Fn: +90d (Chích bắp) → +104d (Cắt bắp) → +174d (Thu hoạch) tính từ harvest F(n-1).
+  - Destruction logs: map giai đoạn xuất hủy → stage tương ứng để dùng timeline matching.
+- **[insert_to_db()]**: Tự động gọi `resolve_base_lot_id()` khi insert stage_logs, harvest_logs, destruction_logs.
+- **[Edit dialogs]**: Thêm `base_lot_id` auto-resolved vào data dict khi update 3 loại log (stage, destruction, harvest).
+
+#### Backfill dữ liệu
+- **[backfill_base_lot_id.py]**: Script backfill 65 records hiện có. Kết quả verified: 100% chính xác (0 NULL trừ 4 seasons của lô chưa trồng).
+
 ## [2026-04-06]
 ## [Version 24.3 - Refactoring & Fix UI] - 2026-04-06
 

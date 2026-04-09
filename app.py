@@ -82,6 +82,96 @@ LOAI_TRONG_OPTIONS = ["Trồng mới", "Trồng dặm"]
 STAGE_NT_OPTIONS = ["Chích bắp", "Cắt bắp"]  # Không còn Thu Hoạch ở đây
 DESTRUCTION_STAGE_OPTIONS = ["Trước chích bắp", "Trước cắt bắp", "Trước thu hoạch"]
 
+# =====================================================
+# TIMELINE SINH TRƯỞNG CHUỐI (Constants)
+# =====================================================
+# F0 (từ ngày trồng): Trồng → +180d Chích → +14d Cắt → +70d Thu hoạch (tổng 264d)
+# Fn (từ harvest trước): +90d Chích → +14d Cắt → +70d Thu hoạch (tổng 174d)
+# Cây con Fn sinh trưởng 3 tháng dưới gốc mẹ trước khi mẹ thu hoạch
+F0_DAYS_TO_CHICH = 180
+F0_DAYS_TO_CAT = 194      # 180 + 14
+F0_DAYS_TO_THU = 264       # 180 + 14 + 70
+FN_CYCLE_DAYS = 174        # 90 + 14 + 70 (từ harvest trước)
+FN_DAYS_CHICH_OFFSET = 90  # Từ harvest trước đến chích bắp Fn
+FN_DAYS_CAT_OFFSET = 104   # 90 + 14
+FN_DAYS_THU_OFFSET = 174   # 90 + 14 + 70
+CONVERGENCE_DAYS = 15      # Ngưỡng hội tụ: 2 đợt chênh ≤15d → coi như gộp
+MAX_GENERATION = 5         # Tính tối đa F0→F5
+
+# Stage offsets cho thuật toán matching
+_STAGE_OFFSETS = {
+    "Chích bắp": {"f0": F0_DAYS_TO_CHICH, "fn": FN_DAYS_CHICH_OFFSET},
+    "Cắt bắp":   {"f0": F0_DAYS_TO_CAT,   "fn": FN_DAYS_CAT_OFFSET},
+    "Thu hoạch":  {"f0": F0_DAYS_TO_THU,   "fn": FN_DAYS_THU_OFFSET},
+}
+
+
+# Map giai đoạn xuất hủy → stage tương ứng để dùng timeline matching
+_DESTRUCTION_STAGE_MAP = {
+    "Trước chích bắp": "Chích bắp",
+    "Trước cắt bắp": "Cắt bắp",
+    "Trước thu hoạch": "Thu hoạch",
+}
+
+def resolve_base_lot_id(dim_lo_id, action_date, giai_doan):
+    """
+    Tự động suy luận base_lot_id dựa trên ngày hành động và giai đoạn.
+    Tính expected dates cho TẤT CẢ vụ (F0→F5) của mỗi đợt trồng trong lô.
+    Chọn đợt có khoảng cách nhỏ nhất (closest match).
+    Luôn trả về kết quả — không bao giờ None (trừ khi lô chưa có đợt trồng).
+    """
+    res = supabase.table("base_lots") \
+        .select("id, ngay_trong") \
+        .eq("dim_lo_id", dim_lo_id) \
+        .eq("is_deleted", False) \
+        .execute()
+    
+    if not res.data:
+        return None  # Lô chưa có đợt trồng nào
+
+    action_dt = pd.to_datetime(action_date)
+    best_match_id = None
+    best_distance = float('inf')
+
+    # Nếu là giai đoạn xuất hủy → map sang stage tương ứng để dùng timeline
+    effective_giai_doan = _DESTRUCTION_STAGE_MAP.get(giai_doan, giai_doan)
+
+    for batch in res.data:
+        trong_dt = pd.to_datetime(batch["ngay_trong"])
+
+        if effective_giai_doan in _STAGE_OFFSETS:
+            offsets = _STAGE_OFFSETS[effective_giai_doan]
+
+            # --- F0 ---
+            f0_expected = trong_dt + timedelta(days=offsets["f0"])
+            dist = abs((action_dt - f0_expected).days)
+            if dist < best_distance:
+                best_distance = dist
+                best_match_id = batch["id"]
+
+            # --- F1 → F5 ---
+            f0_harvest_dt = trong_dt + timedelta(days=F0_DAYS_TO_THU)
+            for n in range(1, MAX_GENERATION + 1):
+                prev_harvest = f0_harvest_dt + timedelta(days=FN_CYCLE_DAYS * (n - 1))
+                fn_expected = prev_harvest + timedelta(days=offsets["fn"])
+                dist = abs((action_dt - fn_expected).days)
+                if dist < best_distance:
+                    best_distance = dist
+                    best_match_id = batch["id"]
+        else:
+            # Giai đoạn không xác định → đợt trồng gần nhất trước ngày hành động
+            if trong_dt <= action_dt:
+                dist = (action_dt - trong_dt).days
+                if dist < best_distance:
+                    best_distance = dist
+                    best_match_id = batch["id"]
+
+    # Fallback: nếu tất cả đợt trồng đều SAU ngày hành động → chọn đợt sớm nhất
+    if best_match_id is None:
+        best_match_id = sorted(res.data, key=lambda b: b["ngay_trong"])[0]["id"]
+
+    return best_match_id
+
 
 # =====================================================
 # STYLE TÙY CHỈNH (CSS)
@@ -257,6 +347,18 @@ def insert_to_db(table_name: str, data: dict) -> bool:
             if not data.get("dim_lo_id"):
                 st.error("❌ Lỗi hệ thống: Không tìm thấy Lô trong danh mục (dim_lo_id = null). Vui lòng kiểm tra tên Lô.")
                 return False
+            
+            # Auto-resolve base_lot_id cho stage/harvest/destruction logs
+            auto_resolve_tables = ["stage_logs", "harvest_logs", "destruction_logs"]
+            if table_name in auto_resolve_tables and not data.get("base_lot_id"):
+                date_col_map = {"stage_logs": "ngay_thuc_hien", "harvest_logs": "ngay_thu_hoach", "destruction_logs": "ngay_xuat_huy"}
+                giai_doan_map = {"stage_logs": data.get("giai_doan", ""), "harvest_logs": "Thu hoạch", "destruction_logs": data.get("giai_doan", "")}
+                action_date = data.get(date_col_map.get(table_name, ""))
+                giai_doan = giai_doan_map.get(table_name, "")
+                if action_date and data.get("dim_lo_id"):
+                    resolved_id = resolve_base_lot_id(data["dim_lo_id"], action_date, giai_doan)
+                    if resolved_id:
+                        data["base_lot_id"] = resolved_id
 
         supabase.table(table_name).insert(data).execute()
         return True
@@ -555,10 +657,12 @@ def edit_stage_log_dialog(editing_row, available_lots, c_team):
                 is_valid, msg = check_quantity_limit(editing_row["farm"], lot_id, sl, "stage", giai_doan=giai_doan, exclude_id=editing_row["id"])
                 if not is_valid: st.error(msg)
                 else:
+                    resolved_blid = resolve_base_lot_id(editing_row["dim_lo_id"], ngay_th.isoformat(), giai_doan)
                     data = {
                         "giai_doan": giai_doan, 
                         "ngay_thuc_hien": ngay_th.isoformat(), "so_luong": sl, "mau_day": mau_day_clean,
-                        "tuan": ngay_th.isocalendar()[1]
+                        "tuan": ngay_th.isocalendar()[1],
+                        "base_lot_id": resolved_blid
                     }
                     supabase.table("stage_logs").update(data).eq("id", editing_row["id"]).execute()
                     st.session_state["toast"] = f"✅ Cập nhật tiến độ: {lot_id}!"
@@ -615,7 +719,8 @@ def edit_destruction_log_dialog(editing_row, available_lots):
                 is_valid, msg = check_quantity_limit(editing_row["farm"], lot_id, sl, "destruction", exclude_id=editing_row["id"])
                 if not is_valid: st.error(msg)
                 else:
-                    data = {"ngay_xuat_huy": ngay.isoformat(), "giai_doan": gxh, "ly_do": ly_do.strip(), "so_luong": sl, "tuan": ngay.isocalendar()[1], "mau_day": mau_day_clean}
+                    resolved_blid = resolve_base_lot_id(editing_row["dim_lo_id"], ngay.isoformat(), gxh)
+                    data = {"ngay_xuat_huy": ngay.isoformat(), "giai_doan": gxh, "ly_do": ly_do.strip(), "so_luong": sl, "tuan": ngay.isocalendar()[1], "mau_day": mau_day_clean, "base_lot_id": resolved_blid}
                     supabase.table("destruction_logs").update(data).eq("id", editing_row["id"]).execute()
                     st.session_state["toast"] = "✅ Đã cập nhật!"
                     st.rerun()
@@ -654,10 +759,12 @@ def edit_harvest_log_dialog(editing_row, available_lots):
                 is_valid, msg = check_quantity_limit(editing_row["farm"], lot_id, sl, "harvest", exclude_id=editing_row["id"])
                 if not is_valid: st.error(msg)
                 else:
+                    resolved_blid = resolve_base_lot_id(editing_row["dim_lo_id"], ngay.isoformat(), "Thu hoạch")
                     data = {
                         "mau_day": mau_day_clean, 
                         "ngay_thu_hoach": ngay.isoformat(), "so_luong": sl, 
-                        "hinh_thuc_thu_hoach": hinh_thuc_thu_hoach, "tuan": ngay.isocalendar()[1]
+                        "hinh_thuc_thu_hoach": hinh_thuc_thu_hoach, "tuan": ngay.isocalendar()[1],
+                        "base_lot_id": resolved_blid
                     }
                     supabase.table("harvest_logs").update(data).eq("id", editing_row["id"]).execute()
                     st.session_state["toast"] = f"✅ Lưu thu hoạch {lot_id} thành công!"
