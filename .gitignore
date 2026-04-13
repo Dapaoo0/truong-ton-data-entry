@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+*.log
+tmp_test*.py
+test_supabase*.py
+app_temp.py
+clean_db.py
+clean_db.sql
+skills/
+skills_manifest.json
