@@ -2,6 +2,19 @@
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
 
+## [Version 26.0 - Harvest Forecast 3 Phases] - 2026-04-13
+
+#### UI/CSS (`app.py`)
+- **[Fix padding]**: Inject CSS loại bỏ khoảng trắng mặc định ở đầu trang Streamlit (ẩn `stHeader`, giảm `padding-top` container).
+
+#### Tính năng mới: Lịch Thu hoạch Dự kiến (`app.py`)
+- **[3 đợt thu]**: Phân tách thu hoạch thành Thu bói (10%) → Thu rộ (80%) → Thu vét (10%):
+  - Mốc: `harvest_midpoint` (F0: +264d, Fn: +174d)
+  - Thu rộ: ±13 ngày quanh mốc (26 ngày). Thu bói: 14 ngày trước. Thu vét: 14 ngày sau.
+  - Tổng cửa sổ: 54 ngày/vụ. Hao hụt 10%/vụ (không kép).
+- **[Filter Năm]**: Thêm selectbox lọc theo năm (default: năm hiện tại).
+- **[Popover chi tiết]**: Click "🔍 Xem chi tiết" dưới mỗi thẻ tháng → hiện bảng breakdown: Lô, Vụ, Loại thu, Số buồng, Khoảng thời gian.
+
 ## [2026-04-09]
 ## [Version 25.0 - Auto Batch Mapping] - 2026-04-09
 

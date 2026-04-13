@@ -11,3 +11,6 @@ Những khám phá, cấu hình cứng và lưu ý kinh nghiệm tìm được t
 - **Auto Batch Mapping**: Hệ thống tự động liên kết log entries với đợt trồng (`base_lot_id`) dựa trên timeline sinh trưởng. Không yêu cầu user nhập chọn thủ công. Thuật toán closest-match so sánh expected dates của F0→F5 với ngày hành động thực tế.
 - **Xử lý chồng chập timeline**: Khi 2 đợt trồng có expected date chồng chập (≤15 ngày), hệ thống gán theo đợt gần nhất. Trường hợp Fn: F1 bắt đầu = ngày harvest F0, nên Season Fn match bằng expected harvest F(n-1), không phải ngày trồng.
 - **Destruction timeline**: Giai đoạn xuất hủy ("Trước chích bắp/cắt bắp/thu hoạch") được map sang stage tương ứng để dùng timeline matching chính xác, thay vì fallback closest-planted có thể match sai đợt mới trồng.
+- **Harvest 3 Phases**: Dự báo thu hoạch dùng mô hình Normal Distribution truncated. Cửa sổ 54 ngày = Thu bói (14d, 10%) + Thu rộ (26d, 80%) + Thu vét (14d, 10%). Mỗi phase được gán vào tháng chứa midpoint của khoảng thời gian.
+- **Hao hụt không kép**: Mỗi vụ Fn reset về số cây trồng gốc (không lấy 10% kép từ vụ trước), vì cây Fn mọc mới thay thế cây mẹ.
+- **CSS Streamlit padding**: Khoảng trắng thừa đầu trang do Streamlit header mặc định. Fix bằng CSS: `.stMainBlockContainer { padding-top: 1rem }` + `header[data-testid="stHeader"] { height: 0 }`.
