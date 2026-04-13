@@ -1,0 +1,150 @@
+TÀI LIỆU ĐẶC TẢ YÊU CẦU FRONT-END (FRONT-END MIGRATION SPECS)
+DỰ ÁN: HỆ THỐNG QUẢN LÝ SINH TRƯỞNG CHUỐI XUẤT KHẨU - CÔNG TY TRƯỜNG TỒN
+
+================================================================================
+1. TỔNG QUAN KIẾN TRÚC GIAO DIỆN (SHELL LAYOUT)
+================================================================================
+Bất kể phân quyền, layout chính của ứng dụng chia làm 3 phần:
+1.1. Sidebar (Cột điều hướng trái)
+- Logo công ty: "logo.png" hoặc text fallback "🍌 Trường Tồn".
+- Đường kẻ ngang phân cách (Divider).
+- Badge "Farm": Hiển thị tên Nông trường hiện tại (VD: 🏭 Farm 195).
+- Badge "Đội": Hiển thị tên Đội hiện tại (VD: 👥 NT1).
+- Text phụ (Caption): Thời gian đăng nhập (Format: HH:MM - DD/MM/YYYY).
+- Button "Đăng xuất" (Nút phụ / Secondary, Full-width).
+
+1.2. Header (Đầu trang)
+- Toast / Snackbar Message: Khu vực hiển thị thông báo "Thành công" (Màu xanh) hoặc "Lỗi" (Màu đỏ). Tự động theo kiểu pop-up rồi biến mất.
+- Dynamic Title: Tiêu đề trang thay đổi theo user đăng nhập (Ví dụ: "Hệ thống NT1 - Farm 195").
+
+1.3. Vùng Nội Dung Chính (Main Content Area)
+- Sử dụng "Segmented Control" (Tab ngang) để chuyển đổi qua lại giữa các màn hình nhập liệu hoặc báo cáo.
+- Các Tab tự động ẩn/hiện tùy thuộc vào quyền của người dùng đang đăng nhập (Vai trò).
+
+================================================================================
+2. PHÂN QUYỀN (RBAC) VÀ RENDER TABS
+================================================================================
+Hệ thống hiển thị Tab chức năng dựa vào field "Team" của user:
+
+- TEAM "Quản trị viên" (Admin):
+  + Tab 1: 🌐 Dữ liệu toàn cục (Báo cáo, Filter, Export).
+  + Tab 2: 👑 Quản trị Mùa Vụ (Màn hình Data Grid danh sách các vụ và form cập nhật ngày bắt đầu / chốt vụ).
+
+- TEAM "Quản lý farm":
+  + Không có tab. Show trực tiếp một trang là "🌐 Dữ liệu toàn cục" nhưng bị filter cố định chỉ xem được báo cáo số liệu của Farm người đó quản lý. Không có quyền nhập liệu (Read-only).
+
+- TEAM "NT1" và "NT2": (Gồm 8 Tab chức năng)
+  + Tab 1: 🌐 Dữ liệu toàn cục
+  + Tab 2: 🌱 Khởi tạo Lô trồng
+  + Tab 3: 📈 Cập nhật Tiến độ (Giao diện Cắt Bắp)
+  + Tab 4: 📏 Đo Size
+  + Tab 5: 🗑️ Cập nhật Xuất hủy
+  + Tab 6: 🌳 Kiểm kê cây
+  + Tab 7: 🧪 Đo pH Đất
+  + Tab 8: 🦠 Kiểm tra Fusarium
+
+- TEAM "Đội BVTV": (Gồm 2 Tab chính)
+  + Tab 1: 🌐 Dữ liệu toàn cục
+  + Tab 2: 📈 Cập nhật Tiến độ (Giao diện Chích bắp)
+
+- TEAM "Đội Thu Hoạch":
+  + Cấu trúc tương tự: Tab Dữ liệu toàn cục và màn hình form "Cắt Buồng" (Harvesting).
+
+- TEAM "Xưởng Đóng Gói":
+  + Cấu trúc tương tự: Tab Dữ liệu toàn cục và màn hình form "Thu hồi Cuống" (BSR Logs).
+
+================================================================================
+3. ĐẶC TẢ CHI TIẾT CÁC FORM NHẬP LIỆU (UI COMPONENTS)
+================================================================================
+*** QUY TẮC CHUNG CHO TẤT CẢ CÁC FORM NHẬP LIỆU:
+- Mọi form đều áp dụng "Cơ chế Queue" (Hàng đợi lưu tạm): User điền các Input -> Bấm nút "Thêm vào Danh sách" (Chưa ghi DB) -> Dữ liệu trôi xuống một "Bảng đợi" phía bên dưới.
+- Bảng đợi (Queue Data Grid) cho phép xem lại các items vừa điền. Cuối mỗi dòng có cột xóa dòng (để chỉnh sửa nếu nhập lỗi).
+- Dưới cùng của bảng đợi sẽ có nút bấm "🚀 Lưu toàn bộ" (Submit Bulk API ghi vào CSDL).
+- Vùng dưới cùng của mỗi tab là "Bảng Dữ liệu thật" đã lưu trên hệ thống, kèm theo logic 48 Giờ:
+  + Mỗi dòng data nếu lấy (Current_Time - Created_at <= 48h): Hiển thị nút "✏️ Sửa" (Mở ra một popup/modal form điền sẵn data) và nút "🗑️ Xóa".
+  + Nếu data > 48 tiếng: Ẩn 2 tính năng Sửa/Xóa. Chuyển thành text "🔒 Quá 48h".
+
+3.1. FORM KHỞI TẠO LÔ TRỒNG
+- Input "Tên Lô": Text input (Bắt buộc nhập). Frontend nên viết Auto uppercase chữ cái đầu.
+- Trạng thái "Loại trồng": Dropdown / Select box (Options: Trồng mới, Trồng dặm, Để chồi, Khác).
+- Input "Ngày trồng": Date Picker. (Mặc định set current date).
+- Input "Tuần": Text Input (Dạng Disabled/Read-only). Giá trị hiển thị phải tự động được tính là "Số tuần trong năm (ISO Week Number)" sinh ra từ biến Ngày Trồng bên cạnh.
+- Input "Số lượng trồng": Number Input. Yêu cầu validate (> 0). Bước nhảy (Step) 100.
+
+3.2. FORM CẬP NHẬT TIẾN ĐỘ (Stage Logs)
+- Dropdown "Chọn Lô": Filter option các Tên Lô của hệ thống.
+- Radio Group "Giai đoạn": Hiển thị ngang ngang. 
+  + Nếu Team BVTV đăng nhập: Mặc định chọn 1 option "Chích bắp"
+  + Nếu NT1/NT2 đăng nhập: Mặc định tùy chọn là "Cắt bắp"
+- Input "Màu dây": Text input (Ví dụ: Đỏ, Xanh lá...). Validate bắt buộc.
+- Input "Ngày thực hiện": Date Picker.
+- Input "Tuần": Text (Dạng Disabled tự động tính tuần).
+- Input "Số lượng": Number. (Min = 1, Step = 1000).
+
+3.3. FORM ĐO SIZE
+- Dropdown "Chọn Lô".
+- Input "Màu dây": Text input.
+- Radio Group "Lần đo": Options (1 hoặc 2). 
+  + VALIDATION ĐẶC BIỆT: Nếu bấm chọn "Lần 2", Submit form phải có action call check DB: "Trường hợp [Lô này] + [Màu dây này] chưa từng có record đo Lần 1 => Không cho submit, báo lỗi".
+- Input "Ngày đo": Date Picker. Input "Tuần" (Auto).
+- Input "Hàng kiểm tra": Text (VD: H1-H5).
+- Input "Size (Cal)": Number Field (Kiểu số thập phân, ví dụ 12.5). Step 0.1.
+- Input "Số lượng buồng mẫu": Number Field. Step 10.
+
+3.4. FORM KIỂM KÊ CÂY (Tree Inventory Logs)
+- Gồm: Dropdown chọn Lô, Ngày kiểm kê (Date), Tuần (Auto), và Số lượng cây thực tế (Number input).
+
+3.5. FORM ĐO PH ĐẤT (Cấu trúc mảng Form động - Dynamic Repater UI)
+- Phía trên quy định thông tin gốc: Dropdown Lô, Ngày Đo, Tuần Đo.
+- Nửa dưới giao diện là các thẻ nhập động: Mặc định là 1 dòng "Lần đo 1" với một Text_Field nhập liệu (Kiểu dữ liệu Number từ 0 đến 14.0).
+- Nút "➕ Thêm lần đo": Bấm vào Front-end sẽ đẻ thêm Element div dọc xuống dưới "Lần đo 2", "Lần đo 3"...
+- Nút "Lưu kết quả": Quét duyệt mảng component array, bóc tách toàn bộ các Field value > 0 gửi 1 mẻ mảng JSON Payload POST lên server.
+
+================================================================================
+4. ĐẶC TẢ CHI TIẾT MÀN HÌNH DỮ LIỆU TỔNG & BÁO CÁO (GLOBAL DASHBOARDS)
+================================================================================
+Bao gồm nhóm các nút Xuất File, Các Bộ Lọc Chéo và Cụm Biểu Đồ Analytics phức tạp.
+
+4.1. Chức năng Xuất Excel
+- Cần có 2 Nút Action: "Tải Báo cáo Cắt bắp theo Tuần" và "Tải Báo cáo Trồng/Để chồi".
+- Nếu dùng React/NextJS, phần này cần thiết kế API Route để export dữ liệu Raw DB sang file định dạng `.xlsx`. Đặc biệt, Báo cáo cắt bắp có yêu cầu format tính màu tô điểm Cells (Background Fill) tương ứng với text cột "Màu dây" ghi trong CSDL.
+
+4.2. Khối Trạng Thái Xử Lý Lọc (Global Filters Cascade)
+- Ngay phía trên biểu đồ phải xuất hiện 1 dải Menu gồm 4 Dropdowns (Select Box) theo cấp:
+   [ Lọc theo Farm ] -> [ Lọc theo Vụ ] -> [ Lọc theo Đội ] -> [ Lọc theo Lô ]
+- Cùng xếp kề đó là 1 cụm "Date Range Picker" (Từ ngày - Đến ngày).
+=> State của 5 thành phần này sẽ Bind cứng với các Components Bảng/Biểu Đồ phía dưới để filter trực tiếp dữ liệu đang display.
+
+4.3. Biểu đồ 1: Biểu Đồ Phễu Theo Lô (Hybrid Funnel Bar Chart)
+- Trục X: Category dọc các danh sách "Lô".  Trục Y: Axis Number "Số lượng Cây/buồng".
+- Mảng logic Mapping Bar Type:
+  + Label: "1a. Trồng mới" // "1b. Trồng dặm" -> Chart Setup Type = "Stacked Bar" (Chồng nối tiếp lên nhau thành 1 trụ cột).
+  + Label "2. Chích bắp" // "3. Cắt bắp" // "4. Thu hoạch" // "5. Xuất hủy" -> Chart Setup Type = "Grouped Bar" (Clustered, chia cột đứng cạnh trụ trên).
+- Đòi hỏi Component UI Library của bạn hỗ trợ cấu hình multi-series offset group. (Ví dụ: Plotly, Apache ECharts, Nivo...)
+
+4.4. Biểu đồ 2: Phân Tích Biến Trở Tiến Trình Theo Thời Gian
+- Dạng biểu đồ: Graph Line Chart đa luồng (Multi-lines, tương ứng 5 đường Tracking giai đoạn sinh trưởng).
+- Trục X: Timeline bằng "Ngày thao tác thực tế". Trục Y: Tổng "Số lượng của tất cả Lô gom lại trong ngày đó".
+- Filter đặc biệt trong Layout của component (Tương tác UI):
+  + Multi-Select Tool: Cung cấp list checkboxes cho phép User Tick Tắt / Mở các đường Line không muốn xem. Nếu bị bỏ chọn, đường Graph Line sẽ tự mờ xuống (Css Opacity: 15%), nếu bật lại thì sáng rỡ lên (Opacity: 100%, stroke_width = 3).
+  + Tooltip Interaction (Nâng cao): Sự kiện MouseHover vào các Point node (dấu chấm trên đường Line). Nội dung Hover phải bật ra một khung box không chỉ ghi con số tổng, mà phải là bảng liệt kê chi tiết (Breakdown HTML) ví dụ: 
+         [ Ngày 20/03: 15.000 cây ]
+         - Chi tiết theo Lô:
+           > Lô AA1: 7.000 cây
+           > Lô BB2: 8.000 cây
+
+4.5. Biểu đồ 3: Theo dõi Kiểm kê Cây Lô theo Thời gian
+- Tương tự Line Chart trên nhưng thay Series bằng "Lô". Mục đích để Admin nắm được một Lô đang sụt dần số cây qua các tháng do hủy hỏng hay chết.
+
+================================================================================
+5. BUSINESS LOGIC & VALIDATION CORE (DUNG SANG API OR FORM DATA)
+================================================================================
+Không chỉ copy layout, bạn cần map đủ các API Core để tái tính toán lại các luật validation khống chế:
+1. Logic Hạn mức (Capacity Rules check):
+   - Mọi hành động log "Chích bắp, Cắt bắp, Thu hoạch, Xuất Kém, Diệt hủy" liên quan đến cây/buồng đều phải trừ dần trong một Giỏ Giới Hạn Quota khổng lồ của các lô đó (Dựa vào số cây tổng Trồng/Để Chồi của nó). Front-end bắt buộc chặn Submit nếu người nông dân nhập số liệu lớn hơn lượng capacity còn lại của lô (Lỗi hiển thị Validation Error Toast).
+2. Logic Trình Tự Thời Gian (Timeline Logic Check):
+   - Lập trình validate Date: Giai đoạn thu hoạch KHÔNG THỂ có giá trị Ngày (Date Picker) nằm TRƯỚC ngày Khởi tạo Lô trồng gốc (Date mismatch lock).
+3. Logic Thu hồi Cấp phát (FIFO Allocations):
+   - Xử lý mảng (dành cho Backend, call API từ Frontend): Khi thao tác số liệu phải clear dữ liệu theo Queue nhập kho trước, xuất kho trước (FIFO).
+
+--- End of Request ---

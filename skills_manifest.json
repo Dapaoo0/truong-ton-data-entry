@@ -1,0 +1,98 @@
+﻿[
+    {
+        "Folder":  "brainstorming",
+        "Name":  "brainstorming",
+        "Desc":  "\"You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation.\"",
+        "Path":  "D:\\input_du_bao_san_luong\\skills\\brainstorming\\SKILL.md"
+    },
+    {
+        "Folder":  "dispatching-parallel-agents",
+        "Name":  "dispatching-parallel-agents",
+        "Desc":  "Use when facing 2+ independent tasks that can be worked on without shared state or sequential dependencies",
+        "Path":  "D:\\input_du_bao_san_luong\\skills\\dispatching-parallel-agents\\SKILL.md"
+    },
+    {
+        "Folder":  "executing-plans",
+        "Name":  "executing-plans",
+        "Desc":  "Use when you have a written implementation plan to execute in a separate session with review checkpoints",
+        "Path":  "D:\\input_du_bao_san_luong\\skills\\executing-plans\\SKILL.md"
+    },
+    {
+        "Folder":  "finishing-a-development-branch",
+        "Name":  "finishing-a-development-branch",
+        "Desc":  "Use when implementation is complete, all tests pass, and you need to decide how to integrate the work - guides completion of development work by presenting structured options for merge, PR, or cleanup",
+        "Path":  "D:\\input_du_bao_san_luong\\skills\\finishing-a-development-branch\\SKILL.md"
+    },
+    {
+        "Folder":  "receiving-code-review",
+        "Name":  "receiving-code-review",
+        "Desc":  "Use when receiving code review feedback, before implementing suggestions, especially if feedback seems unclear or technically questionable - requires technical rigor and verification, not performative agreement or blind implementation",
+        "Path":  "D:\\input_du_bao_san_luong\\skills\\receiving-code-review\\SKILL.md"
+    },
+    {
+        "Folder":  "requesting-code-review",
+        "Name":  "requesting-code-review",
+        "Desc":  "Use when completing tasks, implementing major features, or before merging to verify work meets requirements",
+        "Path":  "D:\\input_du_bao_san_luong\\skills\\requesting-code-review\\SKILL.md"
+    },
+    {
+        "Folder":  "skill-creator",
+        "Name":  "skill-creator",
+        "Desc":  "Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill\u0027s description for better triggering accuracy.",
+        "Path":  "D:\\input_du_bao_san_luong\\skills\\skill-creator\\SKILL.md"
+    },
+    {
+        "Folder":  "subagent-driven-development",
+        "Name":  "subagent-driven-development",
+        "Desc":  "Use when executing implementation plans with independent tasks in the current session",
+        "Path":  "D:\\input_du_bao_san_luong\\skills\\subagent-driven-development\\SKILL.md"
+    },
+    {
+        "Folder":  "systematic-debugging",
+        "Name":  "systematic-debugging",
+        "Desc":  "Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes",
+        "Path":  "D:\\input_du_bao_san_luong\\skills\\systematic-debugging\\SKILL.md"
+    },
+    {
+        "Folder":  "test-driven-development",
+        "Name":  "test-driven-development",
+        "Desc":  "Use when implementing any feature or bugfix, before writing implementation code",
+        "Path":  "D:\\input_du_bao_san_luong\\skills\\test-driven-development\\SKILL.md"
+    },
+    {
+        "Folder":  "truong-ton-app-developer",
+        "Name":  "truong-ton-app-developer",
+        "Desc":  "Master prompt guidelines and instructions for developing the Streamlit + Supabase app. Includes Streamlit rendering patterns, Supabase table querying, Role-Based Access Control (RBAC), Plotly data visualization, and Clean Code principles.",
+        "Path":  "D:\\input_du_bao_san_luong\\skills\\truong-ton-app-developer\\SKILL.md"
+    },
+    {
+        "Folder":  "using-git-worktrees",
+        "Name":  "using-git-worktrees",
+        "Desc":  "Use when starting feature work that needs isolation from current workspace or before executing implementation plans - creates isolated git worktrees with smart directory selection and safety verification",
+        "Path":  "D:\\input_du_bao_san_luong\\skills\\using-git-worktrees\\SKILL.md"
+    },
+    {
+        "Folder":  "using-superpowers",
+        "Name":  "using-superpowers",
+        "Desc":  "Use when starting any conversation - establishes how to find and use skills, requiring Skill tool invocation before ANY response including clarifying questions",
+        "Path":  "D:\\input_du_bao_san_luong\\skills\\using-superpowers\\SKILL.md"
+    },
+    {
+        "Folder":  "verification-before-completion",
+        "Name":  "verification-before-completion",
+        "Desc":  "Use when about to claim work is complete, fixed, or passing, before committing or creating PRs - requires running verification commands and confirming output before making any success claims; evidence before assertions always",
+        "Path":  "D:\\input_du_bao_san_luong\\skills\\verification-before-completion\\SKILL.md"
+    },
+    {
+        "Folder":  "writing-plans",
+        "Name":  "writing-plans",
+        "Desc":  "Use when you have a spec or requirements for a multi-step task, before touching code",
+        "Path":  "D:\\input_du_bao_san_luong\\skills\\writing-plans\\SKILL.md"
+    },
+    {
+        "Folder":  "writing-skills",
+        "Name":  "writing-skills",
+        "Desc":  "Use when creating new skills, editing existing skills, or verifying skills work before deployment",
+        "Path":  "D:\\input_du_bao_san_luong\\skills\\writing-skills\\SKILL.md"
+    }
+]

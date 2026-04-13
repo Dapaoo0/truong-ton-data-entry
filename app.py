@@ -1603,26 +1603,46 @@ def render_global_data_tab(c_farm):
 
     st.divider()
 
-    # --- LỊCH THU HOẠCH DỰ KIẾN ---
+    # --- LỊCH THU HOẠCH DỰ KIẾN (Normal Distribution Model) ---
     st.markdown("#### 📅 Lịch Thu hoạch Dự kiến")
-    st.caption("Dự báo thời gian & sản lượng thu hoạch theo tháng cho từng lô. "
-               "Phân tách 3 đợt: Thu bói (10%) → Thu rộ (80%) → Thu vét (10%). Hao hụt: 10%/vụ (không kép).")
+    st.caption("Dự báo sản lượng thu hoạch theo phân phối chuẩn (σ≈10.14 ngày). "
+               "80% sản lượng tập trung ±13 ngày quanh mốc (Thu rộ), 10% mỗi đầu (Thu bói / Thu vét). "
+               "Hao hụt: 10%/vụ (không kép).")
 
     if not df_lots_all.empty and "ngay_trong" in df_lots_all.columns and "lo" in df_lots_all.columns:
         from datetime import timedelta
+        from scipy.stats import norm as scipy_norm
+        import numpy as np
         import re as _re
         
         LOSS_RATE = 0.10          # Hao hụt 10%
         FORECAST_GENERATIONS = 4  # F0, F1, F2, F3
-        # Tỉ lệ 3 đợt thu
-        RATIO_BOI = 0.10  # Thu bói  – cây phát triển sớm
-        RATIO_RO  = 0.80  # Thu rộ   – đúng chu kì
-        RATIO_VET = 0.10  # Thu vét  – cây phát triển chậm
         # Khoảng thời gian (ngày)
         DAYS_RO_HALF  = 13  # ±13 ngày quanh mốc = 26 ngày thu rộ
         DAYS_BOI_VET  = 14  # 14 ngày cho thu bói / thu vét
+        WINDOW_HALF   = DAYS_RO_HALF + DAYS_BOI_VET  # 27 ngày mỗi bên
         
-        harvest_rows = []
+        # σ tính từ: P(|X| ≤ 13) = 0.80 → Φ(13/σ) = 0.90 → σ = 13/1.2816 ≈ 10.14
+        SIGMA = 13.0 / scipy_norm.ppf(0.90)  # ≈ 10.14 ngày
+        
+        # Tính trọng số PDF cho 55 ngày (day -27 → +27)
+        day_offsets = np.arange(-WINDOW_HALF, WINDOW_HALF + 1)  # [-27..+27] = 55 ngày
+        pdf_weights = scipy_norm.pdf(day_offsets, loc=0, scale=SIGMA)
+        pdf_weights /= pdf_weights.sum()  # Normalize tổng = 1.0
+        
+        # Xác định loại thu cho mỗi offset
+        def _classify_phase(offset):
+            if offset < -DAYS_RO_HALF:
+                return "Thu bói"
+            elif offset <= DAYS_RO_HALF:
+                return "Thu rộ"
+            else:
+                return "Thu vét"
+        
+        day_phases = [_classify_phase(d) for d in day_offsets]
+        
+        # ─── Tạo daily harvest data ───
+        daily_rows = []
         for _, lot_row in df_lots_all.iterrows():
             ngay_trong_raw = lot_row.get("ngay_trong")
             lo_name = lot_row.get("lo", "")
@@ -1634,53 +1654,61 @@ def render_global_data_tab(c_farm):
                 continue
             
             ngay_trong = pd.to_datetime(ngay_trong_raw)
-            so_thu_after_loss = int(so_luong * (1 - LOSS_RATE))  # Reset mỗi vụ, không kép
+            so_thu_after_loss = so_luong * (1 - LOSS_RATE)  # Reset mỗi vụ, không kép
             
-            # Tính harvest midpoint cho mỗi vụ
-            harvest_midpoint = ngay_trong + timedelta(days=F0_DAYS_TO_THU)  # F0
+            harvest_midpoint = ngay_trong + timedelta(days=F0_DAYS_TO_THU)
             for gen in range(FORECAST_GENERATIONS):
                 vu_label = f"F{gen}"
                 
-                # Tính khoảng thời gian 3 đợt
+                # Window boundaries
+                win_start = harvest_midpoint - timedelta(days=WINDOW_HALF)
+                thu_boi_start = win_start
+                thu_boi_end   = harvest_midpoint - timedelta(days=DAYS_RO_HALF + 1)
                 thu_ro_start  = harvest_midpoint - timedelta(days=DAYS_RO_HALF)
                 thu_ro_end    = harvest_midpoint + timedelta(days=DAYS_RO_HALF)
-                thu_boi_start = thu_ro_start - timedelta(days=DAYS_BOI_VET)
-                thu_boi_end   = thu_ro_start - timedelta(days=1)
-                thu_vet_start = thu_ro_end + timedelta(days=1)
-                thu_vet_end   = thu_ro_end + timedelta(days=DAYS_BOI_VET)
+                thu_vet_start = harvest_midpoint + timedelta(days=DAYS_RO_HALF + 1)
+                thu_vet_end   = harvest_midpoint + timedelta(days=WINDOW_HALF)
                 
-                # Midpoint mỗi đợt → quyết định tháng gán
-                thu_boi_mid = thu_boi_start + timedelta(days=DAYS_BOI_VET // 2)
-                thu_vet_mid = thu_vet_start + timedelta(days=DAYS_BOI_VET // 2)
-                
-                # 3 rows cho bói / rộ / vét
-                phases = [
-                    ("Thu bói", RATIO_BOI, thu_boi_mid, thu_boi_start, thu_boi_end),
-                    ("Thu rộ",  RATIO_RO,  harvest_midpoint, thu_ro_start, thu_ro_end),
-                    ("Thu vét", RATIO_VET, thu_vet_mid, thu_vet_start, thu_vet_end),
-                ]
-                for loai, ratio, mid_date, win_start, win_end in phases:
-                    harvest_rows.append({
+                # Tạo row cho mỗi ngày
+                for idx, (offset, weight, phase) in enumerate(zip(day_offsets, pdf_weights, day_phases)):
+                    actual_date = harvest_midpoint + timedelta(days=int(offset))
+                    daily_qty = so_thu_after_loss * weight
+                    
+                    # Window label cho phase này
+                    if phase == "Thu bói":
+                        wlabel = f"{thu_boi_start.strftime('%d/%m')} – {thu_boi_end.strftime('%d/%m/%Y')}"
+                    elif phase == "Thu rộ":
+                        wlabel = f"{thu_ro_start.strftime('%d/%m')} – {thu_ro_end.strftime('%d/%m/%Y')}"
+                    else:
+                        wlabel = f"{thu_vet_start.strftime('%d/%m')} – {thu_vet_end.strftime('%d/%m/%Y')}"
+                    
+                    daily_rows.append({
                         "farm": farm_name,
                         "lo": lo_name,
                         "base_lot_id": base_lot_id,
                         "vu": vu_label,
-                        "loai_thu": loai,
-                        "thang_thu_hoach": mid_date.strftime("%m/%Y"),
-                        "harvest_date": mid_date,
-                        "year": mid_date.year,
+                        "loai_thu": phase,
+                        "ngay": actual_date,
+                        "thang": actual_date.strftime("%m/%Y"),
+                        "year": actual_date.year,
                         "so_luong_trong": so_luong,
-                        "so_thu_hoach_dk": int(so_thu_after_loss * ratio),
-                        "window_start": win_start.strftime("%d/%m/%Y"),
-                        "window_end": win_end.strftime("%d/%m/%Y"),
-                        "window_label": f"{win_start.strftime('%d/%m')} – {win_end.strftime('%d/%m/%Y')}",
+                        "daily_qty": daily_qty,
+                        "window_label": wlabel,
                     })
                 
-                # Vụ tiếp theo: +174 ngày từ harvest hiện tại
                 harvest_midpoint = harvest_midpoint + timedelta(days=FN_CYCLE_DAYS)
         
-        if harvest_rows:
-            df_harvest = pd.DataFrame(harvest_rows)
+        if daily_rows:
+            df_daily = pd.DataFrame(daily_rows)
+            
+            # Gom theo tháng + lô + vụ + loại thu (từ daily → monthly)
+            df_harvest = df_daily.groupby(
+                ["farm", "lo", "base_lot_id", "vu", "loai_thu", "thang", "year", 
+                 "so_luong_trong", "window_label"],
+                as_index=False
+            ).agg(so_thu_hoach_dk=("daily_qty", "sum"))
+            df_harvest["so_thu_hoach_dk"] = df_harvest["so_thu_hoach_dk"].round(0).astype(int)
+            df_harvest.rename(columns={"thang": "thang_thu_hoach"}, inplace=True)
             
             # ─── Bộ lọc: Farm + Năm + Tháng ───
             year_options = sorted(df_harvest["year"].unique())
@@ -1696,7 +1724,6 @@ def render_global_data_tab(c_farm):
                                           options=["Tất cả"] + [str(y) for y in year_options],
                                           index=default_year_idx, key="hv_year_sched")
                 with hcf2:
-                    # Tạo danh sách tháng sau khi lọc năm
                     _df_tmp = df_harvest.copy()
                     if hv_year != "Tất cả":
                         _df_tmp = _df_tmp[_df_tmp["year"] == int(hv_year)]
@@ -1747,7 +1774,6 @@ def render_global_data_tab(c_farm):
                             month_key = m["thang_thu_hoach"]
                             
                             with col:
-                                # Card HTML
                                 st.markdown(f"""
                                 <div style="background: linear-gradient(135deg, #1a472a 0%, #2d6a4f 100%); 
                                             border-radius: 12px; padding: 1.2rem; text-align: center; 
@@ -1767,7 +1793,6 @@ def render_global_data_tab(c_farm):
                                 with st.popover("🔍 Xem chi tiết", use_container_width=True):
                                     df_month = df_hv[df_hv["thang_thu_hoach"] == month_key].copy()
                                     
-                                    # Natural sort 
                                     def _nat_key_pop(name):
                                         _m = _re.match(r"^(\d+)(.*)", str(name))
                                         return (int(_m.group(1)), _m.group(2)) if _m else (9999, str(name))

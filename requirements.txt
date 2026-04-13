@@ -4,3 +4,5 @@ pandas
 python-dotenv
 plotly
 openpyxl
+scipy
+numpy

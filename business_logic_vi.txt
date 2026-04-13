@@ -1,0 +1,50 @@
+TÀI LIỆU MÔ TẢ NGHIỆP VỤ (BUSINESS LOGIC) - QUẢN LÝ SINH TRƯỞNG CHUỐI
+Mục đích: Giúp team phát triển nắm vững ý nghĩa thực tế của việc ghi nhận dữ liệu trong app, từ đó xây dựng UX/UI và cấu trúc Database chuẩn xác trên nền tảng mới.
+
+1. TỔNG QUAN VÒNG ĐỜI CÂY CHUỐI LÊN BÁO CÁO (THE FARMING LIFECYCLE)
+Quy trình ghi nhận của dự án Trường Tồn xoay quanh một LÔ CHUỐI (Lot/Block) với một số lượng thân cây nhất định được trồng qua từng VỤ (Season). Quá trình này diễn ra tuyến tính theo thời gian và tạo thành một "Phễu sinh trưởng":
+
+ 🌱 Khởi tạo Lô (Trồng mới / Để chồi)  ->  💉 Chích bắp  ->  🔪 Cắt bắp (Đeo dây màu)  ->  📏 Đo Size định kỳ  ->  🍌 Cắt buồng (Thu hoạch)  ->  📦 Xưởng đóng gói (Thu hồi cuống).
+
+2. GIẢI THÍCH CHI TIẾT TỪNG NGHIỆP VỤ & CHỨC NĂNG CỦA ỨNG DỤNG:
+
+2.1. 🌱 Khởi tạo Lô Trồng (Nội bộ: Nông trường NT1/NT2)
+- Thực tế: Nông trường tiến hành xuất cây giống trồng xuống một khu đất (Lô). Có thể trồng hoàn toàn mới (Trồng mới), trồng bù nhưng cây chết lúc nhỏ (Trồng dặm), hoặc chặt cây mẹ lấy nải và nuôi lại chồi cây con lên cho vụ sau (Để chồi).
+- Ý nghĩa Phần mềm: Tạo ra dữ liệu Gốc. Đây là "Số lượng tồn quỹ tối đa" (Max Capacity/Quota) của lô đó trong một mùa vụ. Phần mềm sẽ giám sát các bước sau: Chích bắp bao nhiêu, Diệt bao nhiêu, Thu hoạch bao nhiêu thì luôn cộng / trừ tự động từ "Số lượng gốc" này, tuyệt đối không được ghi khống số liệu ở các khâu sau lớn hơn khâu trồng.
+
+2.2. 💉 Chích bắp (Nội bộ: Đội BVTV)
+- Thực tế: Khoảng 5-6 tháng sau khi trồng, cây chuối từ thân giả mọc nhú lên hoa chuối (trổ bắp). Bắp chuối rất ngọt và dễ bị côn trùng châm vào làm hỏng nải chuối con bên trong. Do đó, Đội Bảo Vệ Thực Vật (BVTV) phải đi rừng tiêm thuốc sinh học (chích bắp) để bảo vệ.
+- Ý nghĩa Phần mềm: Đánh dấu một tập hợp cây trong lô đã bước vào "Giai đoạn sinh sản". Bước này bắt đầu quản lý theo "Tuần" và có "Màu Dây".
+
+2.3. 🔪 Cắt bắp & Đeo màu dây (Nội bộ: Nông trường NT1/NT2)
+- Thực tế: Sau khi chích bắp 1-2 tuần, các nải chuối đã nở xong, phần hoa cái vô dụng (bắp) ở dưới sẽ bị cắt bỏ để cây dồn dinh dưỡng nuôi trái. Ngay khi cắt bắp, người nông dân SẼ BUỘC MỘT SỢI DÂY NILON MÀU VÀO CUỐNG (Ví dụ: Tất cả bắp cắt vào Tuần 1 cột dây Đỏ, Tuần 2 cột dây Xanh lá). 
+- Ý nghĩa Phần mềm: Chức năng quan trọng nhất nhì hệ thống. "MÀU DÂY" đóng vai trò như Biển Số Xe, quy chiếu mốc thời gian. Người quản trị nhìn vào Báo cáo Cắt bắp theo Tuần với Màu dây tương ứng có thể DỰ BÁO CHÍNH XÁC sản lượng thu hoạch trong tương lai (Chuối thường thu hoạch vào 10-12 tuần sau khi đeo dây).
+
+2.4. 📏 Đo Size (Nội bộ: Nông trường)
+- Thực tế: Dù cùng đeo dây Đỏ, nhưng không phải buồng nào cũng lớn đều nhau. Ở tuần thứ 8 hoặc 9 sau khi đeo dây, Kỹ sư chọn ngẫu nhiên các buồng "Màu Dây Đỏ" để dùng thước Cặp (Caliper) đo đường kính trái. Thường sẽ kiểm tra 2 lần.
+- Ý nghĩa Phần mềm: Cung cấp tham số Data-driven cho Dashboard để giám đốc quyết định: "Tuần sau đã cho công nhân vào vườn thu hoạch màu ruy-băng Đỏ lô A được chưa?". Trên app, Lần đo 2 của cùng 1 Dây + Lô bắt buộc phải xảy logic "Có Lần 1 rồi mới được đo Lần 2".
+
+2.5. 🍌 Thu hoạch / Cắt Buồng (Đội Thu Hoạch)
+- Thực tế: Buồng chuối đạt tiêu chuẩn xuất khẩu sẽ bị công nhân lấy dao pha cắt khỏi thân cây mẹ và đem về điểm thu gom ròng rọc. Họ ghi sổ tay: Lô nào, đốn dây màu gì, đốn nhiêu buồng.
+- Ý nghĩa Phần mềm: Kết thúc hoàn toàn vòng đời của một cây chuối mang buồng. App trừ dứt điểm số lượng buồng này ra khỏi Phễu sinh trưởng.
+
+2.6. 📦 Thu hồi cuống buồng - BSR (Xưởng đóng gói)
+- Thực tế: Buồng về tới xưởng, công nhân lóc từng nải thả vào bể nước phèn. Phần lõi thừa giữa buồng lóc vứt ra gọi là Cuống. Cuống được thu gom cân ký.
+- Ý nghĩa Phần mềm: Kiểm soát chuỗi khối lượng vật tư rác, đồng thời Cross-check (kiểm tra chéo) việc thất thoát số lượng buồng chuối giữa Đội đi thu hoạch rừng vs Đội Xưởng.
+
+3. KIỂM SOÁT THIỆT HẠI:
+3.1. 🗑️ Xuất hủy / Diệt hủy (Loss)
+- Thực tế: Cây chuối có thể ngã đổ do bão, chết do khô hạn thối củ. (Hủy lúc chưa ra buồng hoặc Hủy lúc đang đeo màu dây trên buồng rồi).
+- Ý nghĩa App: Giải phóng quota. Trừ số cây khỏi Lô tổng để Dashboard tính ra tỉ lệ sinh tồn (Survival Rate), dự báo lại sản lượng đúng nhất thay vì đếm cua trong lỗ.
+
+3.2. 🦠 Kiểm tra Fusarium (Bệnh héo rũ Panama)
+- Thực tế: "Bệnh ung thư" của chuối. Lây truyền qua đất.
+- Ý nghĩa App: Quản lý chi tiết việc "Dập dịch" (Ghi số cây phát hiện Nhiễm và số cây đã Đào gốc Xử lý).
+
+3.3. 🌳 Kiểm kê cây thực tế
+- Thực tế: Nông dân lười báo diệt hủy. Mọi thứ trên sổ sách Database có thể là Ảo tưởng. Quản lý ép cấp dưới mỗi 1 quý phải đi bộ đếm chay toàn trang trại!
+- Ý nghĩa App: Đường Line Chart trên UI giúp Tổng Giám Đốc đối chiếu 2 biến số: "Số lượng trên giấy tờ Máy tính" và "Số lượng trên Điền dã" qua từng tháng để truy cứu trách nhiệm trưởng farm làm thất thoát tài sản.
+
+3.4. 🧪 Đo pH Đất
+- Thực tế: Hầu hết bệnh tật/cây chết do độ pH đất bị chua.
+- Ý nghĩa App: Cảnh báo sớm trên Dashboard để cấp trên chỉ đạo thả vôi cải tạo đất. Đậm tính chất "Preventive Action" (Hành động phòng cháy) trước khi phải ghi Xuất hủy ở phía trên.

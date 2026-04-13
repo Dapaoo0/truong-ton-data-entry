@@ -1,0 +1,89 @@
+TÀI LIỆU CẤU TRÚC KỸ THUẬT VÀ LOGIC CHUYÊN SÂU NGUYÊN BẢN (DEEP TECHNICAL SPECS)
+Dự án: Hệ Thống Quản Lý Sinh Trưởng Chuối Xuất Khẩu
+
+Tài liệu này bóc tách TOÀN BỘ các dòng code Python, SQL Schema hiện hành và các bug-fixes từ các phiên bản cập nhật trong qúa khứ (như xử lý Duplicate Key do Soft Delete) để cung cấp cho bạn một bản thiết kế Kỹ thuật (Technical Document) hoàn chỉnh nhất. Bạn hãy chuyển giao file này cho đội Dev NextJS/React + Backend để build lại chính xác 100%.
+
+================================================================================
+PHẦN 1: CẤU TRÚC DATABASE (DỰA TRÊN CLEAN_DB.SQL & MIGRATION)
+================================================================================
+Hệ thống sử dụng PostgreSQL (Supabase). Bất kỳ bảng cơ sở nào cũng đều chứa các meta-fields bắt buộc: `farm`, `team`, `created_at`, và `is_deleted` (Boolean, default FALSE).
+
+1. Bảng `base_lots` (Lô Trồng Gốc)
+   - Lưu trữ sức chứa (Capacity) tối đa của 1 Lô.
+   - Core fields: `farm`, `team`, `lo`, `lot_id` (Unique ID dạng "TÊN-LÔ_DDMMYYYY"), `ngay_trong`, `so_luong` (Số gốc), `so_luong_con_lai`, `tuan` (Auto ISO Week), `dien_tich`.
+   - Bug-fix Note: Trong hàm `insert_to_db()`, khi lưu Lô nếu gặp lỗi "duplicate key" (Lô đã tồn tại), hệ thống sẽ ngầm check xem lô đó có đang bị `is_deleted = True` hay không. Nếu có, nó tự động "Khôi phục" (Overwrite data mới và set `is_deleted = False`) thay vì báo lỗi.
+
+2. Bảng `seasons` (Quản lý mùa vụ - Mới thêm)
+   - Core fields: `id`, `farm`, `lo`, `vu` (Dạng chữ, VD: F0, F1...), `loai_trong`, `ngay_bat_dau`, `ngay_ket_thuc_thuc_te`, `ngay_ket_thuc_du_kien`.
+   - Admin chốt vụ sẽ update `ngay_ket_thuc_thuc_te`. Logic Front-end cho phép tự động sinh vụ kế tiếp `int(vu.replace("F", "")) + 1` (Tức F0 -> F1) và insert ngay dòng mới.
+
+3. Các Bảng Log (Hành động theo thời gian)
+   - `stage_logs` (Giai đoạn sinh sản): Ghi nhận cả "Chích bắp" và "Cắt bắp". Core: `lot_id`, `giai_doan`, `mau_day`, `so_luong`, `ngay_thuc_hien`, `tuan`.
+   - `destruction_logs` (Xuất hủy): `lot_id`, `so_luong`, `ngay_xuat_huy`, `mau_day` (Field mới migrate thêm vào phục vụ báo cáo xuất hủy buồng rớt size).
+   - `harvest_logs` (Thu hoạch): `lot_id`, `so_luong`, `ngay_thu_hoach`.
+   - `size_measure_logs` (Đo Size): `lot_id`, `mau_day`, `lan_do`, `so_luong_mau`, `hang_kiem_tra`, `size_cal`, `ngay_do`.
+   - `soil_ph_logs` (Đo độ pH): `lot_id`, `ngay_do`, `lan_do`, `ph_value`.
+   - `tree_inventory_logs` (Kiểm kê định kỳ): `lot_id`, `so_luong_cay_thuc_te`, `ngay_kiem_ke`.
+
+================================================================================
+PHẦN 2: BỘ QUY TẮC TOÁN HỌC & VALIDATION LÕI (CORE BUSINESS ALGORITHMS)
+================================================================================
+
+Dev Backend/Frontend phải nắm thật chắc 3 thuật toán chặn dữ liệu (Gatekeepers) đang nằm ở `app.py`:
+
+2.1. HÀM `validate_timeline_logic` (Chặn ngược dòng thời gian)
+Khi có hành động insert, ngày thực hiện (`target_date`) phải tuân thủ nghiêm ngặt Timeline:
+- Hành động "Chích bắp": Phải xảy ra SAU hoặc BẰNG "Ngày Trồng" của `lot_id` đó.
+- Hành động "Cắt bắp": Bắt buộc Lô đó phải TỪNG CÓ record "Chích bắp" rồi. Hơn nữa, Ngày Cắt phải >= Ngày "Chích bắp" sớm nhất của Lô.
+- Hành động "Thu hoạch": Bắt buộc Lô đã phải TỪNG "Cắt bắp". Hơn nữa, Ngày Thu hoạch >= Ngày "Cắt bắp" sớm nhất.
+[!] Nếu bất kỳ điều kiện nào sai, văng thông báo `st.error` ngay lập tức và hủy lưu.
+
+2.2. HÀM `get_available_capacity_for_lot` (Tính toán Room/Quota còn lại)
+Tính xem một thao tác được phép nhập tối đa (`max_allowed`) là bao nhiêu cây. Công thức như sau:
+- Mức trần gốc (Total Planted) = `so_luong_con_lai` của Lô.
+- Nếu nhập Giai đoạn "Cắt Bắp": Max_allowed = Tổng số lượng "Chích bắp" hiện có của Lô đó.
+- Nếu nhập Giai đoạn "Thu hoạch": Max_allowed = Tổng số lượng "Cắt bắp" hiện có của Lô đó.
+- Tính `remain` (Quỹ CÒN LẠI có thể xài) = `max_allowed` TRỪ đi "Tổng số lượng ĐÃ xài trước đó ở cùng giai đoạn". Cứ vượt là từ chối phục vụ! (Báo lỗi: "Lứa này chỉ có X cây/buồng cho phép").
+
+2.3. HÀM `allocate_fifo_quantity` (Phân bổ trừ lùi FIFO cho Nhập liệu lớn)
+Hàm này chạy nếu App chọn Farm + Lo nhưng không chọn cụ thể Lot_id nào (VD nhập tổng cho toàn bộ các đời F của lô đó).
+- Logic: Sắp xếp toàn bộ `lot_id` theo `ngay_trong` cũ nhất đến mới nhất.
+- Kiểm tra TimeLine Logic từng Lot con. Nếu hợp lệ, kiểm tra xem nó còn dư Quota (Remain > 0) không.
+- Nếu còn, lấy số lượng nhập ăn lẹm (Consume) vào Lot 1. Nếu Lot 1 cạn quota mà vẫn còn số lượng User nhập dư, tràn qua ăn tiếp (Subtract) qua Lot 2, Lot 3... Trả về mảng `allocations` rải đều các lô này.
+- [Đặc biệt quan trọng đối với Migrate Backend sau này].
+
+================================================================================
+PHẦN 3: CHI TIẾT FRONT-END XỬ LÝ (UI/UX TRICKS ĐANG DÙNG)
+================================================================================
+
+3.1. Các tham số Màu Sắc Biểu Đồ Quy Ước (Mã HEX hardcode cho Plotly Funnel Chart)
+Bạn cần copy các mã màu này gắn vào Chart.js / Recharts để đồng bộ trải nghiệm nhìn cho user cũ:
+- 1a. Trồng mới: `#4CAF50` (Green)
+- 1b. Trồng dặm: `#8BC34A` (Light Green)
+- 2. Chích bắp: `#FFC107` (Amber)
+- 3. Cắt bắp: `#FF9800` (Orange)
+- 4. Thu hoạch: `#2196F3` (Blue)
+- 5. Xuất hủy: `#F44336` (Red)
+
+3.2. Chức năng Xuất Excel Cắt Bắp (generate_cut_bap_excel)
+- App hiện tại trích xuất Pivot DataFrame.
+- UI Style Export: Duyệt qua các cột tuột (Màu dây). Logic Excel tự động dò String "Đỏ/Red", "Xanh/Green", "Vàng/Yellow"... để tự fill `PatternFill` (Nền ô Excel đổ màu giống hệt chữ).
+- Output: 1 tuần cắt bắp tương ứng với 1 màu duy nhất, phân làm 2 sub-columns: (Cắt Bắp) và (Tiêu Hủy).
+
+3.3. UX Queue-based (Trái tim của UI Form)
+- Không có bất kỳ Data nào được POST văng thẳng lên Database tức thì.
+- Mọi Input đẩy vào 1 Array state local (Trong Streamlit gọi là `st.session_state["queue_xx"]`).
+- Render state đó ra thành DataGrid Table có Button Icon 🗑️.
+- Hàm `process_sm_queue` (Lưu data) chạy vòng lặp lướt qua Array state này, gọi Database Insert từng dòng. Sau khi xong sẽ clear Empty mảng đó và thả Toast Success Message.
+
+3.4. Quản trị Logic 48H Edit/Delete
+Hàm `get_editing_row`: Lấy ra record gần nhất, tính toán UTC Time differences. `is_within_48h = (datetime.now - created_at) <= 48 hours`. Biến boolean này quyết định việc Mount (Hiển thị) hay Unmount (Ẩn) nhóm thẻ Nút Edit/Delete ở Front-End cho tầng Nông dân. Quá giờ là Khóa Sổ.
+
+================================================================================
+PHẦN 4: AN NINH VÀ KIỂM SOÁT (SECURITY & LOGGING)
+================================================================================
+- RBAC Rules cứng: Bảng `app.py` lưu Hard-code Object Dictionary Password cho các farm (Ví dụ farm 195: NT1 pass 789). Front-end tiếp theo nên migrate hệ thống chuyển sang Auth bằng JWT/Supabase Auth (Cấp Account Email hoặc Code đăng nhập, assign Role vào User Meta Data ở Supabase).
+- Mọi hành động Create/Update, Delete và ngay cả Đăng nhập đều kích hoạt hàm phụ `insert_access_log(farm, team, action)`. Lưu dấu vết thanh tra Admin.
+- Soft Delete Rule: Các cú pháp API GET luôn kèm điều kiện ngầm định `.eq("is_deleted", False)`. Các nút 🗑️ Xóa trên UI thực chất gửi HTTP PATCH/UPDATE `{is_deleted: true}` chứ tuyệt đối cấm dùng lệnh SQL DELETE.
+
+===> HẾT TÀI LIỆU CHI TIẾT KỸ THUẬT SÂU <===
