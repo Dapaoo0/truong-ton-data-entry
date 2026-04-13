@@ -178,6 +178,11 @@ def resolve_base_lot_id(dim_lo_id, action_date, giai_doan):
 # =====================================================
 st.markdown("""
 <style>
+    /* --- Loại bỏ khoảng trắng mặc định ở đầu trang --- */
+    .stMainBlockContainer { padding-top: 1rem !important; }
+    header[data-testid="stHeader"] { height: 0 !important; min-height: 0 !important; padding: 0 !important; }
+    .stDeployButton { display: none !important; }
+
     .main-title { text-align: center; color: #2E7D32; font-size: 2rem; font-weight: 700; margin-bottom: 0.2rem; }
     .sub-title { text-align: center; color: #6D6D6D; font-size: 1rem; margin-bottom: 1.5rem; }
     .farm-badge { display: inline-block; padding: 4px 14px; border-radius: 20px; background: #2E7D32; color: white; font-weight: 600; font-size: 0.9rem; }
@@ -1600,14 +1605,22 @@ def render_global_data_tab(c_farm):
 
     # --- LỊCH THU HOẠCH DỰ KIẾN ---
     st.markdown("#### 📅 Lịch Thu hoạch Dự kiến")
-    st.caption("Dự báo thời gian & sản lượng thu hoạch theo tháng cho từng lô. F0: 264 ngày từ trồng, Fn: +174 ngày từ thu hoạch trước. Hao hụt: 10%/vụ (không kép).")
+    st.caption("Dự báo thời gian & sản lượng thu hoạch theo tháng cho từng lô. "
+               "Phân tách 3 đợt: Thu bói (10%) → Thu rộ (80%) → Thu vét (10%). Hao hụt: 10%/vụ (không kép).")
 
     if not df_lots_all.empty and "ngay_trong" in df_lots_all.columns and "lo" in df_lots_all.columns:
         from datetime import timedelta
         import re as _re
         
-        LOSS_RATE = 0.10  # Hao hụt 10%
+        LOSS_RATE = 0.10          # Hao hụt 10%
         FORECAST_GENERATIONS = 4  # F0, F1, F2, F3
+        # Tỉ lệ 3 đợt thu
+        RATIO_BOI = 0.10  # Thu bói  – cây phát triển sớm
+        RATIO_RO  = 0.80  # Thu rộ   – đúng chu kì
+        RATIO_VET = 0.10  # Thu vét  – cây phát triển chậm
+        # Khoảng thời gian (ngày)
+        DAYS_RO_HALF  = 13  # ±13 ngày quanh mốc = 26 ngày thu rộ
+        DAYS_BOI_VET  = 14  # 14 ngày cho thu bói / thu vét
         
         harvest_rows = []
         for _, lot_row in df_lots_all.iterrows():
@@ -1621,58 +1634,102 @@ def render_global_data_tab(c_farm):
                 continue
             
             ngay_trong = pd.to_datetime(ngay_trong_raw)
+            so_thu_after_loss = int(so_luong * (1 - LOSS_RATE))  # Reset mỗi vụ, không kép
             
-            # Tính harvest date cho mỗi vụ
-            harvest_date = ngay_trong + timedelta(days=F0_DAYS_TO_THU)  # F0
+            # Tính harvest midpoint cho mỗi vụ
+            harvest_midpoint = ngay_trong + timedelta(days=F0_DAYS_TO_THU)  # F0
             for gen in range(FORECAST_GENERATIONS):
                 vu_label = f"F{gen}"
-                # Sản lượng: luôn dựa trên gốc trồng, trừ 10% (không kép)
-                so_thu_hoach_du_kien = int(so_luong * (1 - LOSS_RATE))
                 
-                harvest_rows.append({
-                    "farm": farm_name,
-                    "lo": lo_name,
-                    "base_lot_id": base_lot_id,
-                    "vu": vu_label,
-                    "thang_trong": ngay_trong.strftime("%m/%Y"),
-                    "thang_thu_hoach": harvest_date.strftime("%m/%Y"),
-                    "harvest_date": harvest_date,
-                    "so_luong_trong": so_luong,
-                    "so_thu_hoach_dk": so_thu_hoach_du_kien,
-                })
+                # Tính khoảng thời gian 3 đợt
+                thu_ro_start  = harvest_midpoint - timedelta(days=DAYS_RO_HALF)
+                thu_ro_end    = harvest_midpoint + timedelta(days=DAYS_RO_HALF)
+                thu_boi_start = thu_ro_start - timedelta(days=DAYS_BOI_VET)
+                thu_boi_end   = thu_ro_start - timedelta(days=1)
+                thu_vet_start = thu_ro_end + timedelta(days=1)
+                thu_vet_end   = thu_ro_end + timedelta(days=DAYS_BOI_VET)
+                
+                # Midpoint mỗi đợt → quyết định tháng gán
+                thu_boi_mid = thu_boi_start + timedelta(days=DAYS_BOI_VET // 2)
+                thu_vet_mid = thu_vet_start + timedelta(days=DAYS_BOI_VET // 2)
+                
+                # 3 rows cho bói / rộ / vét
+                phases = [
+                    ("Thu bói", RATIO_BOI, thu_boi_mid, thu_boi_start, thu_boi_end),
+                    ("Thu rộ",  RATIO_RO,  harvest_midpoint, thu_ro_start, thu_ro_end),
+                    ("Thu vét", RATIO_VET, thu_vet_mid, thu_vet_start, thu_vet_end),
+                ]
+                for loai, ratio, mid_date, win_start, win_end in phases:
+                    harvest_rows.append({
+                        "farm": farm_name,
+                        "lo": lo_name,
+                        "base_lot_id": base_lot_id,
+                        "vu": vu_label,
+                        "loai_thu": loai,
+                        "thang_thu_hoach": mid_date.strftime("%m/%Y"),
+                        "harvest_date": mid_date,
+                        "year": mid_date.year,
+                        "so_luong_trong": so_luong,
+                        "so_thu_hoach_dk": int(so_thu_after_loss * ratio),
+                        "window_start": win_start.strftime("%d/%m/%Y"),
+                        "window_end": win_end.strftime("%d/%m/%Y"),
+                        "window_label": f"{win_start.strftime('%d/%m')} – {win_end.strftime('%d/%m/%Y')}",
+                    })
                 
                 # Vụ tiếp theo: +174 ngày từ harvest hiện tại
-                harvest_date = harvest_date + timedelta(days=FN_CYCLE_DAYS)
+                harvest_midpoint = harvest_midpoint + timedelta(days=FN_CYCLE_DAYS)
         
         if harvest_rows:
             df_harvest = pd.DataFrame(harvest_rows)
             
-            # Bộ lọc
+            # ─── Bộ lọc: Farm + Năm + Tháng ───
+            year_options = sorted(df_harvest["year"].unique())
+            current_year = date.today().year
+            default_year_idx = year_options.index(current_year) + 1 if current_year in year_options else 0
+
             if c_farm == "Admin":
-                hcf0, hcf1 = st.columns([1, 1])
+                hcf0, hcf1, hcf2 = st.columns([1, 1, 1])
                 with hcf0:
                     hv_farm = st.selectbox("Lọc theo Farm", options=farms_all, key="hv_farm_sched")
                 with hcf1:
-                    # Tạo danh sách tháng thu hoạch để lọc
-                    all_months = sorted(df_harvest["thang_thu_hoach"].unique(), 
+                    hv_year = st.selectbox("Lọc theo Năm",
+                                          options=["Tất cả"] + [str(y) for y in year_options],
+                                          index=default_year_idx, key="hv_year_sched")
+                with hcf2:
+                    # Tạo danh sách tháng sau khi lọc năm
+                    _df_tmp = df_harvest.copy()
+                    if hv_year != "Tất cả":
+                        _df_tmp = _df_tmp[_df_tmp["year"] == int(hv_year)]
+                    all_months = sorted(_df_tmp["thang_thu_hoach"].unique(),
                                        key=lambda x: pd.to_datetime(x, format="%m/%Y"))
-                    hv_month = st.selectbox("Lọc theo tháng thu hoạch", 
+                    hv_month = st.selectbox("Lọc theo tháng thu hoạch",
                                           options=["Tất cả"] + list(all_months), key="hv_month_sched")
             else:
                 hv_farm = c_farm
-                all_months = sorted(df_harvest["thang_thu_hoach"].unique(),
-                                   key=lambda x: pd.to_datetime(x, format="%m/%Y"))
-                hv_month = st.selectbox("Lọc theo tháng thu hoạch",
-                                       options=["Tất cả"] + list(all_months), key="hv_month_sched")
+                hcf1, hcf2 = st.columns([1, 1])
+                with hcf1:
+                    hv_year = st.selectbox("Lọc theo Năm",
+                                          options=["Tất cả"] + [str(y) for y in year_options],
+                                          index=default_year_idx, key="hv_year_sched")
+                with hcf2:
+                    _df_tmp = df_harvest.copy()
+                    if hv_year != "Tất cả":
+                        _df_tmp = _df_tmp[_df_tmp["year"] == int(hv_year)]
+                    all_months = sorted(_df_tmp["thang_thu_hoach"].unique(),
+                                       key=lambda x: pd.to_datetime(x, format="%m/%Y"))
+                    hv_month = st.selectbox("Lọc theo tháng thu hoạch",
+                                           options=["Tất cả"] + list(all_months), key="hv_month_sched")
             
             df_hv = df_harvest.copy()
             if hv_farm != "Tất cả":
                 df_hv = df_hv[df_hv["farm"] == hv_farm]
+            if hv_year != "Tất cả":
+                df_hv = df_hv[df_hv["year"] == int(hv_year)]
             if hv_month != "Tất cả":
                 df_hv = df_hv[df_hv["thang_thu_hoach"] == hv_month]
             
             if not df_hv.empty:
-                # ─── Metric cards: tổng sản lượng theo tháng ───
+                # ─── Metric cards + Popover chi tiết theo tháng ───
                 monthly_summary = df_hv.groupby("thang_thu_hoach").agg(
                     tong_cay=("so_thu_hoach_dk", "sum"),
                     so_lo=("lo", "nunique")
@@ -1680,7 +1737,6 @@ def render_global_data_tab(c_farm):
                 monthly_summary = monthly_summary.sort_values("thang_thu_hoach",
                     key=lambda x: pd.to_datetime(x, format="%m/%Y"))
                 
-                # Hiển thị metric cards theo hàng 4 cột
                 month_list = monthly_summary.to_dict("records")
                 for i in range(0, len(month_list), 4):
                     cols = st.columns(min(4, len(month_list) - i))
@@ -1688,13 +1744,16 @@ def render_global_data_tab(c_farm):
                         if i + j < len(month_list):
                             m = month_list[i + j]
                             kg_est = m["tong_cay"] * KG_PER_TREE_DETAIL
+                            month_key = m["thang_thu_hoach"]
+                            
                             with col:
+                                # Card HTML
                                 st.markdown(f"""
                                 <div style="background: linear-gradient(135deg, #1a472a 0%, #2d6a4f 100%); 
                                             border-radius: 12px; padding: 1.2rem; text-align: center; 
-                                            color: white; margin-bottom: 0.5rem;
+                                            color: white; margin-bottom: 0.3rem;
                                             box-shadow: 0 2px 8px rgba(0,0,0,0.15);">
-                                    <div style="font-size: 0.85rem; opacity: 0.85;">📅 Tháng {m['thang_thu_hoach']}</div>
+                                    <div style="font-size: 0.85rem; opacity: 0.85;">📅 Tháng {month_key}</div>
                                     <div style="font-size: 1.8rem; font-weight: 700; margin: 0.3rem 0;">
                                         {m['tong_cay']:,} buồng
                                     </div>
@@ -1703,22 +1762,53 @@ def render_global_data_tab(c_farm):
                                     </div>
                                 </div>
                                 """, unsafe_allow_html=True)
+                                
+                                # Popover chi tiết khi click
+                                with st.popover("🔍 Xem chi tiết", use_container_width=True):
+                                    df_month = df_hv[df_hv["thang_thu_hoach"] == month_key].copy()
+                                    
+                                    # Natural sort 
+                                    def _nat_key_pop(name):
+                                        _m = _re.match(r"^(\d+)(.*)", str(name))
+                                        return (int(_m.group(1)), _m.group(2)) if _m else (9999, str(name))
+                                    
+                                    df_month["_sort"] = df_month["lo"].apply(_nat_key_pop)
+                                    df_month = df_month.sort_values(["_sort", "vu", "loai_thu"]).drop(columns=["_sort"])
+                                    
+                                    # Tổng hợp theo loại thu
+                                    summary_by_type = df_month.groupby("loai_thu")["so_thu_hoach_dk"].sum()
+                                    type_parts = []
+                                    for lt in ["Thu bói", "Thu rộ", "Thu vét"]:
+                                        if lt in summary_by_type.index:
+                                            type_parts.append(f"**{lt}**: {summary_by_type[lt]:,}")
+                                    st.markdown(" · ".join(type_parts))
+                                    st.markdown("---")
+                                    
+                                    # Bảng chi tiết
+                                    df_pop = df_month[["lo", "vu", "loai_thu", "so_thu_hoach_dk", "window_label"]].copy()
+                                    df_pop.columns = ["Lô", "Vụ", "Loại thu", "Số buồng", "Khoảng thời gian"]
+                                    
+                                    styled_pop = df_pop.style.set_properties(**{'text-align': 'center', 'font-size': '0.85rem'})
+                                    styled_pop = styled_pop.set_table_styles([
+                                        {"selector": "th", "props": [("text-align", "center"), ("font-size", "0.85rem")]},
+                                        {"selector": "td", "props": [("text-align", "center")]}
+                                    ]).hide(axis="index")
+                                    st.markdown(f'<div style="overflow-x:auto;">{styled_pop.to_html(escape=False)}</div>',
+                                               unsafe_allow_html=True)
                 
-                # ─── Bảng chi tiết lịch thu hoạch ───
-                with st.expander("📋 Chi tiết lịch thu hoạch theo lô", expanded=False):
-                    # Natural sort
+                # ─── Bảng tổng hợp (expander) ───
+                with st.expander("📋 Bảng tổng hợp lịch thu hoạch", expanded=False):
                     def _nat_key(name):
                         m = _re.match(r"^(\d+)(.*)", str(name))
                         return (int(m.group(1)), m.group(2)) if m else (9999, str(name))
                     
-                    df_display = df_hv[["lo", "vu", "thang_trong", "thang_thu_hoach", 
-                                        "so_luong_trong", "so_thu_hoach_dk"]].copy()
+                    df_display = df_hv[["lo", "vu", "loai_thu", "thang_thu_hoach",
+                                        "so_luong_trong", "so_thu_hoach_dk", "window_label"]].copy()
                     df_display["_sort"] = df_display["lo"].apply(lambda x: _nat_key(x))
-                    df_display = df_display.sort_values(["_sort", "vu"]).drop(columns=["_sort"])
-                    df_display.columns = ["Tên lô", "Vụ", "Tháng trồng", "Tháng thu hoạch", 
-                                         "Cây trồng", "Thu hoạch DK (buồng)"]
+                    df_display = df_display.sort_values(["_sort", "vu", "loai_thu"]).drop(columns=["_sort"])
+                    df_display.columns = ["Lô", "Vụ", "Loại thu", "Tháng thu hoạch",
+                                         "Cây trồng", "Thu hoạch DK (buồng)", "Khoảng TG"]
                     
-                    # HTML table
                     styled = df_display.style.set_properties(**{'text-align': 'center'})
                     styled = styled.set_table_styles([
                         {"selector": "th", "props": [("text-align", "center")]},
