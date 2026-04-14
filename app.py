@@ -1521,6 +1521,25 @@ def render_global_data_tab(c_farm):
             so_chich_bap = int(sub_stg[sub_stg["giai_doan"] == "Chích bắp"]["so_luong"].sum()) if not sub_stg.empty else 0
             so_cat_bap = int(sub_stg[sub_stg["giai_doan"] == "Cắt bắp"]["so_luong"].sum()) if not sub_stg.empty else 0
             so_thu_hoach = int(sub_har["so_luong"].sum()) if not sub_har.empty else 0
+            
+            # ─── Fix: Nếu vụ chưa đến chu kỳ thu hoạch → thực tế = 0 ───
+            # Tránh gán nhầm harvest F0 vào F1 khi F1 mới bắt đầu trồng
+            ngay_trong_lot = None
+            if not sub_lots.empty and "ngay_trong" in sub_lots.columns:
+                ngay_trong_lot = pd.to_datetime(sub_lots["ngay_trong"].min())
+            
+            if ngay_trong_lot is not None and f_vu != "F0":
+                # Vụ Fn: chu kỳ thu = 174 ngày từ harvest trước
+                # Ước lượng: harvest chưa xảy ra nếu chưa có chích bắp trong vụ này
+                if so_chich_bap == 0:
+                    so_thu_hoach = 0
+            elif ngay_trong_lot is not None and f_vu == "F0":
+                # Vụ F0: thu hoạch sau ~264 ngày trồng
+                from datetime import timedelta as _td
+                ngay_du_kien_thu = ngay_trong_lot + _td(days=F0_DAYS_TO_THU)
+                if date.today() < ngay_du_kien_thu.date():
+                    # Chưa đến mốc thu hoạch → thực tế chưa có
+                    so_thu_hoach = 0
 
             # Tên lô: gắn "(đợt X)" nếu lô có nhiều đợt trồng
             display_lo = batch_label_map.get(season_blid, lo_name) if pd.notna(season_blid) else lo_name
