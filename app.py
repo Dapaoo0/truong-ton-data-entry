@@ -1474,7 +1474,7 @@ def render_global_data_tab(c_farm):
     # KG dự toán: sử dụng get_kg_per_tree(vu) — F0=15, Fn=18
     st.markdown("#### 📋 Bảng chi tiết thông tin các lô (Theo Vụ)")
     st.caption("Xem thông tin chi tiết từng lô phân loại theo vụ (Season). Các cột dữ liệu dự toán và thực tế được tính toán trong phạm vi khoảng thời gian của mục tiêu.")
-    st.caption(f"📉 Tỉ lệ hao hụt dự toán: Trồng → Chích bắp: **{LOSS_RATE_TO_CHICH*100:.0f}%** · Chích bắp → Thu hoạch: **{LOSS_RATE_TO_CHICH*100:.0f}%** · Tổng: **{LOSS_RATE_TO_THU*100:.0f}%**")
+    st.caption(f"📉 Hao hụt: Trồng → Chích bắp **{LOSS_RATE_TO_CHICH*100:.0f}%** · Chích bắp → Thu hoạch **{LOSS_RATE_TO_CHICH*100:.0f}%** · Tổng **{LOSS_RATE_TO_THU*100:.0f}%** · Sản lượng: **F0 = {KG_PER_TREE_F0} kg/buồng**, **Fn = {KG_PER_TREE_FN} kg/buồng**")
 
     dt_farm, dt_vu, dt_team, dt_lot, _ = render_chart_filters("dt")
 
@@ -1722,7 +1722,7 @@ def render_global_data_tab(c_farm):
 
     # --- LỊCH THU HOẠCH DỰ KIẾN (Normal Distribution Model) ---
     st.markdown("#### 📅 Lịch Thu hoạch Dự kiến")
-    st.caption(f"Hao hụt từ Trồng → Thu hoạch: **{LOSS_RATE_TO_THU*100:.0f}%/vụ**")
+    st.caption(f"Hao hụt từ Trồng → Thu hoạch: **{LOSS_RATE_TO_THU*100:.0f}%/vụ** · Sản lượng: **F0 = {KG_PER_TREE_F0} kg/buồng**, **Fn = {KG_PER_TREE_FN} kg/buồng**")
 
     if not df_lots_all.empty and "ngay_trong" in df_lots_all.columns and "lo" in df_lots_all.columns:
         from datetime import timedelta
