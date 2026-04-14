@@ -1785,7 +1785,9 @@ def render_global_data_tab(c_farm):
                     # Header
                     total_buong = df_month["so_thu_hoach_dk"].sum()
                     total_kg = total_buong * KG_PER_TREE_DETAIL
+                    so_thung = int(total_kg // 13)
                     st.markdown(f"### Tháng {month_key} — {total_buong:,} buồng ≈ {total_kg:,.0f} kg")
+                    st.markdown(f"📦 **Ước tính: ~{so_thung:,} thùng** (13 kg/thùng)")
                     
                     # Tổng hợp theo loại thu
                     summary_by_type = df_month.groupby("loai_thu")["so_thu_hoach_dk"].sum()
@@ -1812,31 +1814,30 @@ def render_global_data_tab(c_farm):
                 st.markdown("""
                 <style>
                 div[data-testid="stColumns"] div[data-testid="stColumn"] button[kind="secondary"][data-testid="stBaseButton-secondary"] {
-                    background: linear-gradient(135deg, #1a472a 0%, #2d6a4f 100%);
-                    color: white;
-                    border: none;
+                    background: linear-gradient(135deg, #b7e4c7 0%, #95d5b2 100%);
+                    color: #1b4332;
+                    border: 1px solid #74c69d;
                     border-radius: 12px;
                     padding: 1.2rem 0.5rem;
                     width: 100%;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
                     cursor: pointer;
                     transition: transform 0.15s, box-shadow 0.15s;
                     min-height: 110px;
                 }
                 div[data-testid="stColumns"] div[data-testid="stColumn"] button[kind="secondary"][data-testid="stBaseButton-secondary"]:hover {
                     transform: translateY(-2px);
-                    box-shadow: 0 4px 16px rgba(0,0,0,0.25);
-                    background: linear-gradient(135deg, #2d6a4f 0%, #40916c 100%);
-                    color: white;
-                    border: none;
+                    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+                    background: linear-gradient(135deg, #95d5b2 0%, #74c69d 100%);
+                    color: #1b4332;
+                    border: 1px solid #52b788;
                 }
                 div[data-testid="stColumns"] div[data-testid="stColumn"] button[kind="secondary"][data-testid="stBaseButton-secondary"]:active {
                     transform: translateY(0px);
-                    color: white;
-                    border: none;
+                    color: #1b4332;
                 }
                 div[data-testid="stColumns"] div[data-testid="stColumn"] button[kind="secondary"][data-testid="stBaseButton-secondary"] p {
-                    color: white !important;
+                    color: #1b4332 !important;
                     margin: 0;
                 }
                 </style>
@@ -1860,7 +1861,8 @@ def render_global_data_tab(c_farm):
                             month_key = m["thang_thu_hoach"]
                             
                             with col:
-                                btn_label = f"📅 Tháng {month_key}\n\n**{m['tong_cay']:,} buồng**\n\n≈ {kg_est:,.0f} kg · {m['so_lo']} lô"
+                                so_thung_card = int(kg_est // 13)
+                                btn_label = f"📅 Tháng {month_key}\n\n**{m['tong_cay']:,} buồng**\n\n≈ {kg_est:,.0f} kg · ~{so_thung_card:,} thùng · {m['so_lo']} lô"
                                 if st.button(btn_label, key=f"hv_card_{month_key}",
                                            use_container_width=True):
                                     _show_harvest_detail(month_key, df_hv)
