@@ -1615,9 +1615,9 @@ def render_global_data_tab(c_farm):
             if f_vu not in detail_rows_by_vu:
                 detail_rows_by_vu[f_vu] = []
 
-            dt_chich_est = int(so_luong_trong * get_estimated_rate("chich_bap"))
-            dt_cat_est   = int(so_luong_trong * get_estimated_rate("cat_bap"))
-            dt_thu_est   = int(so_luong_trong * get_estimated_rate("thu_hoach"))
+            dt_chich_est = int(round(so_luong_trong * get_estimated_rate("chich_bap")))
+            dt_cat_est   = int(round(so_luong_trong * get_estimated_rate("cat_bap")))
+            dt_thu_est   = int(round(so_luong_trong * get_estimated_rate("thu_hoach")))
 
             detail_rows_by_vu[f_vu].append({
                 ("Thông tin", "Thời gian vụ"): thoi_gian_vu,
@@ -2029,17 +2029,19 @@ def render_global_data_tab(c_farm):
     ek_des_df = filtered_ek_dfs["des"]
 
     total_cay_da_trong = int(ek_lots_df["so_luong"].sum()) if not ek_lots_df.empty else 0
+    total_du_toan_thu = int(round(total_cay_da_trong * get_estimated_rate("thu_hoach")))
     total_da_thu = int(ek_har_df["so_luong"].sum()) if not ek_har_df.empty else 0
     total_xuat_huy = int(ek_des_df["so_luong"].sum()) if not ek_des_df.empty else 0
-    total_con_lai = max(total_cay_da_trong - total_da_thu - total_xuat_huy, 0)
+    total_con_lai = max(total_du_toan_thu - total_da_thu - total_xuat_huy, 0)
 
     # Metric cards
     m1, m2, m3, m4 = st.columns(4)
     with m1:
-        st.metric("🌱 Tổng cây đã trồng", f"{total_cay_da_trong:,}")
+        st.metric("🌱 Dự toán thu hoạch", f"{total_du_toan_thu:,} buồng",
+                  delta=f"Trồng: {total_cay_da_trong:,} · Hao hụt: {LOSS_RATE_TO_THU*100:.0f}%")
     with m2:
         _kg_rate = get_kg_per_tree(ek_vu if ek_vu != "Tất cả" else "Fn")
-        st.metric("✅ Đã thu hoạch", f"{total_da_thu:,} cây", delta=f"{total_da_thu * _kg_rate:,.0f} kg")
+        st.metric("✅ Đã thu hoạch", f"{total_da_thu:,} buồng", delta=f"{total_da_thu * _kg_rate:,.0f} kg")
     with m3:
         st.metric("🗑️ Xuất hủy", f"{total_xuat_huy:,} cây")
     with m4:
