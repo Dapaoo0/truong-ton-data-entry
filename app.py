@@ -1810,40 +1810,39 @@ def render_global_data_tab(c_farm):
                     st.markdown(f'<div style="overflow-x:auto;">{styled_pop.to_html(escape=False)}</div>',
                                unsafe_allow_html=True)
                 
-                # ─── CSS: style button thành card ───
+                # ─── CSS: style button thành card (scoped qua container key) ───
                 st.markdown("""
                 <style>
-                div[data-testid="stColumns"] div[data-testid="stColumn"] button[kind="secondary"][data-testid="stBaseButton-secondary"] {
-                    background: linear-gradient(135deg, #b7e4c7 0%, #95d5b2 100%);
-                    color: #1b4332;
-                    border: 1px solid #74c69d;
-                    border-radius: 12px;
-                    padding: 1.2rem 0.5rem;
+                .st-key-harvest-cards button {
+                    background: linear-gradient(135deg, #b7e4c7 0%, #95d5b2 100%) !important;
+                    color: #1b4332 !important;
+                    border: 1px solid #74c69d !important;
+                    border-radius: 12px !important;
+                    padding: 1.2rem 0.5rem !important;
                     width: 100%;
                     box-shadow: 0 2px 8px rgba(0,0,0,0.08);
                     cursor: pointer;
                     transition: transform 0.15s, box-shadow 0.15s;
                     min-height: 110px;
                 }
-                div[data-testid="stColumns"] div[data-testid="stColumn"] button[kind="secondary"][data-testid="stBaseButton-secondary"]:hover {
+                .st-key-harvest-cards button:hover {
                     transform: translateY(-2px);
                     box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-                    background: linear-gradient(135deg, #95d5b2 0%, #74c69d 100%);
-                    color: #1b4332;
-                    border: 1px solid #52b788;
+                    background: linear-gradient(135deg, #95d5b2 0%, #74c69d 100%) !important;
+                    color: #1b4332 !important;
+                    border: 1px solid #52b788 !important;
                 }
-                div[data-testid="stColumns"] div[data-testid="stColumn"] button[kind="secondary"][data-testid="stBaseButton-secondary"]:active {
+                .st-key-harvest-cards button:active {
                     transform: translateY(0px);
-                    color: #1b4332;
                 }
-                div[data-testid="stColumns"] div[data-testid="stColumn"] button[kind="secondary"][data-testid="stBaseButton-secondary"] p {
+                .st-key-harvest-cards button p {
                     color: #1b4332 !important;
                     margin: 0;
                 }
                 </style>
                 """, unsafe_allow_html=True)
                 
-                # ─── Metric cards (buttons) ───
+                # ─── Metric cards (buttons) trong container scoped ───
                 monthly_summary = df_hv.groupby("thang_thu_hoach").agg(
                     tong_cay=("so_thu_hoach_dk", "sum"),
                     so_lo=("lo", "nunique")
@@ -1852,20 +1851,21 @@ def render_global_data_tab(c_farm):
                     key=lambda x: pd.to_datetime(x, format="%m/%Y"))
                 
                 month_list = monthly_summary.to_dict("records")
-                for i in range(0, len(month_list), 4):
-                    cols = st.columns(min(4, len(month_list) - i))
-                    for j, col in enumerate(cols):
-                        if i + j < len(month_list):
-                            m = month_list[i + j]
-                            kg_est = m["tong_cay"] * KG_PER_TREE_DETAIL
-                            month_key = m["thang_thu_hoach"]
-                            
-                            with col:
-                                so_thung_card = int(kg_est // 13)
-                                btn_label = f"📅 Tháng {month_key}\n\n**{m['tong_cay']:,} buồng**\n\n≈ {kg_est:,.0f} kg · ~{so_thung_card:,} thùng · {m['so_lo']} lô"
-                                if st.button(btn_label, key=f"hv_card_{month_key}",
-                                           use_container_width=True):
-                                    _show_harvest_detail(month_key, df_hv)
+                with st.container(key="harvest-cards"):
+                    for i in range(0, len(month_list), 4):
+                        cols = st.columns(min(4, len(month_list) - i))
+                        for j, col in enumerate(cols):
+                            if i + j < len(month_list):
+                                m = month_list[i + j]
+                                kg_est = m["tong_cay"] * KG_PER_TREE_DETAIL
+                                month_key = m["thang_thu_hoach"]
+                                
+                                with col:
+                                    so_thung_card = int(kg_est // 13)
+                                    btn_label = f"📅 Tháng {month_key}\n\n**{m['tong_cay']:,} buồng**\n\n≈ {kg_est:,.0f} kg · ~{so_thung_card:,} thùng · {m['so_lo']} lô"
+                                    if st.button(btn_label, key=f"hv_card_{month_key}",
+                                               use_container_width=True):
+                                        _show_harvest_detail(month_key, df_hv)
                 
                 # ─── Bảng tổng hợp (expander) ───
                 with st.expander("📋 Bảng tổng hợp lịch thu hoạch", expanded=False):
