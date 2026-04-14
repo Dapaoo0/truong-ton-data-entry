@@ -1707,7 +1707,25 @@ def render_global_data_tab(c_farm):
                  "so_luong_trong", "window_label"],
                 as_index=False
             ).agg(so_thu_hoach_dk=("daily_qty", "sum"))
-            df_harvest["so_thu_hoach_dk"] = df_harvest["so_thu_hoach_dk"].round(0).astype(int)
+            
+            # Largest Remainder Method: làm tròn mà đảm bảo tổng mỗi (lô, vụ) chính xác
+            def _largest_remainder(group):
+                vals = group["so_thu_hoach_dk"].values
+                target_total = int(round(vals.sum()))  # = int(so_luong × 0.9)
+                floors = np.floor(vals).astype(int)
+                remainders = vals - floors
+                deficit = target_total - floors.sum()
+                if deficit > 0:
+                    # +1 cho các nhóm có phần thập phân lớn nhất
+                    top_indices = np.argsort(-remainders)[:deficit]
+                    floors[top_indices] += 1
+                group = group.copy()
+                group["so_thu_hoach_dk"] = floors
+                return group
+            
+            df_harvest = df_harvest.groupby(
+                ["lo", "base_lot_id", "vu"], group_keys=False
+            ).apply(_largest_remainder)
             df_harvest.rename(columns={"thang": "thang_thu_hoach"}, inplace=True)
             
             # ─── Bộ lọc: Farm + Năm + Tháng ───
