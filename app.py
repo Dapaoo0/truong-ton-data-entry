@@ -2629,7 +2629,6 @@ def render_main_app():
         if active_tab is None: active_tab = tab_opts[0]
         
         if active_tab == tab_opts[1]:
-            st.markdown("## 👑 Admin Dashboard - Quản trị Mùa Vụ & Hệ Thống")
             st.info("👋 Chào mừng Quản trị viên. Tại đây bạn có thể quản lý lịch sử Vụ cho từng lô.")
             
             res = supabase.table("seasons").select("*, dim_lo!inner(lo_name, dim_farm!inner(farm_name))").eq("is_deleted", False).order("created_at", desc=True).execute()
@@ -2707,7 +2706,6 @@ def render_main_app():
     # MODULE KINH DOANH
     # =================================================
     if c_farm == "Phòng Kinh doanh" and c_team == "Kinh doanh":
-        st.markdown("## 📊 Dashboard Kinh Doanh")
         render_global_data_tab("Phòng Kinh doanh")
         return
 
@@ -2715,7 +2713,6 @@ def render_main_app():
     # MODULE 4: QUẢN LÝ FARM
     # =================================================
     if c_team == "Quản lý farm":
-        st.markdown("## 📊 Dashboard Quản Lý Farm")
         st.info("👋 Chế độ chỉ xem (Read-only). Tương tác với các biểu đồ bên dưới để phân tích dữ liệu.")
         render_global_data_tab(c_farm)
         return
