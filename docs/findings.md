@@ -9,6 +9,8 @@ Những khám phá, cấu hình cứng và lưu ý kinh nghiệm tìm được t
   - Chích bắp → Thu hoạch: **thêm 5% nữa** → tổng **10%** (`LOSS_RATE_TO_THU = 0.10`) → dự toán = 90%
   - Cắt bắp: chỉ cách chích 14 ngày → giữ nguyên = 95% (như chích bắp)
   - Helper: `get_estimated_rate(stage)` trả về tỉ lệ còn lại (0.95 hoặc 0.90)
+- **Filter DRY pattern**: 6/7 chart sections dùng chung bộ lọc Farm/Vụ/Đội/Lô/Date → extract thành `render_chart_filters(prefix, include_date, use_dynamic_lots)` + `get_filtered_dfs()`. Riêng Harvest Schedule (hv) dùng filter Year/Month khác biệt → giữ nguyên.
+- **Estimation consistency**: Cả 3 section (Bảng chi tiết, Lịch thu hoạch, Dự toán sản lượng) đều dùng `int(round(cây × rate))` để rounding. `int()` truncate và `int(round())` round khác nhau ±1 → phải thống nhất `int(round())`.
 - Data source Pipeline (ETL): Tình trạng `missing CV` (Công việc) và `missing LO` ảnh hưởng trực tiếp tới tracking. Pipeline cần làm sạch và fetch từ GSheet trước khi đẩy vào Supabase Dimension.
 - Sự đồng bộ Map: Dữ liệu `lot_id` và `lo` trong table `seasons` và `base_lots` phải được đồng bộ chính xác. Bất cứ ai thay đổi mapping này sai đều có thể dẫn tới bảng chi tiết dữ liệu hiện lên trống (empty dataframe).
 - Việc chia tách bảng dữ liệu chi tiết theo 'Vụ' sẽ yêu cầu code thao tác mượt mà thông qua việc gom nhóm (group by dictionaries) từ lúc tạo list vòng lặp, tốt hơn nhiều so với việc trích xuất và gọi lệnh DataFrame `drop()` ẩn cột về sau.
