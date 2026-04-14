@@ -1709,23 +1709,19 @@ def render_global_data_tab(c_farm):
             ).agg(so_thu_hoach_dk=("daily_qty", "sum"))
             
             # Largest Remainder Method: làm tròn mà đảm bảo tổng mỗi (lô, vụ) chính xác
-            def _largest_remainder(group):
-                vals = group["so_thu_hoach_dk"].values
-                target_total = int(round(vals.sum()))  # = int(so_luong × 0.9)
+            # Dùng loop thay vì groupby().apply() để tránh pandas index issues
+            for (lo_k, bid_k, vu_k), grp_idx in df_harvest.groupby(["lo", "base_lot_id", "vu"]).groups.items():
+                vals = df_harvest.loc[grp_idx, "so_thu_hoach_dk"].values.astype(float)
+                target_total = int(round(vals.sum()))
                 floors = np.floor(vals).astype(int)
                 remainders = vals - floors
                 deficit = target_total - floors.sum()
                 if deficit > 0:
-                    # +1 cho các nhóm có phần thập phân lớn nhất
-                    top_indices = np.argsort(-remainders)[:deficit]
-                    floors[top_indices] += 1
-                group = group.copy()
-                group["so_thu_hoach_dk"] = floors
-                return group
+                    top_idx = np.argsort(-remainders)[:deficit]
+                    floors[top_idx] += 1
+                df_harvest.loc[grp_idx, "so_thu_hoach_dk"] = floors
             
-            df_harvest = df_harvest.groupby(
-                ["lo", "base_lot_id", "vu"], group_keys=False
-            ).apply(_largest_remainder)
+            df_harvest["so_thu_hoach_dk"] = df_harvest["so_thu_hoach_dk"].astype(int)
             df_harvest.rename(columns={"thang": "thang_thu_hoach"}, inplace=True)
             
             # ─── Bộ lọc: Farm + Năm + Tháng ───
