@@ -1696,9 +1696,7 @@ def render_global_data_tab(c_farm):
 
     # --- LỊCH THU HOẠCH DỰ KIẾN (Normal Distribution Model) ---
     st.markdown("#### 📅 Lịch Thu hoạch Dự kiến")
-    st.caption("Dự báo sản lượng thu hoạch theo phân phối chuẩn (σ≈10.14 ngày). "
-               "80% sản lượng tập trung ±13 ngày quanh mốc (Thu rộ), 10% mỗi đầu (Thu bói / Thu vét). "
-               "Hao hụt: 10%/vụ (không kép).")
+    st.caption(f"Hao hụt từ Trồng → Thu hoạch: **{LOSS_RATE_TO_THU*100:.0f}%/vụ**")
 
     if not df_lots_all.empty and "ngay_trong" in df_lots_all.columns and "lo" in df_lots_all.columns:
         from datetime import timedelta
