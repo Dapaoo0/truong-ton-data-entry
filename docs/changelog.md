@@ -2,6 +2,15 @@
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
 
+## [Version 26.1 - RBAC Kinh doanh Role] - 2026-04-14
+
+#### Security & RBAC (`app.py`, Supabase)
+- **[Quyền truy cập mở rộng]**: Thiết lập thêm role "Phòng Kinh doanh" (team "Kinh doanh").
+- **[Dashboard chuyên biệt]**: Cho phép tài khoản này truy cập màn hình dữ liệu toàn cục giống như Admin nhưng không sở hữu các quyền chỉnh sửa trực tiếp thông tin farm.
+- **[Bug Fix]**:
+  - Khắc phục lỗi hiển thị 0 số lượng cây trồng cho các Season Fn (không phải F0) do date range filter. Điều hướng property "cây đã trồng" thành hằng số từ base_lot.
+  - Fix logic overlap window đối với thời gian harvest season khi F0 vượt quá ngày kết thúc hành chính.
+
 ## [Version 26.0 - Harvest Forecast 3 Phases] - 2026-04-13
 
 #### UI/CSS (`app.py`)
