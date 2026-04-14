@@ -1428,6 +1428,7 @@ def render_global_data_tab(c_farm):
     # KG dự toán: sử dụng get_kg_per_tree(vu) — F0=15, Fn=18
     st.markdown("#### 📋 Bảng chi tiết thông tin các lô (Theo Vụ)")
     st.caption("Xem thông tin chi tiết từng lô phân loại theo vụ (Season). Các cột dữ liệu dự toán và thực tế được tính toán trong phạm vi khoảng thời gian của mục tiêu.")
+    st.caption(f"📉 Tỉ lệ hao hụt dự toán: Trồng → Chích bắp: **{LOSS_RATE_TO_CHICH*100:.0f}%** · Chích bắp → Thu hoạch: **{LOSS_RATE_TO_CHICH*100:.0f}%** · Tổng: **{LOSS_RATE_TO_THU*100:.0f}%**")
 
     if c_farm in ["Admin", "Phòng Kinh doanh"]:
         dtf0, dtf1, dtf2, dtf3 = st.columns([1, 1, 1, 1])
