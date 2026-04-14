@@ -106,6 +106,26 @@ KG_PER_TREE_FN = 18        # Fn (F1+): 18 kg/buồng
 KG_PER_BOX = 13            # 13 kg/thùng
 BOXES_PER_CONTAINER = 1320 # 1320 thùng/container
 
+# =====================================================
+# TỈ LỆ HAO HỤT THEO GIAI ĐOẠN (so với số cây trồng gốc)
+# =====================================================
+# Trồng → Chích bắp: 5% loss | Chích bắp → Thu hoạch: +5% loss | Tổng: 10%
+LOSS_RATE_TO_CHICH = 0.05   # 5% hao hụt từ trồng → chích bắp
+LOSS_RATE_TO_THU   = 0.10   # 10% tổng hao hụt từ trồng → thu hoạch
+
+def get_estimated_rate(stage: str) -> float:
+    """
+    Trả về tỉ lệ còn lại (1 - loss) theo giai đoạn.
+    - Chích bắp: 0.95 (5% hao hụt)
+    - Cắt bắp:  0.95 (cắt bắp chỉ cách chích 14 ngày, chưa chênh đáng kể)
+    - Thu hoạch: 0.90 (10% hao hụt tổng cộng)
+    """
+    if stage in ("chich_bap", "cat_bap"):
+        return 1 - LOSS_RATE_TO_CHICH  # 0.95
+    elif stage == "thu_hoach":
+        return 1 - LOSS_RATE_TO_THU    # 0.90
+    return 1.0  # Trồng: không hao hụt
+
 def get_kg_per_tree(vu: str) -> int:
     """Trả về kg/buồng tương ứng theo vụ. F0 = 15kg, Fn = 18kg."""
     return KG_PER_TREE_F0 if vu == "F0" else KG_PER_TREE_FN
@@ -1594,18 +1614,22 @@ def render_global_data_tab(c_farm):
             if f_vu not in detail_rows_by_vu:
                 detail_rows_by_vu[f_vu] = []
 
+            dt_chich_est = int(so_luong_trong * get_estimated_rate("chich_bap"))
+            dt_cat_est   = int(so_luong_trong * get_estimated_rate("cat_bap"))
+            dt_thu_est   = int(so_luong_trong * get_estimated_rate("thu_hoach"))
+
             detail_rows_by_vu[f_vu].append({
                 ("Thông tin", "Thời gian vụ"): thoi_gian_vu,
                 ("Thông tin", "Tên lô"): display_lo,
                 ("Thông tin", "Diện tích (ha)"): f"{dien_tich:.2f}",
                 ("Thông tin", "Cây đã trồng"): so_luong_trong,
-                ("Chích bắp", "Dự toán"): so_luong_trong,
+                ("Chích bắp", "Dự toán"): dt_chich_est,
                 ("Chích bắp", "Thực tế"): so_chich_bap,
-                ("Cắt bắp", "Dự toán"): so_luong_trong,
+                ("Cắt bắp", "Dự toán"): dt_cat_est,
                 ("Cắt bắp", "Thực tế"): so_cat_bap,
-                ("Thu hoạch", "Dự toán"): so_luong_trong,
+                ("Thu hoạch", "Dự toán"): dt_thu_est,
                 ("Thu hoạch", "Thực tế"): so_thu_hoach,
-                ("Tổng khối lượng (kg)", "Dự toán"): so_luong_trong * get_kg_per_tree(f_vu),
+                ("Tổng khối lượng (kg)", "Dự toán"): dt_thu_est * get_kg_per_tree(f_vu),
                 ("Tổng khối lượng (kg)", "Thực tế"): so_thu_hoach * get_kg_per_tree(f_vu)
             })
             
@@ -1681,7 +1705,7 @@ def render_global_data_tab(c_farm):
         import numpy as np
         import re as _re
         
-        LOSS_RATE = 0.10          # Hao hụt 10%
+        LOSS_RATE = LOSS_RATE_TO_THU  # Sử dụng constant trung tâm
         FORECAST_GENERATIONS = 4  # F0, F1, F2, F3
         # Khoảng thời gian (ngày)
         DAYS_RO_HALF  = 13  # ±13 ngày quanh mốc = 26 ngày thu rộ
