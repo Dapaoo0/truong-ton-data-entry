@@ -1770,7 +1770,79 @@ def render_global_data_tab(c_farm):
                 df_hv = df_hv[df_hv["thang_thu_hoach"] == hv_month]
             
             if not df_hv.empty:
-                # ─── Metric cards + Popover chi tiết theo tháng ───
+                # ─── @st.dialog: chi tiết breakdown theo tháng ───
+                @st.dialog("📊 Chi tiết thu hoạch", width="large")
+                def _show_harvest_detail(month_key, df_src):
+                    df_month = df_src[df_src["thang_thu_hoach"] == month_key].copy()
+                    
+                    def _nat_key_pop(name):
+                        _m = _re.match(r"^(\d+)(.*)", str(name))
+                        return (int(_m.group(1)), _m.group(2)) if _m else (9999, str(name))
+                    
+                    df_month["_sort"] = df_month["lo"].apply(_nat_key_pop)
+                    df_month = df_month.sort_values(["_sort", "vu", "loai_thu"]).drop(columns=["_sort"])
+                    
+                    # Header
+                    total_buong = df_month["so_thu_hoach_dk"].sum()
+                    total_kg = total_buong * KG_PER_TREE_DETAIL
+                    st.markdown(f"### Tháng {month_key} — {total_buong:,} buồng ≈ {total_kg:,.0f} kg")
+                    
+                    # Tổng hợp theo loại thu
+                    summary_by_type = df_month.groupby("loai_thu")["so_thu_hoach_dk"].sum()
+                    type_parts = []
+                    for lt in ["Thu bói", "Thu rộ", "Thu vét"]:
+                        if lt in summary_by_type.index:
+                            type_parts.append(f"**{lt}**: {summary_by_type[lt]:,}")
+                    st.markdown(" · ".join(type_parts))
+                    st.markdown("---")
+                    
+                    # Bảng chi tiết
+                    df_pop = df_month[["lo", "vu", "loai_thu", "so_thu_hoach_dk", "window_label"]].copy()
+                    df_pop.columns = ["Lô", "Vụ", "Loại thu", "Số buồng", "Khoảng thời gian"]
+                    
+                    styled_pop = df_pop.style.set_properties(**{'text-align': 'center', 'font-size': '0.85rem'})
+                    styled_pop = styled_pop.set_table_styles([
+                        {"selector": "th", "props": [("text-align", "center"), ("font-size", "0.85rem")]},
+                        {"selector": "td", "props": [("text-align", "center")]}
+                    ]).hide(axis="index")
+                    st.markdown(f'<div style="overflow-x:auto;">{styled_pop.to_html(escape=False)}</div>',
+                               unsafe_allow_html=True)
+                
+                # ─── CSS: style button thành card ───
+                st.markdown("""
+                <style>
+                div[data-testid="stColumns"] div[data-testid="stColumn"] button[kind="secondary"][data-testid="stBaseButton-secondary"] {
+                    background: linear-gradient(135deg, #1a472a 0%, #2d6a4f 100%);
+                    color: white;
+                    border: none;
+                    border-radius: 12px;
+                    padding: 1.2rem 0.5rem;
+                    width: 100%;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+                    cursor: pointer;
+                    transition: transform 0.15s, box-shadow 0.15s;
+                    min-height: 110px;
+                }
+                div[data-testid="stColumns"] div[data-testid="stColumn"] button[kind="secondary"][data-testid="stBaseButton-secondary"]:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+                    background: linear-gradient(135deg, #2d6a4f 0%, #40916c 100%);
+                    color: white;
+                    border: none;
+                }
+                div[data-testid="stColumns"] div[data-testid="stColumn"] button[kind="secondary"][data-testid="stBaseButton-secondary"]:active {
+                    transform: translateY(0px);
+                    color: white;
+                    border: none;
+                }
+                div[data-testid="stColumns"] div[data-testid="stColumn"] button[kind="secondary"][data-testid="stBaseButton-secondary"] p {
+                    color: white !important;
+                    margin: 0;
+                }
+                </style>
+                """, unsafe_allow_html=True)
+                
+                # ─── Metric cards (buttons) ───
                 monthly_summary = df_hv.groupby("thang_thu_hoach").agg(
                     tong_cay=("so_thu_hoach_dk", "sum"),
                     so_lo=("lo", "nunique")
@@ -1788,52 +1860,10 @@ def render_global_data_tab(c_farm):
                             month_key = m["thang_thu_hoach"]
                             
                             with col:
-                                st.markdown(f"""
-                                <div style="background: linear-gradient(135deg, #1a472a 0%, #2d6a4f 100%); 
-                                            border-radius: 12px; padding: 1.2rem; text-align: center; 
-                                            color: white; margin-bottom: 0.3rem;
-                                            box-shadow: 0 2px 8px rgba(0,0,0,0.15);">
-                                    <div style="font-size: 0.85rem; opacity: 0.85;">📅 Tháng {month_key}</div>
-                                    <div style="font-size: 1.8rem; font-weight: 700; margin: 0.3rem 0;">
-                                        {m['tong_cay']:,} buồng
-                                    </div>
-                                    <div style="font-size: 0.8rem; opacity: 0.7;">
-                                        ≈ {kg_est:,.0f} kg · {m['so_lo']} lô
-                                    </div>
-                                </div>
-                                """, unsafe_allow_html=True)
-                                
-                                # Popover chi tiết khi click
-                                with st.popover("🔍 Xem chi tiết", use_container_width=True):
-                                    df_month = df_hv[df_hv["thang_thu_hoach"] == month_key].copy()
-                                    
-                                    def _nat_key_pop(name):
-                                        _m = _re.match(r"^(\d+)(.*)", str(name))
-                                        return (int(_m.group(1)), _m.group(2)) if _m else (9999, str(name))
-                                    
-                                    df_month["_sort"] = df_month["lo"].apply(_nat_key_pop)
-                                    df_month = df_month.sort_values(["_sort", "vu", "loai_thu"]).drop(columns=["_sort"])
-                                    
-                                    # Tổng hợp theo loại thu
-                                    summary_by_type = df_month.groupby("loai_thu")["so_thu_hoach_dk"].sum()
-                                    type_parts = []
-                                    for lt in ["Thu bói", "Thu rộ", "Thu vét"]:
-                                        if lt in summary_by_type.index:
-                                            type_parts.append(f"**{lt}**: {summary_by_type[lt]:,}")
-                                    st.markdown(" · ".join(type_parts))
-                                    st.markdown("---")
-                                    
-                                    # Bảng chi tiết
-                                    df_pop = df_month[["lo", "vu", "loai_thu", "so_thu_hoach_dk", "window_label"]].copy()
-                                    df_pop.columns = ["Lô", "Vụ", "Loại thu", "Số buồng", "Khoảng thời gian"]
-                                    
-                                    styled_pop = df_pop.style.set_properties(**{'text-align': 'center', 'font-size': '0.85rem'})
-                                    styled_pop = styled_pop.set_table_styles([
-                                        {"selector": "th", "props": [("text-align", "center"), ("font-size", "0.85rem")]},
-                                        {"selector": "td", "props": [("text-align", "center")]}
-                                    ]).hide(axis="index")
-                                    st.markdown(f'<div style="overflow-x:auto;">{styled_pop.to_html(escape=False)}</div>',
-                                               unsafe_allow_html=True)
+                                btn_label = f"📅 Tháng {month_key}\n\n**{m['tong_cay']:,} buồng**\n\n≈ {kg_est:,.0f} kg · {m['so_lo']} lô"
+                                if st.button(btn_label, key=f"hv_card_{month_key}",
+                                           use_container_width=True):
+                                    _show_harvest_detail(month_key, df_hv)
                 
                 # ─── Bảng tổng hợp (expander) ───
                 with st.expander("📋 Bảng tổng hợp lịch thu hoạch", expanded=False):
