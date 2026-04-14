@@ -1454,6 +1454,19 @@ def render_global_data_tab(c_farm):
         df_dt_seasons["_has_end"] = df_dt_seasons["ngay_ket_thuc_thuc_te"].notna().astype(int)
         df_dt_seasons = df_dt_seasons.sort_values(["_has_end", "ngay_bat_dau"], ascending=[False, False])
         seen_vu_blid = set()
+        
+        # ─── Build next_season_start: cho mỗi (base_lot_id, vu), tìm start vụ kế ───
+        # Dùng làm upper bound cho harvest filter để tránh duplicate
+        _next_season_map = {}  # (base_lot_id, vu) → ngày bắt đầu vụ kế tiếp (hoặc None)
+        if "base_lot_id" in df_dt_seasons.columns:
+            for blid, blid_grp in df_dt_seasons[df_dt_seasons["base_lot_id"].notna()].groupby("base_lot_id"):
+                sorted_seasons = blid_grp.sort_values("ngay_bat_dau").drop_duplicates("vu")
+                vu_list = sorted_seasons[["vu", "ngay_bat_dau"]].values.tolist()
+                for i, (vu_val, start_dt) in enumerate(vu_list):
+                    if i + 1 < len(vu_list):
+                        _next_season_map[(int(blid), vu_val)] = pd.to_datetime(vu_list[i + 1][1])
+                    else:
+                        _next_season_map[(int(blid), vu_val)] = None  # Vụ cuối → không giới hạn
 
         for idx, row in df_dt_seasons.iterrows():
             f_vu = row.get("vu")
@@ -1492,54 +1505,53 @@ def render_global_data_tab(c_farm):
                 sub_har = df_har_all[df_har_all["base_lot_id"] == season_blid] if not df_har_all.empty else pd.DataFrame()
                 sub_des = df_des_all[df_des_all["base_lot_id"] == season_blid] if not df_des_all.empty else pd.DataFrame()
             else:
-                # ⚠️ FALLBACK: Lô chưa có base_lot_id → dùng date-range cũ
+                # ⚠️ FALLBACK: Lô chưa có base_lot_id → dùng lot_id
                 sub_lots = df_lots_all[df_lots_all["lot_id"] == lot_id] if not df_lots_all.empty else pd.DataFrame()
                 sub_stg = df_stg_all[df_stg_all["lot_id"] == lot_id] if not df_stg_all.empty else pd.DataFrame()
                 sub_har = df_har_all[df_har_all["lot_id"] == lot_id] if not df_har_all.empty else pd.DataFrame()
                 sub_des = df_des_all[df_des_all["lot_id"] == lot_id] if not df_des_all.empty else pd.DataFrame()
 
-                if pd.notna(start):
-                    if not sub_lots.empty and "ngay_trong" in sub_lots.columns:
-                        sub_lots = sub_lots[pd.to_datetime(sub_lots["ngay_trong"]).dt.date >= start.date()]
-                    if not sub_stg.empty and "ngay_thuc_hien" in sub_stg.columns:
-                        sub_stg = sub_stg[pd.to_datetime(sub_stg["ngay_thuc_hien"]).dt.date >= start.date()]
-                    if not sub_har.empty and "ngay_thu_hoach" in sub_har.columns:
-                        sub_har = sub_har[pd.to_datetime(sub_har["ngay_thu_hoach"]).dt.date >= start.date()]
-                    if not sub_des.empty and "ngay_xuat_huy" in sub_des.columns:
-                        sub_des = sub_des[pd.to_datetime(sub_des["ngay_xuat_huy"]).dt.date >= start.date()]
-                if pd.notna(end):
-                    if not sub_lots.empty and "ngay_trong" in sub_lots.columns:
-                        sub_lots = sub_lots[pd.to_datetime(sub_lots["ngay_trong"]).dt.date <= end.date()]
-                    if not sub_stg.empty and "ngay_thuc_hien" in sub_stg.columns:
-                        sub_stg = sub_stg[pd.to_datetime(sub_stg["ngay_thuc_hien"]).dt.date <= end.date()]
-                    if not sub_har.empty and "ngay_thu_hoach" in sub_har.columns:
-                        sub_har = sub_har[pd.to_datetime(sub_har["ngay_thu_hoach"]).dt.date <= end.date()]
-                    if not sub_des.empty and "ngay_xuat_huy" in sub_des.columns:
-                        sub_des = sub_des[pd.to_datetime(sub_des["ngay_xuat_huy"]).dt.date <= end.date()]
+            # ─── LUÔN filter date range cho stage/harvest/destruction ───
+            # (Cả khi đã filter base_lot_id, vì cùng đợt trồng có nhiều vụ F0/F1/F2...)
+            if pd.notna(start):
+                if not sub_lots.empty and "ngay_trong" in sub_lots.columns:
+                    sub_lots = sub_lots[pd.to_datetime(sub_lots["ngay_trong"]).dt.date >= start.date()]
+                if not sub_stg.empty and "ngay_thuc_hien" in sub_stg.columns:
+                    sub_stg = sub_stg[pd.to_datetime(sub_stg["ngay_thuc_hien"]).dt.date >= start.date()]
+                if not sub_har.empty and "ngay_thu_hoach" in sub_har.columns:
+                    sub_har = sub_har[pd.to_datetime(sub_har["ngay_thu_hoach"]).dt.date >= start.date()]
+                if not sub_des.empty and "ngay_xuat_huy" in sub_des.columns:
+                    sub_des = sub_des[pd.to_datetime(sub_des["ngay_xuat_huy"]).dt.date >= start.date()]
+            if pd.notna(end):
+                if not sub_lots.empty and "ngay_trong" in sub_lots.columns:
+                    sub_lots = sub_lots[pd.to_datetime(sub_lots["ngay_trong"]).dt.date <= end.date()]
+                if not sub_stg.empty and "ngay_thuc_hien" in sub_stg.columns:
+                    sub_stg = sub_stg[pd.to_datetime(sub_stg["ngay_thuc_hien"]).dt.date <= end.date()]
+                if not sub_des.empty and "ngay_xuat_huy" in sub_des.columns:
+                    sub_des = sub_des[pd.to_datetime(sub_des["ngay_xuat_huy"]).dt.date <= end.date()]
+            
+            # ─── Harvest upper bound: dùng ngày bắt đầu vụ KẾ TIẾP ───
+            # Thu hoạch có thể kéo dài sau ngày kết thúc hành chính của vụ,
+            # nhưng PHẢI kết thúc trước khi vụ tiếp theo bắt đầu.
+            if pd.notna(season_blid):
+                next_start = _next_season_map.get((int(season_blid), f_vu))
+                if next_start is not None and not sub_har.empty and "ngay_thu_hoach" in sub_har.columns:
+                    sub_har = sub_har[pd.to_datetime(sub_har["ngay_thu_hoach"]).dt.date < next_start.date()]
+            elif pd.notna(end):
+                # Fallback: dùng season end date cho harvest nếu không có next_season_map
+                if not sub_har.empty and "ngay_thu_hoach" in sub_har.columns:
+                    sub_har = sub_har[pd.to_datetime(sub_har["ngay_thu_hoach"]).dt.date <= end.date()]
 
             so_luong_trong = int(sub_lots["so_luong"].sum()) if not sub_lots.empty else 0
             so_chich_bap = int(sub_stg[sub_stg["giai_doan"] == "Chích bắp"]["so_luong"].sum()) if not sub_stg.empty else 0
             so_cat_bap = int(sub_stg[sub_stg["giai_doan"] == "Cắt bắp"]["so_luong"].sum()) if not sub_stg.empty else 0
             so_thu_hoach = int(sub_har["so_luong"].sum()) if not sub_har.empty else 0
             
-            # ─── Fix: Nếu vụ chưa đến chu kỳ thu hoạch → thực tế = 0 ───
-            # Tránh gán nhầm harvest F0 vào F1 khi F1 mới bắt đầu trồng
-            ngay_trong_lot = None
-            if not sub_lots.empty and "ngay_trong" in sub_lots.columns:
-                ngay_trong_lot = pd.to_datetime(sub_lots["ngay_trong"].min())
-            
-            if ngay_trong_lot is not None and f_vu != "F0":
-                # Vụ Fn: chu kỳ thu = 174 ngày từ harvest trước
-                # Ước lượng: harvest chưa xảy ra nếu chưa có chích bắp trong vụ này
-                if so_chich_bap == 0:
-                    so_thu_hoach = 0
-            elif ngay_trong_lot is not None and f_vu == "F0":
-                # Vụ F0: thu hoạch sau ~264 ngày trồng
-                from datetime import timedelta as _td
-                ngay_du_kien_thu = ngay_trong_lot + _td(days=F0_DAYS_TO_THU)
-                if date.today() < ngay_du_kien_thu.date():
-                    # Chưa đến mốc thu hoạch → thực tế chưa có
-                    so_thu_hoach = 0
+            # ─── Safety: thu hoạch chưa thể xảy ra nếu chưa có chích bắp ───
+            # Vụ Fn: nếu chưa có chích bắp trong khoảng date range → harvest = 0
+            # (Tránh gán nhầm harvest F0 vào F1 khi overlap date range)
+            if f_vu != "F0" and so_chich_bap == 0:
+                so_thu_hoach = 0
 
             # Tên lô: gắn "(đợt X)" nếu lô có nhiều đợt trồng
             display_lo = batch_label_map.get(season_blid, lo_name) if pd.notna(season_blid) else lo_name
