@@ -1422,6 +1422,52 @@ def render_global_data_tab(c_farm):
         loai_str = f" · Loại: **{loai}**" if loai else ""
         st.info(f"📅 Vụ **{f_vu}** — Lô **{f_lot}**{loai_str} · Bắt đầu: **{start_str}** · {end_label}: **{end_str}**", icon="ℹ️")
 
+    def render_chart_filters(prefix: str, include_date: bool = False, use_dynamic_lots: bool = True):
+        """
+        Render bộ lọc chuẩn (Farm, Vụ, Đội, Lô, [Date]) và trả về giá trị filter.
+        Args:
+            prefix: tiền tố key duy nhất cho session_state (vd: "dt", "ek", "lc")
+            include_date: hiển thị ô chọn khoảng thời gian
+            use_dynamic_lots: True = lọc lô theo farm/team/vụ, False = hiện tất cả lô
+        Returns: (farm, vu, team, lot, date_or_None)
+        """
+        if c_farm in ["Admin", "Phòng Kinh doanh"]:
+            cols = st.columns([1, 1, 1, 1, 1.5] if include_date else [1, 1, 1, 1])
+            col_idx = 0
+            with cols[col_idx]:
+                f_farm = st.selectbox("Lọc theo Farm", options=farms_all, key=f"{prefix}_farm")
+            col_idx += 1
+        else:
+            f_farm = c_farm
+            cols = st.columns([1, 1, 1, 1.5] if include_date else [1, 1, 1])
+            col_idx = 0
+
+        with cols[col_idx]:
+            f_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key=f"{prefix}_vu")
+        col_idx += 1
+        with cols[col_idx]:
+            f_team = st.selectbox("Lọc theo Đội", options=teams_all, key=f"{prefix}_team")
+        col_idx += 1
+        with cols[col_idx]:
+            if use_dynamic_lots:
+                lot_opts = get_dynamic_lot_options(df_lots_all, df_seasons, f_farm, f_team, f_vu)
+            else:
+                lot_opts = lots_all
+            f_lot = st.selectbox("Lọc theo Lô", options=lot_opts, key=f"{prefix}_lot")
+
+        f_date = None
+        if include_date:
+            col_idx += 1
+            with cols[col_idx]:
+                f_date = st.date_input("Khoảng thời gian", value=(), key=f"{prefix}_date")
+
+        return f_farm, f_vu, f_team, f_lot, f_date
+
+    def get_filtered_dfs(farm, vu, team, lot, date_range, data_dict):
+        """Show season info và apply bộ lọc chuẩn. Trả về dict filtered DataFrames."""
+        show_season_info(vu, lot)
+        return apply_filters_local(farm, vu, team, lot, date_range, data_dict)
+
     st.divider()
 
     # --- BẢNG CHI TIẾT THÔNG TIN CÁC LÔ ---
@@ -1430,27 +1476,7 @@ def render_global_data_tab(c_farm):
     st.caption("Xem thông tin chi tiết từng lô phân loại theo vụ (Season). Các cột dữ liệu dự toán và thực tế được tính toán trong phạm vi khoảng thời gian của mục tiêu.")
     st.caption(f"📉 Tỉ lệ hao hụt dự toán: Trồng → Chích bắp: **{LOSS_RATE_TO_CHICH*100:.0f}%** · Chích bắp → Thu hoạch: **{LOSS_RATE_TO_CHICH*100:.0f}%** · Tổng: **{LOSS_RATE_TO_THU*100:.0f}%**")
 
-    if c_farm in ["Admin", "Phòng Kinh doanh"]:
-        dtf0, dtf1, dtf2, dtf3 = st.columns([1, 1, 1, 1])
-        with dtf0:
-            dt_farm = st.selectbox("Lọc theo Farm", options=farms_all, key="dt_farm")
-        with dtf1:
-            dt_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="dt_vu")
-        with dtf2:
-            dt_team = st.selectbox("Lọc theo Đội", options=teams_all, key="dt_team")
-        with dtf3:
-            dt_lot_opts = get_dynamic_lot_options(df_lots_all, df_seasons, dt_farm, dt_team, dt_vu)
-            dt_lot = st.selectbox("Lọc theo Lô", options=dt_lot_opts, key="dt_lot")
-    else:
-        dt_farm = c_farm
-        dtf1, dtf2, dtf3 = st.columns([1, 1, 1])
-        with dtf1:
-            dt_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="dt_vu")
-        with dtf2:
-            dt_team = st.selectbox("Lọc theo Đội", options=teams_all, key="dt_team")
-        with dtf3:
-            dt_lot_opts = get_dynamic_lot_options(df_lots_all, df_seasons, c_farm, dt_team, dt_vu)
-            dt_lot = st.selectbox("Lọc theo Lô", options=dt_lot_opts, key="dt_lot")
+    dt_farm, dt_vu, dt_team, dt_lot, _ = render_chart_filters("dt")
 
     df_dt_seasons = df_seasons.copy()
     if not df_dt_seasons.empty:
@@ -1995,31 +2021,8 @@ def render_global_data_tab(c_farm):
     st.markdown("#### ⚖️ Dự toán Sản lượng Thu hoạch (Kg)")
     st.caption(f"Ước tính sản lượng dựa trên số cây ở giai đoạn gần nhất × **{KG_PER_TREE_F0} kg/cây (F0)** hoặc **{KG_PER_TREE_FN} kg/cây (Fn)**.")
 
-    # Bộ lọc riêng (cùng pattern với các chart khác)
-    if c_farm in ["Admin", "Phòng Kinh doanh"]:
-        ekf0, ekf1, ekf2, ekf3 = st.columns([1, 1, 1, 1])
-        with ekf0:
-            ek_farm = st.selectbox("Lọc theo Farm", options=farms_all, key="ek_farm")
-        with ekf1:
-            ek_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="ek_vu")
-        with ekf2:
-            ek_team = st.selectbox("Lọc theo Đội", options=teams_all, key="ek_team")
-        with ekf3:
-            ek_lot_opts = get_dynamic_lot_options(df_lots_all, df_seasons, ek_farm, ek_team, ek_vu)
-            ek_lot = st.selectbox("Lọc theo Lô", options=ek_lot_opts, key="ek_lot")
-    else:
-        ek_farm = c_farm
-        ekf1, ekf2, ekf3 = st.columns([1, 1, 1])
-        with ekf1:
-            ek_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="ek_vu")
-        with ekf2:
-            ek_team = st.selectbox("Lọc theo Đội", options=teams_all, key="ek_team")
-        with ekf3:
-            ek_lot_opts = get_dynamic_lot_options(df_lots_all, df_seasons, c_farm, ek_team, ek_vu)
-            ek_lot = st.selectbox("Lọc theo Lô", options=ek_lot_opts, key="ek_lot")
-
-    show_season_info(ek_vu, ek_lot)
-    filtered_ek_dfs = apply_filters_local(ek_farm, ek_vu, ek_team, ek_lot, None, {
+    ek_farm, ek_vu, ek_team, ek_lot, _ = render_chart_filters("ek")
+    filtered_ek_dfs = get_filtered_dfs(ek_farm, ek_vu, ek_team, ek_lot, None, {
         "lots": df_lots_all, "stg": df_stg_all, "des": df_des_all, "har": df_har_all
     })
 
@@ -2055,35 +2058,8 @@ def render_global_data_tab(c_farm):
     st.markdown("#### 📈 So sánh Tiến độ Sinh trưởng: Dự toán vs Thực tế")
     st.caption("Mỗi đường line đại diện cho 1 Lô. Các điểm đánh dấu màu thể hiện giai đoạn sinh trưởng. Hover để xem chi tiết.")
 
-    # Bộ lọc riêng
-    if c_farm in ["Admin", "Phòng Kinh doanh"]:
-        lcf0, lcf1, lcf2, lcf3, lcf4 = st.columns([1, 1, 1, 1, 1.5])
-        with lcf0:
-            lc_farm = st.selectbox("Lọc theo Farm", options=farms_all, key="lc_farm")
-        with lcf1:
-            lc_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="lc_vu")
-        with lcf2:
-            lc_team = st.selectbox("Lọc theo Đội", options=teams_all, key="lc_team")
-        with lcf3:
-            lc_lot_opts = get_dynamic_lot_options(df_lots_all, df_seasons, lc_farm, lc_team, lc_vu)
-            lc_lot = st.selectbox("Lọc theo Lô", options=lc_lot_opts, key="lc_lot")
-        with lcf4:
-            lc_date = st.date_input("Khoảng thời gian", value=(), key="lc_date")
-    else:
-        lc_farm = c_farm
-        lcf1, lcf2, lcf3, lcf4 = st.columns([1, 1, 1, 1.5])
-        with lcf1:
-            lc_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="lc_vu")
-        with lcf2:
-            lc_team = st.selectbox("Lọc theo Đội", options=teams_all, key="lc_team")
-        with lcf3:
-            lc_lot_opts = get_dynamic_lot_options(df_lots_all, df_seasons, lc_farm, lc_team, lc_vu)
-            lc_lot = st.selectbox("Lọc theo Lô", options=lc_lot_opts, key="lc_lot")
-        with lcf4:
-            lc_date = st.date_input("Khoảng thời gian", value=(), key="lc_date")
-
-    show_season_info(lc_vu, lc_lot)
-    filtered_lc_dfs = apply_filters_local(lc_farm, lc_vu, lc_team, lc_lot, lc_date, {
+    lc_farm, lc_vu, lc_team, lc_lot, lc_date = render_chart_filters("lc", include_date=True)
+    filtered_lc_dfs = get_filtered_dfs(lc_farm, lc_vu, lc_team, lc_lot, lc_date, {
         "lots": df_lots_all, "stg": df_stg_all, "des": df_des_all, "har": df_har_all
     })
 
@@ -2300,34 +2276,8 @@ def render_global_data_tab(c_farm):
     st.caption("So sánh tương quan Mức độ Hao hụt và Năng suất từ lúc Xuống giống đến khi Thu hoạch.")
     
     # 1. Pipeline Chart Filters
-    if c_farm in ["Admin", "Phòng Kinh doanh"]:
-        cpf0, cpf1, cpf2, cpf3, cpf4 = st.columns([1, 1, 1, 1, 1.5])
-        with cpf0:
-            pf_farm = st.selectbox("Lọc theo Farm", options=farms_all, key="pf_farm")
-        with cpf1:
-            pf_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="pf_vu")
-        with cpf2:
-            pf_team = st.selectbox("Lọc theo Đội", options=teams_all, key="pf_team")
-        with cpf3:
-            pf_lot_opts = get_dynamic_lot_options(df_lots_all, df_seasons, pf_farm, pf_team, pf_vu)
-            pf_lot = st.selectbox("Lọc theo Lô", options=pf_lot_opts, key="pf_lot")
-        with cpf4:
-            pf_date = st.date_input("Khoảng thời gian", value=(), key="pf_date")
-    else:
-        pf_farm = c_farm
-        cpf1, cpf2, cpf3, cpf4 = st.columns([1, 1, 1, 1.5])
-        with cpf1:
-            pf_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="pf_vu")
-        with cpf2:
-            pf_team = st.selectbox("Lọc theo Đội", options=teams_all, key="pf_team")
-        with cpf3:
-            pf_lot_opts = get_dynamic_lot_options(df_lots_all, df_seasons, pf_farm, pf_team, pf_vu)
-            pf_lot = st.selectbox("Lọc theo Lô", options=pf_lot_opts, key="pf_lot")
-        with cpf4:
-            pf_date = st.date_input("Khoảng thời gian", value=(), key="pf_date")
-        
-    show_season_info(pf_vu, pf_lot)
-    filtered_pipe_dfs = apply_filters_local(pf_farm, pf_vu, pf_team, pf_lot, pf_date, {
+    pf_farm, pf_vu, pf_team, pf_lot, pf_date = render_chart_filters("pf", include_date=True)
+    filtered_pipe_dfs = get_filtered_dfs(pf_farm, pf_vu, pf_team, pf_lot, pf_date, {
         "lots": df_lots_all, "stg": df_stg_all, "des": df_des_all, "har": df_har_all
     })
     
@@ -2438,34 +2388,8 @@ def render_global_data_tab(c_farm):
     st.caption("Biểu đồ gộp thể hiện biến động các công đoạn dọc theo trục ngày. Có thể filter để làm nổi bật.")
 
     # 2. Multi-line Chart Filters
-    if c_farm in ["Admin", "Phòng Kinh doanh"]:
-        mlf0, mlf1, mlf2, mlf3, mlf4 = st.columns([1, 1, 1, 1, 1.5])
-        with mlf0:
-            mlf_farm = st.selectbox("Lọc theo Farm", options=farms_all, key="mlf_farm")
-        with mlf1:
-            mlf_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="mlf_vu")
-        with mlf2:
-            mlf_team = st.selectbox("Lọc theo Đội", options=teams_all, key="mlf_team")
-        with mlf3:
-            mlf_lot_opts = get_dynamic_lot_options(df_lots_all, df_seasons, mlf_farm, mlf_team, mlf_vu)
-            mlf_lot = st.selectbox("Lọc theo Lô", options=mlf_lot_opts, key="mlf_lot")
-        with mlf4:
-            mlf_date = st.date_input("Khoảng thời gian", value=(), key="mlf_date")
-    else:
-        mlf_farm = c_farm
-        mlf1, mlf2, mlf3, mlf4 = st.columns([1, 1, 1, 1.5])
-        with mlf1:
-            mlf_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="mlf_vu")
-        with mlf2:
-            mlf_team = st.selectbox("Lọc theo Đội", options=teams_all, key="mlf_team")
-        with mlf3:
-            mlf_lot_opts = get_dynamic_lot_options(df_lots_all, df_seasons, mlf_farm, mlf_team, mlf_vu)
-            mlf_lot = st.selectbox("Lọc theo Lô", options=mlf_lot_opts, key="mlf_lot")
-        with mlf4:
-            mlf_date = st.date_input("Khoảng thời gian", value=(), key="mlf_date")
-        
-    show_season_info(mlf_vu, mlf_lot)
-    filtered_ml_dfs = apply_filters_local(mlf_farm, mlf_vu, mlf_team, mlf_lot, mlf_date, {
+    mlf_farm, mlf_vu, mlf_team, mlf_lot, mlf_date = render_chart_filters("mlf", include_date=True)
+    filtered_ml_dfs = get_filtered_dfs(mlf_farm, mlf_vu, mlf_team, mlf_lot, mlf_date, {
         "lots": df_lots_all, "stg": df_stg_all, "des": df_des_all, "har": df_har_all
     })
 
@@ -2631,32 +2555,8 @@ def render_global_data_tab(c_farm):
     st.caption("Theo dõi số lượng cây thực tế trên từng Lô qua các lần kiểm đếm.")
     
     # 3. Tree Inventory Filters
-    if c_farm in ["Admin", "Phòng Kinh doanh"]:
-        tif0, tif1, tif2, tif3, tif4 = st.columns([1, 1, 1, 1, 1.5])
-        with tif0:
-            ti_farm = st.selectbox("Lọc theo Farm", options=farms_all, key="ti_farm")
-        with tif1:
-            ti_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="ti_vu")
-        with tif2:
-            ti_team = st.selectbox("Lọc theo Đội", options=teams_all, key="ti_team")
-        with tif3:
-            ti_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="ti_lot")
-        with tif4:
-            ti_date = st.date_input("Khoảng thời gian", value=(), key="ti_date")
-    else:
-        ti_farm = c_farm
-        tif1, tif2, tif3, tif4 = st.columns([1, 1, 1, 1.5])
-        with tif1:
-            ti_vu = st.selectbox("Lọc theo Vụ", options=seasons_all, key="ti_vu")
-        with tif2:
-            ti_team = st.selectbox("Lọc theo Đội", options=teams_all, key="ti_team")
-        with tif3:
-            ti_lot = st.selectbox("Lọc theo Lô", options=lots_all, key="ti_lot")
-        with tif4:
-            ti_date = st.date_input("Khoảng thời gian", value=(), key="ti_date")
-
-    show_season_info(ti_vu, ti_lot)
-    filtered_ti_dfs = apply_filters_local(ti_farm, ti_vu, ti_team, ti_lot, ti_date, {"inv": df_tree_inv_all})
+    ti_farm, ti_vu, ti_team, ti_lot, ti_date = render_chart_filters("ti", include_date=True, use_dynamic_lots=False)
+    filtered_ti_dfs = get_filtered_dfs(ti_farm, ti_vu, ti_team, ti_lot, ti_date, {"inv": df_tree_inv_all})
     ti_inv_df = filtered_ti_dfs["inv"]
     
     if not ti_inv_df.empty and "ngay_kiem_ke" in ti_inv_df.columns:
