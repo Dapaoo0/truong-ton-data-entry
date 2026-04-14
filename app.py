@@ -98,6 +98,18 @@ FN_DAYS_THU_OFFSET = 174   # 90 + 14 + 70
 CONVERGENCE_DAYS = 15      # Ngưỡng hội tụ: 2 đợt chênh ≤15d → coi như gộp
 MAX_GENERATION = 5         # Tính tối đa F0→F5
 
+# =====================================================
+# SẢN LƯỢNG DỰ TOÁN (kg/buồng)
+# =====================================================
+KG_PER_TREE_F0 = 15        # F0: 15 kg/buồng
+KG_PER_TREE_FN = 18        # Fn (F1+): 18 kg/buồng
+KG_PER_BOX = 13            # 13 kg/thùng
+BOXES_PER_CONTAINER = 1320 # 1320 thùng/container
+
+def get_kg_per_tree(vu: str) -> int:
+    """Trả về kg/buồng tương ứng theo vụ. F0 = 15kg, Fn = 18kg."""
+    return KG_PER_TREE_F0 if vu == "F0" else KG_PER_TREE_FN
+
 # Stage offsets cho thuật toán matching
 _STAGE_OFFSETS = {
     "Chích bắp": {"f0": F0_DAYS_TO_CHICH, "fn": FN_DAYS_CHICH_OFFSET},
@@ -1393,7 +1405,7 @@ def render_global_data_tab(c_farm):
     st.divider()
 
     # --- BẢNG CHI TIẾT THÔNG TIN CÁC LÔ ---
-    KG_PER_TREE_DETAIL = 18
+    # KG dự toán: sử dụng get_kg_per_tree(vu) — F0=15, Fn=18
     st.markdown("#### 📋 Bảng chi tiết thông tin các lô (Theo Vụ)")
     st.caption("Xem thông tin chi tiết từng lô phân loại theo vụ (Season). Các cột dữ liệu dự toán và thực tế được tính toán trong phạm vi khoảng thời gian của mục tiêu.")
 
@@ -1593,8 +1605,8 @@ def render_global_data_tab(c_farm):
                 ("Cắt bắp", "Thực tế"): so_cat_bap,
                 ("Thu hoạch", "Dự toán"): so_luong_trong,
                 ("Thu hoạch", "Thực tế"): so_thu_hoach,
-                ("Tổng khối lượng (kg)", "Dự toán"): so_luong_trong * KG_PER_TREE_DETAIL,
-                ("Tổng khối lượng (kg)", "Thực tế"): so_thu_hoach * KG_PER_TREE_DETAIL
+                ("Tổng khối lượng (kg)", "Dự toán"): so_luong_trong * get_kg_per_tree(f_vu),
+                ("Tổng khối lượng (kg)", "Thực tế"): so_thu_hoach * get_kg_per_tree(f_vu)
             })
             
         # ─── Sort bảng theo tên lô tự nhiên (3B < 4A < 12A) rồi đợt trồng ───
@@ -1838,9 +1850,11 @@ def render_global_data_tab(c_farm):
                     
                     # Header
                     total_buong = df_month["so_thu_hoach_dk"].sum()
-                    total_kg = total_buong * KG_PER_TREE_DETAIL
-                    so_thung = int(total_kg // 13)
-                    so_container = so_thung / 1320
+                    # Tính kg theo từng dòng (mỗi dòng có vụ riêng → kg/buồng khác nhau)
+                    df_month["_kg"] = df_month.apply(lambda r: r["so_thu_hoach_dk"] * get_kg_per_tree(r["vu"]), axis=1)
+                    total_kg = df_month["_kg"].sum()
+                    so_thung = int(total_kg // KG_PER_BOX)
+                    so_container = so_thung / BOXES_PER_CONTAINER
                     st.markdown(f"### Tháng {month_key} — {total_buong:,} buồng ≈ {total_kg:,.0f} kg")
                     st.markdown(f"📦 **Ước tính: ~{so_thung:,} thùng** (13 kg/thùng) · 🚛 **~{so_container:,.1f} container** (1320 thùng/cont)")
                     
@@ -1898,8 +1912,11 @@ def render_global_data_tab(c_farm):
                 """, unsafe_allow_html=True)
                 
                 # ─── Metric cards (buttons) trong container scoped ───
+                # Tính kg theo từng dòng trước khi gộp (vì mỗi vụ có kg/buồng khác nhau)
+                df_hv["_kg_est"] = df_hv.apply(lambda r: r["so_thu_hoach_dk"] * get_kg_per_tree(r["vu"]), axis=1)
                 monthly_summary = df_hv.groupby("thang_thu_hoach").agg(
                     tong_cay=("so_thu_hoach_dk", "sum"),
+                    kg_est=("_kg_est", "sum"),
                     so_lo=("lo", "nunique")
                 ).reset_index()
                 monthly_summary = monthly_summary.sort_values("thang_thu_hoach",
@@ -1912,12 +1929,12 @@ def render_global_data_tab(c_farm):
                         for j, col in enumerate(cols):
                             if i + j < len(month_list):
                                 m = month_list[i + j]
-                                kg_est = m["tong_cay"] * KG_PER_TREE_DETAIL
+                                kg_est = m["kg_est"]
                                 month_key = m["thang_thu_hoach"]
                                 
                                 with col:
-                                    so_thung_card = int(kg_est // 13)
-                                    so_cont_card = so_thung_card / 1320
+                                    so_thung_card = int(kg_est // KG_PER_BOX)
+                                    so_cont_card = so_thung_card / BOXES_PER_CONTAINER
                                     btn_label = f"📅 Tháng {month_key}\n\n**{m['tong_cay']:,} buồng**\n\n≈ {kg_est:,.0f} kg · ~{so_thung_card:,} thùng\n\n🚛 ~{so_cont_card:,.1f} cont · {m['so_lo']} lô"
                                     if st.button(btn_label, key=f"hv_card_{month_key}",
                                                use_container_width=True):
@@ -1952,10 +1969,8 @@ def render_global_data_tab(c_farm):
     st.divider()
 
     # --- DỰ TOÁN SẢN LƯỢNG THU HOẠCH (KG) ---
-    KG_PER_TREE = 18
-
     st.markdown("#### ⚖️ Dự toán Sản lượng Thu hoạch (Kg)")
-    st.caption(f"Ước tính sản lượng dựa trên số cây ở giai đoạn gần nhất × **{KG_PER_TREE} kg/cây**.")
+    st.caption(f"Ước tính sản lượng dựa trên số cây ở giai đoạn gần nhất × **{KG_PER_TREE_F0} kg/cây (F0)** hoặc **{KG_PER_TREE_FN} kg/cây (Fn)**.")
 
     # Bộ lọc riêng (cùng pattern với các chart khác)
     if c_farm in ["Admin", "Phòng Kinh doanh"]:
@@ -2000,16 +2015,17 @@ def render_global_data_tab(c_farm):
     with m1:
         st.metric("🌱 Tổng cây đã trồng", f"{total_cay_da_trong:,}")
     with m2:
-        st.metric("✅ Đã thu hoạch", f"{total_da_thu:,} cây", delta=f"{total_da_thu * KG_PER_TREE:,.0f} kg")
+        _kg_rate = get_kg_per_tree(ek_vu if ek_vu != "Tất cả" else "Fn")
+        st.metric("✅ Đã thu hoạch", f"{total_da_thu:,} cây", delta=f"{total_da_thu * _kg_rate:,.0f} kg")
     with m3:
         st.metric("🗑️ Xuất hủy", f"{total_xuat_huy:,} cây")
     with m4:
-        st.metric("📦 Kg dự toán còn lại", f"{total_con_lai * KG_PER_TREE:,.0f} kg")
+        st.metric("📦 Kg dự toán còn lại", f"{total_con_lai * _kg_rate:,.0f} kg")
 
     st.divider()
 
     # --- BIỂU ĐỒ SO SÁNH TIẾN ĐỘ: DỰ TOÁN vs THỰC TẾ ---
-    KG_PER_TREE_CHART = 18
+    # Chart: sử dụng get_kg_per_tree(vu) — F0=15, Fn=18
 
     st.markdown("#### 📈 So sánh Tiến độ Sinh trưởng: Dự toán vs Thực tế")
     st.caption("Mỗi đường line đại diện cho 1 Lô. Các điểm đánh dấu màu thể hiện giai đoạn sinh trưởng. Hover để xem chi tiết.")
@@ -2090,7 +2106,7 @@ def render_global_data_tab(c_farm):
             ideal_events.append({"batch_id": batch_id, "lo": label, "date": d_cat, "so_luong": sl, "giai_doan": "Cắt bắp",
                 "hover": f"<b>Lô {label}</b><br>Diện tích: {dt:.2f} ha<br>Giai đoạn: Cắt bắp<br>Ngày: {d_cat.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây"})
             ideal_events.append({"batch_id": batch_id, "lo": label, "date": d_thu, "so_luong": sl, "giai_doan": "Thu hoạch",
-                "hover": f"<b>Lô {label}</b><br>Diện tích: {dt:.2f} ha<br>Giai đoạn: Thu hoạch<br>Ngày: {d_thu.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây<br><b>Sản lượng dự toán: {sl * KG_PER_TREE_CHART:,.0f} kg</b>"})
+                "hover": f"<b>Lô {label}</b><br>Diện tích: {dt:.2f} ha<br>Giai đoạn: Thu hoạch<br>Ngày: {d_thu.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} cây<br><b>Sản lượng dự toán: {sl * KG_PER_TREE_F0:,.0f} kg</b>"})
 
         df_ideal = pd.DataFrame(ideal_events)
         fig_ideal = go.Figure()
@@ -2182,9 +2198,10 @@ def render_global_data_tab(c_farm):
                     for _, row in har_data.groupby("ngay_thu_hoach")["so_luong"].sum().reset_index().iterrows():
                         d = pd.to_datetime(row["ngay_thu_hoach"])
                         sl = int(row["so_luong"])
+                        _vu_for_kg = lc_vu if lc_vu != "Tất cả" else "Fn"
                         actual_events.append({"batch_id": batch_id, "lo": label, "date": d,
                             "so_luong": sl, "giai_doan": "Thu hoạch",
-                            "hover": f"<b>Lô {label}</b><br>Diện tích: {dt:.2f} ha<br>Giai đoạn: Thu hoạch<br>Ngày: {d.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} buồng<br><b>Sản lượng dự toán: {sl * KG_PER_TREE_CHART:,.0f} kg</b>"})
+                            "hover": f"<b>Lô {label}</b><br>Diện tích: {dt:.2f} ha<br>Giai đoạn: Thu hoạch<br>Ngày: {d.strftime('%d/%m/%Y')}<br>Số lượng: {sl:,} buồng<br><b>Sản lượng dự toán: {sl * get_kg_per_tree(_vu_for_kg):,.0f} kg</b>"})
 
             # Sự kiện Xuất hủy (điểm rời, không nối line)
             if not lc_des_df.empty:
