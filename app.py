@@ -245,7 +245,7 @@ def fetch_table_data(table_name: str, farm: str) -> pd.DataFrame:
     if table_name in tables_with_lo:
         # Use left join (not !inner) so records with dim_lo_id=NULL still appear
         query = supabase.table(table_name).select("*, dim_lo(lo_name, area_ha, dim_doi(doi_name), dim_farm(farm_name))").eq("is_deleted", False)
-        if farm != "Admin" and farm:
+        if farm not in ["Admin", "Kinh doanh"] and farm:
             # For non-admin, we need dim_lo to exist for farm filtering to work
             # But we still show orphan records to avoid silent data loss
             query = supabase.table(table_name).select("*, dim_lo!inner(lo_name, area_ha, dim_doi!inner(doi_name), dim_farm!inner(farm_name))").eq("is_deleted", False)
@@ -254,7 +254,7 @@ def fetch_table_data(table_name: str, farm: str) -> pd.DataFrame:
         query = supabase.table(table_name).select("*")
         if table_name != "user_roles":
             query = query.eq("is_deleted", False)
-            if farm != "Admin" and farm:
+            if farm not in ["Admin", "Kinh doanh"] and farm:
                 query = query.eq("farm", farm)
 
     if table_name != "user_roles":
@@ -1397,7 +1397,7 @@ def render_global_data_tab(c_farm):
     st.markdown("#### 📋 Bảng chi tiết thông tin các lô (Theo Vụ)")
     st.caption("Xem thông tin chi tiết từng lô phân loại theo vụ (Season). Các cột dữ liệu dự toán và thực tế được tính toán trong phạm vi khoảng thời gian của mục tiêu.")
 
-    if c_farm == "Admin":
+    if c_farm in ["Admin", "Kinh doanh"]:
         dtf0, dtf1, dtf2, dtf3 = st.columns([1, 1, 1, 1])
         with dtf0:
             dt_farm = st.selectbox("Lọc theo Farm", options=farms_all, key="dt_farm")
@@ -1783,7 +1783,7 @@ def render_global_data_tab(c_farm):
             current_year = date.today().year
             default_year_idx = year_options.index(current_year) + 1 if current_year in year_options else 0
 
-            if c_farm == "Admin":
+            if c_farm in ["Admin", "Kinh doanh"]:
                 hcf0, hcf1, hcf2 = st.columns([1, 1, 1])
                 with hcf0:
                     hv_farm = st.selectbox("Lọc theo Farm", options=farms_all, key="hv_farm_sched")
@@ -1956,7 +1956,7 @@ def render_global_data_tab(c_farm):
     st.caption(f"Ước tính sản lượng dựa trên số cây ở giai đoạn gần nhất × **{KG_PER_TREE} kg/cây**.")
 
     # Bộ lọc riêng (cùng pattern với các chart khác)
-    if c_farm == "Admin":
+    if c_farm in ["Admin", "Kinh doanh"]:
         ekf0, ekf1, ekf2, ekf3 = st.columns([1, 1, 1, 1])
         with ekf0:
             ek_farm = st.selectbox("Lọc theo Farm", options=farms_all, key="ek_farm")
@@ -2013,7 +2013,7 @@ def render_global_data_tab(c_farm):
     st.caption("Mỗi đường line đại diện cho 1 Lô. Các điểm đánh dấu màu thể hiện giai đoạn sinh trưởng. Hover để xem chi tiết.")
 
     # Bộ lọc riêng
-    if c_farm == "Admin":
+    if c_farm in ["Admin", "Kinh doanh"]:
         lcf0, lcf1, lcf2, lcf3, lcf4 = st.columns([1, 1, 1, 1, 1.5])
         with lcf0:
             lc_farm = st.selectbox("Lọc theo Farm", options=farms_all, key="lc_farm")
@@ -2256,7 +2256,7 @@ def render_global_data_tab(c_farm):
     st.caption("So sánh tương quan Mức độ Hao hụt và Năng suất từ lúc Xuống giống đến khi Thu hoạch.")
     
     # 1. Pipeline Chart Filters
-    if c_farm == "Admin":
+    if c_farm in ["Admin", "Kinh doanh"]:
         cpf0, cpf1, cpf2, cpf3, cpf4 = st.columns([1, 1, 1, 1, 1.5])
         with cpf0:
             pf_farm = st.selectbox("Lọc theo Farm", options=farms_all, key="pf_farm")
@@ -2394,7 +2394,7 @@ def render_global_data_tab(c_farm):
     st.caption("Biểu đồ gộp thể hiện biến động các công đoạn dọc theo trục ngày. Có thể filter để làm nổi bật.")
 
     # 2. Multi-line Chart Filters
-    if c_farm == "Admin":
+    if c_farm in ["Admin", "Kinh doanh"]:
         mlf0, mlf1, mlf2, mlf3, mlf4 = st.columns([1, 1, 1, 1, 1.5])
         with mlf0:
             mlf_farm = st.selectbox("Lọc theo Farm", options=farms_all, key="mlf_farm")
@@ -2587,7 +2587,7 @@ def render_global_data_tab(c_farm):
     st.caption("Theo dõi số lượng cây thực tế trên từng Lô qua các lần kiểm đếm.")
     
     # 3. Tree Inventory Filters
-    if c_farm == "Admin":
+    if c_farm in ["Admin", "Kinh doanh"]:
         tif0, tif1, tif2, tif3, tif4 = st.columns([1, 1, 1, 1, 1.5])
         with tif0:
             ti_farm = st.selectbox("Lọc theo Farm", options=farms_all, key="ti_farm")
@@ -2757,6 +2757,14 @@ def render_main_app():
                             st.error(f"❌ Lỗi khi chốt vụ: {e}")
         elif active_tab == tab_opts[0]:
             render_global_data_tab("Admin")
+        return
+
+    # =================================================
+    # MODULE KINH DOANH
+    # =================================================
+    if c_farm == "Kinh doanh" and c_team == "Phòng ban":
+        st.markdown("## 📊 Dashboard Kinh Doanh")
+        render_global_data_tab("Kinh doanh")
         return
 
     # =================================================
