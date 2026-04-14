@@ -1535,11 +1535,11 @@ def render_global_data_tab(c_farm):
                 sub_har = df_har_all[df_har_all["lot_id"] == lot_id] if not df_har_all.empty else pd.DataFrame()
                 sub_des = df_des_all[df_des_all["lot_id"] == lot_id] if not df_des_all.empty else pd.DataFrame()
 
-            # ─── LUÔN filter date range cho stage/harvest/destruction ───
+            # ─── Filter date range cho stage/harvest/destruction ───
             # (Cả khi đã filter base_lot_id, vì cùng đợt trồng có nhiều vụ F0/F1/F2...)
+            # ⚠️ KHÔNG filter sub_lots: "Cây đã trồng" là thuộc tính đợt trồng,
+            # không thay đổi theo vụ (F0=F1=F2=... = số cây gốc).
             if pd.notna(start):
-                if not sub_lots.empty and "ngay_trong" in sub_lots.columns:
-                    sub_lots = sub_lots[pd.to_datetime(sub_lots["ngay_trong"]).dt.date >= start.date()]
                 if not sub_stg.empty and "ngay_thuc_hien" in sub_stg.columns:
                     sub_stg = sub_stg[pd.to_datetime(sub_stg["ngay_thuc_hien"]).dt.date >= start.date()]
                 if not sub_har.empty and "ngay_thu_hoach" in sub_har.columns:
@@ -1547,8 +1547,6 @@ def render_global_data_tab(c_farm):
                 if not sub_des.empty and "ngay_xuat_huy" in sub_des.columns:
                     sub_des = sub_des[pd.to_datetime(sub_des["ngay_xuat_huy"]).dt.date >= start.date()]
             if pd.notna(end):
-                if not sub_lots.empty and "ngay_trong" in sub_lots.columns:
-                    sub_lots = sub_lots[pd.to_datetime(sub_lots["ngay_trong"]).dt.date <= end.date()]
                 if not sub_stg.empty and "ngay_thuc_hien" in sub_stg.columns:
                     sub_stg = sub_stg[pd.to_datetime(sub_stg["ngay_thuc_hien"]).dt.date <= end.date()]
                 if not sub_des.empty and "ngay_xuat_huy" in sub_des.columns:
