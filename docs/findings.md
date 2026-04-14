@@ -4,6 +4,11 @@ Những khám phá, cấu hình cứng và lưu ý kinh nghiệm tìm được t
 
 - Cấu hình sản lượng dự toán: `KG_PER_TREE_F0 = 15` (F0: 15 kg/buồng), `KG_PER_TREE_FN = 18` (Fn: 18 kg/buồng). Helper: `get_kg_per_tree(vu)`. Hằng số đóng gói: `KG_PER_BOX = 13`, `BOXES_PER_CONTAINER = 1320`.
 - **Quy tắc DRY cho constants**: Không hardcode cùng một giá trị ở nhiều nơi. Gom thành 1 định nghĩa duy nhất ở đầu file + helper function.
+- **Tỉ lệ hao hụt theo giai đoạn** (so với số cây trồng gốc):
+  - Trồng → Chích bắp: **5% hao hụt** (`LOSS_RATE_TO_CHICH = 0.05`) → dự toán = 95%
+  - Chích bắp → Thu hoạch: **thêm 5% nữa** → tổng **10%** (`LOSS_RATE_TO_THU = 0.10`) → dự toán = 90%
+  - Cắt bắp: chỉ cách chích 14 ngày → giữ nguyên = 95% (như chích bắp)
+  - Helper: `get_estimated_rate(stage)` trả về tỉ lệ còn lại (0.95 hoặc 0.90)
 - Data source Pipeline (ETL): Tình trạng `missing CV` (Công việc) và `missing LO` ảnh hưởng trực tiếp tới tracking. Pipeline cần làm sạch và fetch từ GSheet trước khi đẩy vào Supabase Dimension.
 - Sự đồng bộ Map: Dữ liệu `lot_id` và `lo` trong table `seasons` và `base_lots` phải được đồng bộ chính xác. Bất cứ ai thay đổi mapping này sai đều có thể dẫn tới bảng chi tiết dữ liệu hiện lên trống (empty dataframe).
 - Việc chia tách bảng dữ liệu chi tiết theo 'Vụ' sẽ yêu cầu code thao tác mượt mà thông qua việc gom nhóm (group by dictionaries) từ lúc tạo list vòng lặp, tốt hơn nhiều so với việc trích xuất và gọi lệnh DataFrame `drop()` ẩn cột về sau.
