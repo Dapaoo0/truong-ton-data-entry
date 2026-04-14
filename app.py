@@ -1455,18 +1455,42 @@ def render_global_data_tab(c_farm):
         df_dt_seasons = df_dt_seasons.sort_values(["_has_end", "ngay_bat_dau"], ascending=[False, False])
         seen_vu_blid = set()
         
-        # ─── Build next_season_start: cho mỗi (base_lot_id, vu), tìm start vụ kế ───
-        # Dùng làm upper bound cho harvest filter để tránh duplicate
+        # ─── Build next_season_start + kiểm tra vụ kế có sản xuất chưa ───
         _next_season_map = {}  # (base_lot_id, vu) → ngày bắt đầu vụ kế tiếp (hoặc None)
+        _next_vu_producing = set()  # set of (base_lot_id, vu) đã có chích bắp
+        
+        # Pre-build: (base_lot_id, vu) nào đã có chích bắp?
+        if not df_stg_all.empty and "base_lot_id" in df_stg_all.columns:
+            stg_chich = df_stg_all[df_stg_all["giai_doan"] == "Chích bắp"]
+            if not stg_chich.empty:
+                # Cần xác định chích bắp thuộc vụ nào → dùng season date range
+                for _, s_row in df_dt_seasons[df_dt_seasons["base_lot_id"].notna()].iterrows():
+                    s_blid = int(s_row["base_lot_id"])
+                    s_vu = s_row["vu"]
+                    s_start = pd.to_datetime(s_row["ngay_bat_dau"])
+                    chich_for_blid = stg_chich[stg_chich["base_lot_id"] == s_blid]
+                    if not chich_for_blid.empty:
+                        chich_in_range = chich_for_blid[
+                            pd.to_datetime(chich_for_blid["ngay_thuc_hien"]).dt.date >= s_start.date()
+                        ]
+                        if not chich_in_range.empty:
+                            _next_vu_producing.add((s_blid, s_vu))
+        
         if "base_lot_id" in df_dt_seasons.columns:
             for blid, blid_grp in df_dt_seasons[df_dt_seasons["base_lot_id"].notna()].groupby("base_lot_id"):
                 sorted_seasons = blid_grp.sort_values("ngay_bat_dau").drop_duplicates("vu")
                 vu_list = sorted_seasons[["vu", "ngay_bat_dau"]].values.tolist()
                 for i, (vu_val, start_dt) in enumerate(vu_list):
                     if i + 1 < len(vu_list):
-                        _next_season_map[(int(blid), vu_val)] = pd.to_datetime(vu_list[i + 1][1])
+                        next_vu = vu_list[i + 1][0]
+                        next_blid = int(blid)
+                        # Chỉ set upper bound nếu vụ KẾ TIẾP đã có chích bắp
+                        if (next_blid, next_vu) in _next_vu_producing:
+                            _next_season_map[(int(blid), vu_val)] = pd.to_datetime(vu_list[i + 1][1])
+                        else:
+                            _next_season_map[(int(blid), vu_val)] = None
                     else:
-                        _next_season_map[(int(blid), vu_val)] = None  # Vụ cuối → không giới hạn
+                        _next_season_map[(int(blid), vu_val)] = None
 
         for idx, row in df_dt_seasons.iterrows():
             f_vu = row.get("vu")
@@ -1530,9 +1554,10 @@ def render_global_data_tab(c_farm):
                 if not sub_des.empty and "ngay_xuat_huy" in sub_des.columns:
                     sub_des = sub_des[pd.to_datetime(sub_des["ngay_xuat_huy"]).dt.date <= end.date()]
             
-            # ─── Harvest upper bound: dùng ngày bắt đầu vụ KẾ TIẾP ───
-            # Thu hoạch có thể kéo dài sau ngày kết thúc hành chính của vụ,
-            # nhưng PHẢI kết thúc trước khi vụ tiếp theo bắt đầu.
+            # ─── Harvest upper bound: dùng start vụ KẾ TIẾP (nếu vụ kế đã sản xuất) ───
+            # Thu hoạch có thể kéo dài sau end date hành chính,
+            # nhưng chỉ giới hạn khi vụ kế tiếp ĐÃ có chích bắp (đang sản xuất).
+            # Nếu vụ kế chưa sản xuất → harvest vẫn thuộc vụ hiện tại.
             if pd.notna(season_blid):
                 next_start = _next_season_map.get((int(season_blid), f_vu))
                 if next_start is not None and not sub_har.empty and "ngay_thu_hoach" in sub_har.columns:
