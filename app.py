@@ -2618,7 +2618,7 @@ def render_main_app():
     if "toast" in st.session_state:
         st.success(st.session_state.pop("toast"))
         
-    st.markdown(f'<p class="main-title">Hệ thống {c_team} - {c_farm}</p>', unsafe_allow_html=True)
+
 
     # =================================================
     # MODULE ADMIN
