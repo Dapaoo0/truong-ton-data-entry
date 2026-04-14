@@ -1840,8 +1840,9 @@ def render_global_data_tab(c_farm):
                     total_buong = df_month["so_thu_hoach_dk"].sum()
                     total_kg = total_buong * KG_PER_TREE_DETAIL
                     so_thung = int(total_kg // 13)
+                    so_container = so_thung / 1320
                     st.markdown(f"### Tháng {month_key} — {total_buong:,} buồng ≈ {total_kg:,.0f} kg")
-                    st.markdown(f"📦 **Ước tính: ~{so_thung:,} thùng** (13 kg/thùng)")
+                    st.markdown(f"📦 **Ước tính: ~{so_thung:,} thùng** (13 kg/thùng) · 🚛 **~{so_container:,.1f} container** (1320 thùng/cont)")
                     
                     # Tổng hợp theo loại thu
                     summary_by_type = df_month.groupby("loai_thu")["so_thu_hoach_dk"].sum()
@@ -1916,7 +1917,8 @@ def render_global_data_tab(c_farm):
                                 
                                 with col:
                                     so_thung_card = int(kg_est // 13)
-                                    btn_label = f"📅 Tháng {month_key}\n\n**{m['tong_cay']:,} buồng**\n\n≈ {kg_est:,.0f} kg · ~{so_thung_card:,} thùng · {m['so_lo']} lô"
+                                    so_cont_card = so_thung_card / 1320
+                                    btn_label = f"📅 Tháng {month_key}\n\n**{m['tong_cay']:,} buồng**\n\n≈ {kg_est:,.0f} kg · ~{so_thung_card:,} thùng\n\n🚛 ~{so_cont_card:,.1f} cont · {m['so_lo']} lô"
                                     if st.button(btn_label, key=f"hv_card_{month_key}",
                                                use_container_width=True):
                                         _show_harvest_detail(month_key, df_hv)
