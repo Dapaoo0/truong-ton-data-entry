@@ -217,19 +217,24 @@ Tài liệu này ghi lại chi tiết toàn bộ cấu trúc cơ sở dữ liệ
 | updated_at | timestamp without time zone | Không | Thời gian cập nhật record |
 
 ## public.base_lots
-**Ý nghĩa:** Bảng theo dõi thông tin gốc của các lô trồng lúc ban đầu (số lượng, ngày trồng).
+**Ý nghĩa:** Bảng theo dõi thông tin gốc của các đợt trồng (số lượng, ngày trồng). Bao gồm cả đợt **Trồng mới** và **Trồng dặm**.
+
+**Ghi chú nghiệp vụ:**
+- `loai_trong` (Trồng mới / Trồng dặm) hiện nằm ở `seasons.loai_trong` (được set khi tạo F0 cùng lúc tạo base_lot).
+- **Trồng dặm** là bổ sung cây vào lô đã có trồng mới → KHÔNG tạo chu kỳ F0→F3 riêng trong forecast.
+- Trong Dashboard: Trồng dặm bị loại khỏi Bảng chi tiết & Lịch thu hoạch, hiển thị riêng ở bảng "📋 Lịch sử Trồng dặm".
 
 | Tên Trường (Field) | Kiểu Dữ Liệu (Type) | Bắt Buộc (Required) | Ý Nghĩa / Ghi Chú |
 |---|---|---|---|
 | id | integer | Có | - |
-| ngay_trong | date | Có | - |
-| so_luong | integer | Có | - |
-| trang_thai | text | Không | - |
+| ngay_trong | date | Có | Ngày xuống giống thực tế |
+| so_luong | integer | Có | Số cây trồng ban đầu |
+| trang_thai | text | Không | Trạng thái hiện tại (default: "Đã trồng") |
 | created_at | timestamp with time zone | Không | Thời gian tạo record |
-| tuan | integer | Không | - |
+| tuan | integer | Không | Tuần trong năm (ISO week) |
 | is_deleted | boolean | Không | Cờ đánh dấu soft delete (True=Đã xóa) |
-| so_luong_con_lai | integer | Không | - |
-| dim_lo_id | integer | Không | ID định danh/Khóa ngoại |
+| so_luong_con_lai | integer | Không | Số cây còn sống sau hao hụt |
+| dim_lo_id | integer | Không | FK → dim_lo.lo_id — Lô thuộc về |
 
 ## public.stage_logs
 **Ý nghĩa:** Log lưu quá trình sinh trưởng (cắt bắp, chích bắp).
@@ -305,19 +310,24 @@ Tài liệu này ghi lại chi tiết toàn bộ cấu trúc cơ sở dữ liệ
 | created_at | timestamp with time zone | Không | Thời gian tạo record |
 
 ## public.seasons
-**Ý nghĩa:** Bảng định nghĩa các vụ mùa (F0, F1...) của từng lô.
+**Ý nghĩa:** Bảng định nghĩa các vụ mùa (F0, F1...) của từng lô. Mỗi base_lot tạo ra 1 season F0 khi khởi tạo.
+
+**Ghi chú nghiệp vụ:**
+- `loai_trong` xác định loại trồng của đợt trồng gốc ("Trồng mới" hoặc "Trồng dặm"). Được set lúc tạo season F0.
+- Dashboard dùng `loai_trong` để filter: chỉ "Trồng mới" mới xuất hiện trong forecast & bảng chi tiết.
+- ⚠️ **Thiết kế hiện tại**: `loai_trong` về bản chất thuộc về `base_lots` (thuộc tính đợt trồng, không thay đổi giữa các vụ). Xem xét migrate sang `base_lots` trong tương lai.
 
 | Tên Trường (Field) | Kiểu Dữ Liệu (Type) | Bắt Buộc (Required) | Ý Nghĩa / Ghi Chú |
 |---|---|---|---|
 | id | integer | Có | - |
-| vu | text | Có | - |
-| loai_trong | text | Có | - |
-| ngay_bat_dau | date | Có | - |
-| ngay_ket_thuc_thuc_te | date | Không | - |
-| ngay_ket_thuc_du_kien | date | Không | - |
+| vu | text | Có | Mã vụ: F0, F1, F2... (default: "F0") |
+| loai_trong | text | Có | "Trồng mới" hoặc "Trồng dặm" — xác định đợt trồng có tạo forecast riêng không |
+| ngay_bat_dau | date | Có | Ngày bắt đầu vụ |
+| ngay_ket_thuc_thuc_te | date | Không | Ngày kết thúc vụ thực tế |
+| ngay_ket_thuc_du_kien | date | Không | Ngày kết thúc vụ dự kiến |
 | created_at | timestamp with time zone | Không | Thời gian tạo record |
 | is_deleted | boolean | Không | Cờ đánh dấu soft delete (True=Đã xóa) |
-| dim_lo_id | integer | Không | ID định danh/Khóa ngoại |
+| dim_lo_id | integer | Không | FK → dim_lo.lo_id — Lô thuộc về |
 | base_lot_id | integer | Không | FK → base_lots.id — Đợt trồng gốc tương ứng (F0 exact match, Fn timeline match) |
 
 ## public.size_measure_logs
