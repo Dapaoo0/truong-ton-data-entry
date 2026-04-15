@@ -1755,9 +1755,6 @@ def render_global_data_tab(c_farm):
             if total_pct != 100:
                 st.warning(f"⚠️ Tổng tỷ lệ = {total_pct}%, cần = 100%. Đang dùng mặc định 10/80/10.")
                 pct_boi, pct_ro, pct_vet = 10, 80, 10
-            else:
-                if pct_boi != 10 or pct_ro != 80 or pct_vet != 10:
-                    st.info(f"📊 Tỷ lệ tùy chỉnh: Thu bói {pct_boi}% · Thu rộ {pct_ro}% · Thu vét {pct_vet}%")
         
         # σ tính từ: P(|X| ≤ 13) = 0.80 → Φ(13/σ) = 0.90 → σ = 13/1.2816 ≈ 10.14
         SIGMA = 13.0 / scipy_norm.ppf(0.90)  # ≈ 10.14 ngày
