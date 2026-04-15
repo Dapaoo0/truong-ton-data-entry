@@ -220,7 +220,7 @@ Tài liệu này ghi lại chi tiết toàn bộ cấu trúc cơ sở dữ liệ
 **Ý nghĩa:** Bảng theo dõi thông tin gốc của các đợt trồng (số lượng, ngày trồng). Bao gồm cả đợt **Trồng mới** và **Trồng dặm**.
 
 **Ghi chú nghiệp vụ:**
-- `loai_trong` (Trồng mới / Trồng dặm) hiện nằm ở `seasons.loai_trong` (được set khi tạo F0 cùng lúc tạo base_lot).
+- `loai_trong` nằm trực tiếp trong `base_lots` (migration `add_loai_trong_to_base_lots`). Không cần join seasons để lấy.
 - **Trồng dặm** là bổ sung cây vào lô đã có trồng mới → KHÔNG tạo chu kỳ F0→F3 riêng trong forecast.
 - Trong Dashboard: Trồng dặm bị loại khỏi Bảng chi tiết & Lịch thu hoạch, hiển thị riêng ở bảng "📋 Lịch sử Trồng dặm".
 
@@ -235,6 +235,7 @@ Tài liệu này ghi lại chi tiết toàn bộ cấu trúc cơ sở dữ liệ
 | is_deleted | boolean | Không | Cờ đánh dấu soft delete (True=Đã xóa) |
 | so_luong_con_lai | integer | Không | Số cây còn sống sau hao hụt |
 | dim_lo_id | integer | Không | FK → dim_lo.lo_id — Lô thuộc về |
+| loai_trong | text | Có | "Trồng mới" hoặc "Trồng dặm" (default: "Trồng mới"). Trồng dặm bị loại khỏi forecast. |
 
 ## public.stage_logs
 **Ý nghĩa:** Log lưu quá trình sinh trưởng (cắt bắp, chích bắp).
@@ -313,9 +314,9 @@ Tài liệu này ghi lại chi tiết toàn bộ cấu trúc cơ sở dữ liệ
 **Ý nghĩa:** Bảng định nghĩa các vụ mùa (F0, F1...) của từng lô. Mỗi base_lot tạo ra 1 season F0 khi khởi tạo.
 
 **Ghi chú nghiệp vụ:**
-- `loai_trong` xác định loại trồng của đợt trồng gốc ("Trồng mới" hoặc "Trồng dặm"). Được set lúc tạo season F0.
-- Dashboard dùng `loai_trong` để filter: chỉ "Trồng mới" mới xuất hiện trong forecast & bảng chi tiết.
-- ⚠️ **Thiết kế hiện tại**: `loai_trong` về bản chất thuộc về `base_lots` (thuộc tính đợt trồng, không thay đổi giữa các vụ). Xem xét migrate sang `base_lots` trong tương lai.
+- `loai_trong` trên seasons được giữ lại cho backward compatibility, nhưng **canonical source** giờ là `base_lots.loai_trong`.
+- Dashboard đọc `loai_trong` từ `base_lots` trực tiếp (không join seasons nữa).
+- Khi tạo lô mới, `loai_trong` được set đồng thời trên cả `base_lots` và `seasons`.
 
 | Tên Trường (Field) | Kiểu Dữ Liệu (Type) | Bắt Buộc (Required) | Ý Nghĩa / Ghi Chú |
 |---|---|---|---|
