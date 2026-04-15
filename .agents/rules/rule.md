@@ -2,7 +2,17 @@
 trigger: always_on
 ---
 
-Tuyệt đối luôn đọc thư mục `skills/` trước khi bắt đầu thực hiện bất cứ tác vụ nào để đảm bảo tuân thủ đúng các quy trình và quy tắc phát triển (development standards) của dự án. Đặc biệt, phải đọc kĩ từng skill để xem xét và ứng dụng tối đa các skill phù hợp cho tác vụ đang làm, không được bỏ sót hay chỉ dùng một cấu hình duy nhất.
+Trước khi bắt đầu thực hiện bất cứ tác vụ nào, **bắt buộc** phải đọc hai nguồn sau:
+
+1. **Thư mục `skills/`**: Đọc kĩ từng skill để xem xét và ứng dụng tối đa các skill phù hợp cho tác vụ đang làm, không được bỏ sót hay chỉ dùng một cấu hình duy nhất. Đảm bảo tuân thủ đúng các quy trình và quy tắc phát triển (development standards) của dự án.
+
+2. **Thư mục `docs/`**: Đọc các file documentation hiện có để nắm bối cảnh, schema, và logic hiện tại trước khi thay đổi code hay database. Cụ thể:
+   - `schema.md`: Cấu trúc DB, ý nghĩa các trường, ghi chú nghiệp vụ.
+   - `codebase_summary.md`: Luồng dữ liệu, ý nghĩa các hàm, kiến trúc tổng quan.
+   - `findings.md`: Các phát hiện, lưu ý kỹ thuật, bài học kinh nghiệm đã ghi nhận.
+   - `changelog.md`: Lịch sử thay đổi gần đây để tránh xung đột hoặc lặp lại.
+   - `command.md`: Các yêu cầu đã thực hiện (tránh hiểu sai ngữ cảnh).
+   - `tech_stack.md`: Công nghệ đang dùng.
 
 Luôn phải đảm bảo duy trì và cập nhật các file markdown (md) sau đây trong thư mục `docs/`:
 - `changelog.md`: Lưu lại những thay đổi đã thực hiện.
