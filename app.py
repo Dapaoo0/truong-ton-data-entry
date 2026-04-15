@@ -1284,16 +1284,11 @@ def render_global_data_tab(c_farm):
     df_tree_inv_all = fetch_table_data("tree_inventory_logs", c_farm)
     df_seasons = fetch_table_data("seasons", c_farm)
 
-    # ─── Merge loai_trong từ seasons vào df_lots_all ───
+    # ─── Phân loại Trồng mới vs Trồng dặm ───
+    # loai_trong nằm trực tiếp trong base_lots (sau migration add_loai_trong_to_base_lots)
     # Trồng dặm KHÔNG phải đợt trồng độc lập → tách riêng khỏi forecast & bảng chi tiết
-    if not df_lots_all.empty and not df_seasons.empty and 'loai_trong' in df_seasons.columns and 'base_lot_id' in df_seasons.columns:
-        season_loai = df_seasons[df_seasons['vu'] == 'F0'].drop_duplicates(subset=['base_lot_id'])[['base_lot_id', 'loai_trong']]
-        df_lots_all = df_lots_all.merge(season_loai, left_on='id', right_on='base_lot_id', how='left', suffixes=('', '_s'))
-        df_lots_all['loai_trong'] = df_lots_all['loai_trong'].fillna('Trồng mới')
-        if 'base_lot_id_s' in df_lots_all.columns:
-            df_lots_all.drop(columns=['base_lot_id_s'], inplace=True)
-    elif not df_lots_all.empty:
-        df_lots_all['loai_trong'] = 'Trồng mới'
+    if not df_lots_all.empty and 'loai_trong' not in df_lots_all.columns:
+        df_lots_all['loai_trong'] = 'Trồng mới'  # fallback nếu cột chưa có
     
     df_lots_trong_moi = df_lots_all[df_lots_all['loai_trong'] == 'Trồng mới'] if not df_lots_all.empty else pd.DataFrame()
     df_lots_trong_dam = df_lots_all[df_lots_all['loai_trong'] == 'Trồng dặm'] if not df_lots_all.empty else pd.DataFrame()
@@ -2871,7 +2866,8 @@ def render_main_app():
                                 "dim_lo_id": dim_lo_id,
                                 "ngay_trong": ngay_trong.isoformat(), "so_luong": so_luong,
                                 "so_luong_con_lai": so_luong,
-                                "tuan": ngay_trong.isocalendar()[1]
+                                "tuan": ngay_trong.isocalendar()[1],
+                                "loai_trong": loai_trong
                             }
                             data_season = {
                                 "dim_lo_id": dim_lo_id, "vu": "F0",
