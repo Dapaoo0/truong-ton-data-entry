@@ -1284,6 +1284,20 @@ def render_global_data_tab(c_farm):
     df_tree_inv_all = fetch_table_data("tree_inventory_logs", c_farm)
     df_seasons = fetch_table_data("seasons", c_farm)
 
+    # ─── Merge loai_trong từ seasons vào df_lots_all ───
+    # Trồng dặm KHÔNG phải đợt trồng độc lập → tách riêng khỏi forecast & bảng chi tiết
+    if not df_lots_all.empty and not df_seasons.empty and 'loai_trong' in df_seasons.columns and 'base_lot_id' in df_seasons.columns:
+        season_loai = df_seasons[df_seasons['vu'] == 'F0'].drop_duplicates(subset=['base_lot_id'])[['base_lot_id', 'loai_trong']]
+        df_lots_all = df_lots_all.merge(season_loai, left_on='id', right_on='base_lot_id', how='left', suffixes=('', '_s'))
+        df_lots_all['loai_trong'] = df_lots_all['loai_trong'].fillna('Trồng mới')
+        if 'base_lot_id_s' in df_lots_all.columns:
+            df_lots_all.drop(columns=['base_lot_id_s'], inplace=True)
+    elif not df_lots_all.empty:
+        df_lots_all['loai_trong'] = 'Trồng mới'
+    
+    df_lots_trong_moi = df_lots_all[df_lots_all['loai_trong'] == 'Trồng mới'] if not df_lots_all.empty else pd.DataFrame()
+    df_lots_trong_dam = df_lots_all[df_lots_all['loai_trong'] == 'Trồng dặm'] if not df_lots_all.empty else pd.DataFrame()
+
     # Nút Xuất Báo cáo Excel 
     col_t1, col_t2, col_t3, col_t4 = st.columns([2, 1, 1, 1])
     with col_t2:
@@ -1480,6 +1494,9 @@ def render_global_data_tab(c_farm):
 
     df_dt_seasons = df_seasons.copy()
     if not df_dt_seasons.empty:
+        # Loại trồng dặm khỏi bảng chi tiết (trồng dặm hiện ở bảng riêng bên dưới)
+        if 'loai_trong' in df_dt_seasons.columns:
+            df_dt_seasons = df_dt_seasons[df_dt_seasons['loai_trong'] != 'Trồng dặm']
         if dt_farm != "Tất cả" and "farm" in df_dt_seasons.columns:
             df_dt_seasons = df_dt_seasons[df_dt_seasons["farm"] == dt_farm]
         if dt_vu != "Tất cả" and "vu" in df_dt_seasons.columns:
@@ -1492,10 +1509,10 @@ def render_global_data_tab(c_farm):
     if not df_dt_seasons.empty:
         detail_rows_by_vu = {}
         
-        # ─── Xây dựng label "đợt X" cho các lô có nhiều đợt trồng ───
+        # ─── Xây dựng label "đợt X" cho các lô có nhiều đợt trồng (chỉ trồng mới) ───
         batch_label_map = {}  # {base_lot_id: "Tên lô (đợt N)" hoặc "Tên lô"}
-        if not df_lots_all.empty and "id" in df_lots_all.columns and "lo" in df_lots_all.columns:
-            lot_groups = df_lots_all.groupby("lo")
+        if not df_lots_trong_moi.empty and "id" in df_lots_trong_moi.columns and "lo" in df_lots_trong_moi.columns:
+            lot_groups = df_lots_trong_moi.groupby("lo")
             for lo_name_grp, grp_df in lot_groups:
                 if len(grp_df) > 1:
                     # Nhiều đợt → sort theo ngày trồng, đánh số
@@ -1717,6 +1734,46 @@ def render_global_data_tab(c_farm):
                 st.info("Chưa có cấu hình Vụ/Lô nào để hiển thị bảng chi tiết.")
     else:
         st.info("Chưa có cấu hình Vụ/Lô nào để hiển thị bảng chi tiết.")
+    # ─── Bảng Lịch sử Trồng dặm ───
+    if not df_lots_trong_dam.empty:
+        import re as _re_dam
+        # Filter theo farm hiện tại (dt_farm) nếu có
+        df_dam_display = df_lots_trong_dam.copy()
+        if dt_farm != "Tất cả" and "farm" in df_dam_display.columns:
+            df_dam_display = df_dam_display[df_dam_display["farm"] == dt_farm]
+        
+        if not df_dam_display.empty:
+            with st.expander(f"📋 Lịch sử Trồng dặm ({len(df_dam_display)} đợt · {df_dam_display['so_luong'].sum():,} cây)", expanded=False):
+                # Sort tự nhiên theo lô, rồi theo ngày
+                def _nat_sort_dam(name):
+                    m = _re_dam.match(r"^(\d+)(.*)", str(name))
+                    return (int(m.group(1)), m.group(2)) if m else (9999, str(name))
+                
+                df_dam_tbl = df_dam_display[["lo", "farm", "ngay_trong", "so_luong"]].copy()
+                df_dam_tbl["ngay_trong"] = pd.to_datetime(df_dam_tbl["ngay_trong"]).dt.strftime("%d/%m/%Y")
+                df_dam_tbl["_sort"] = df_dam_tbl["lo"].apply(_nat_sort_dam)
+                df_dam_tbl = df_dam_tbl.sort_values(["_sort", "ngay_trong"]).drop(columns=["_sort"])
+                df_dam_tbl.columns = ["Lô", "Farm", "Ngày trồng dặm", "Số cây"]
+                
+                # Tổng dặm theo lô
+                summary_dam = df_dam_display.groupby("lo")["so_luong"].agg(["sum", "count"]).reset_index()
+                summary_dam.columns = ["Lô", "Tổng cây dặm", "Số đợt"]
+                
+                col_dam1, col_dam2 = st.columns([2, 1])
+                with col_dam1:
+                    st.caption("Chi tiết từng đợt trồng dặm")
+                    styled_dam = df_dam_tbl.style.set_properties(**{'text-align': 'center', 'font-size': '0.85rem'})
+                    styled_dam = styled_dam.set_table_styles([
+                        {"selector": "th", "props": [("text-align", "center"), ("font-size", "0.85rem")]},
+                    ]).hide(axis="index")
+                    st.markdown(f'<div style="overflow-x:auto;">{styled_dam.to_html(escape=False)}</div>', unsafe_allow_html=True)
+                with col_dam2:
+                    st.caption("Tổng hợp theo lô")
+                    styled_sum = summary_dam.style.set_properties(**{'text-align': 'center', 'font-size': '0.85rem'})
+                    styled_sum = styled_sum.set_table_styles([
+                        {"selector": "th", "props": [("text-align", "center"), ("font-size", "0.85rem")]},
+                    ]).hide(axis="index")
+                    st.markdown(f'<div style="overflow-x:auto;">{styled_sum.to_html(escape=False)}</div>', unsafe_allow_html=True)
 
     st.divider()
 
@@ -1724,7 +1781,7 @@ def render_global_data_tab(c_farm):
     st.markdown("#### 📅 Lịch Thu hoạch Dự kiến")
     st.caption(f"Hao hụt từ Trồng → Thu hoạch: **{LOSS_RATE_TO_THU*100:.0f}%/vụ** · Sản lượng: **F0 = {KG_PER_TREE_F0} kg/buồng**, **Fn = {KG_PER_TREE_FN} kg/buồng**")
 
-    if not df_lots_all.empty and "ngay_trong" in df_lots_all.columns and "lo" in df_lots_all.columns:
+    if not df_lots_trong_moi.empty and "ngay_trong" in df_lots_trong_moi.columns and "lo" in df_lots_trong_moi.columns:
         from datetime import timedelta
         from scipy.stats import norm as scipy_norm
         import numpy as np
@@ -1804,7 +1861,7 @@ def render_global_data_tab(c_farm):
         
         # ─── Tạo daily harvest data ───
         daily_rows = []
-        for _, lot_row in df_lots_all.iterrows():
+        for _, lot_row in df_lots_trong_moi.iterrows():
             ngay_trong_raw = lot_row.get("ngay_trong")
             lo_name = lot_row.get("lo", "")
             so_luong = int(lot_row.get("so_luong", 0)) if pd.notna(lot_row.get("so_luong")) else 0
