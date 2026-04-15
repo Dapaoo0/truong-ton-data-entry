@@ -2,6 +2,19 @@
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
 
+## [15/04/2026] - Custom Harvest Phase Percentages & Chích Bắp Data
+
+#### Feature: Tùy chỉnh tỷ lệ Thu bói / Thu rộ / Thu vét (`app.py`)
+- **[Custom Ratios]**: Người xem có thể tùy chỉnh tỷ lệ phân phối thu hoạch (mặc định 10/80/10%). Thay đổi realtime, validation tổng = 100%.
+- **[Rescale Logic]**: Giữ nguyên cửa sổ 55 ngày (14/26/14 ngày) cố định theo chu kỳ sinh trưởng. Chỉ rescale trọng số PDF Normal Distribution cho mỗi phase khớp tỷ lệ % mong muốn.
+- **[Stage Logs Insert]**: Insert 7 records chích bắp đợt mới (3A đợt #6, 3B đợt #7, 8B đợt #15) vào `stage_logs` từ dữ liệu `fact_nhat_ky_san_xuat` đã validate.
+
+## [15/04/2026] - ETL Bug Fix & Chích Bắp Analysis
+
+#### Data Investigation (Supabase MCP)
+- **[ETL Bug — Chích Bắp `lo_id = NULL`]**: Phát hiện 575/576 records "Chích Bắp" Farm 157 bị mất `lo_id`. Root cause: ETL ưu tiên cột "Lô 2" (tên nhóm đội) thay vì cột "Lô" (lô thực). Đã viết bug report chi tiết cho workspace ETL → **đã fix** (87% coverage, 87 records NULL = GSheet trống).
+- **[Cross-mapping Chích Bắp × Base Lots]**: Phân tích timeline so sánh expected window chích bắp (5-7 tháng sau trồng) với dữ liệu thực tế. Kết luận: dữ liệu chích hiện tại (09/2025 - 03/2026) thuộc vụ cũ, chưa thuộc đợt trồng mới. Các lô không có `base_lot` = lô cũ, không ảnh hưởng dự báo.
+
 ## [Version 26.1 - RBAC Kinh doanh Role] - 2026-04-14
 
 #### Security & RBAC (`app.py`, Supabase)

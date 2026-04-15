@@ -1732,10 +1732,32 @@ def render_global_data_tab(c_farm):
         
         LOSS_RATE = LOSS_RATE_TO_THU  # Sử dụng constant trung tâm
         FORECAST_GENERATIONS = 4  # F0, F1, F2, F3
-        # Khoảng thời gian (ngày)
+        # Khoảng thời gian (ngày) — CỐ ĐỊNH theo chu kỳ sinh trưởng
         DAYS_RO_HALF  = 13  # ±13 ngày quanh mốc = 26 ngày thu rộ
         DAYS_BOI_VET  = 14  # 14 ngày cho thu bói / thu vét
         WINDOW_HALF   = DAYS_RO_HALF + DAYS_BOI_VET  # 27 ngày mỗi bên
+        
+        # ─── Tùy chỉnh tỷ lệ phân phối thu hoạch ───
+        with st.expander("⚙️ Tùy chỉnh tỷ lệ phân phối thu hoạch", expanded=False):
+            st.caption("Mặc định: Thu bói 10% · Thu rộ 80% · Thu vét 10%. Thay đổi tỷ lệ để xem kịch bản khác. Tổng phải = 100%.")
+            col_boi, col_ro, col_vet = st.columns(3)
+            with col_boi:
+                pct_boi = st.number_input("Thu bói (%)", min_value=0, max_value=100, 
+                                           value=10, step=1, key="pct_thu_boi")
+            with col_ro:
+                pct_ro = st.number_input("Thu rộ (%)", min_value=0, max_value=100, 
+                                          value=80, step=1, key="pct_thu_ro")
+            with col_vet:
+                pct_vet = st.number_input("Thu vét (%)", min_value=0, max_value=100, 
+                                           value=10, step=1, key="pct_thu_vet")
+            
+            total_pct = pct_boi + pct_ro + pct_vet
+            if total_pct != 100:
+                st.warning(f"⚠️ Tổng tỷ lệ = {total_pct}%, cần = 100%. Đang dùng mặc định 10/80/10.")
+                pct_boi, pct_ro, pct_vet = 10, 80, 10
+            else:
+                if pct_boi != 10 or pct_ro != 80 or pct_vet != 10:
+                    st.info(f"📊 Tỷ lệ tùy chỉnh: Thu bói {pct_boi}% · Thu rộ {pct_ro}% · Thu vét {pct_vet}%")
         
         # σ tính từ: P(|X| ≤ 13) = 0.80 → Φ(13/σ) = 0.90 → σ = 13/1.2816 ≈ 10.14
         SIGMA = 13.0 / scipy_norm.ppf(0.90)  # ≈ 10.14 ngày
@@ -1755,6 +1777,33 @@ def render_global_data_tab(c_farm):
                 return "Thu vét"
         
         day_phases = [_classify_phase(d) for d in day_offsets]
+        
+        # ─── Rescale PDF weights theo tỷ lệ custom ───
+        # Giữ nguyên shape Normal Distribution trong mỗi phase,
+        # nhưng scale tổng trọng số mỗi phase khớp với % user nhập.
+        phase_arr = np.array(day_phases)
+        mask_boi = phase_arr == "Thu bói"
+        mask_ro  = phase_arr == "Thu rộ"
+        mask_vet = phase_arr == "Thu vét"
+        
+        raw_sum_boi = pdf_weights[mask_boi].sum()
+        raw_sum_ro  = pdf_weights[mask_ro].sum()
+        raw_sum_vet = pdf_weights[mask_vet].sum()
+        
+        target_boi = pct_boi / 100.0
+        target_ro  = pct_ro / 100.0
+        target_vet = pct_vet / 100.0
+        
+        # Scale mỗi phase: giữ shape tương đối bên trong, thay tổng
+        if raw_sum_boi > 0:
+            pdf_weights[mask_boi] *= (target_boi / raw_sum_boi)
+        if raw_sum_ro > 0:
+            pdf_weights[mask_ro]  *= (target_ro / raw_sum_ro)
+        if raw_sum_vet > 0:
+            pdf_weights[mask_vet] *= (target_vet / raw_sum_vet)
+        
+        # Đảm bảo tổng = 1.0 (phòng floating point)
+        pdf_weights /= pdf_weights.sum()
         
         # ─── Tạo daily harvest data ───
         daily_rows = []

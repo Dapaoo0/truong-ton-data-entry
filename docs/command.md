@@ -2,6 +2,19 @@
 
 Tài liệu này lưu lại tóm tắt các yêu cầu của người dùng để theo dõi tiến độ và nhiệm vụ.
 
+## Ngày 15/04/2026
+
+- Kiểm tra cấu trúc dữ liệu chích bắp (báo cáo chi phí hàng ngày) trong `fact_nhat_ky_san_xuat` Farm 157 — phát hiện 575/576 records `lo_id = NULL`.
+- Viết prompt chi tiết mô tả ETL bug (lo_id NULL cho Chích Bắp) để đưa vào workspace ETL.
+- Sau khi ETL fix: Kiểm tra cấu trúc dữ liệu, cross-mapping chích bắp từ nhật ký hàng ngày với `base_lots` (đợt trồng mới).
+- Phân tích tính hợp lý theo timeline: so sánh expected window chích bắp (5-7 tháng sau trồng) với dữ liệu thực tế từng lô, suy luận xem data thuộc đợt trồng nào. Kết luận: data hiện tại thuộc vụ cũ.
+- Ghi chú: Các lô không được khởi tạo trong app Input Dự báo = lô cũ, không cần quan tâm cho dự báo.
+- Tìm kiếm ngày ghi chép dữ liệu mới nhất về hạng mục "chích bắp" của Farm 157 trong `fact_nhat_ky_san_xuat`. Kết quả là ngày 13/03/2026.
+- Kiểm tra lại chích bắp Farm 157 sau cập nhật ETL T4/2026: Data mới nhất đến 09/04, 3 lô mới (3A, 3B, 8B) đã có data in-window hợp lý. ETL fix thành công (100% coverage T3-T4). Phát hiện 10 base_lots đang trong window.
+- Tạo báo cáo chi tiết tập trung Farm 157: cross-mapping 25 đợt trồng, tiến trình theo tuần, phân loại lô cũ/mới, khuyến nghị theo dõi.
+- Insert dữ liệu chích bắp từ `fact_nhat_ky_san_xuat` vào `stage_logs` cho 3 lô đợt mới: 3A (đợt #6), 3B (đợt #7), 8B (đợt #15). Tổng hợp theo tuần, `mau_day` = NULL. 7 records (ID 36-42).
+- Thêm tính năng tùy chỉnh tỷ lệ % Thu bói / Thu rộ / Thu vét (mặc định 10/80/10). Giữ nguyên cửa sổ 55 ngày cố định, rescale PDF weights theo tỷ lệ custom. Nằm trong `st.expander` để không chiếm diện tích.
+
 ## Ngày 14/04/2026
 
 - Tối ưu hóa hệ thống dự báo: Sửa lỗi phân bổ dữ liệu harvest bị mất khi vụ F0 kéo dài; đảm bảo dữ liệu "Cây đã trồng" cố định cho tất cả các vụ.
