@@ -7,6 +7,7 @@ Trước khi bắt đầu thực hiện bất cứ tác vụ nào, **bắt buộ
 1. **Thư mục `skills/`**: Đọc kĩ từng skill để xem xét và ứng dụng tối đa các skill phù hợp cho tác vụ đang làm, không được bỏ sót hay chỉ dùng một cấu hình duy nhất. Đảm bảo tuân thủ đúng các quy trình và quy tắc phát triển (development standards) của dự án.
 
 2. **Thư mục `docs/`**: Đọc các file documentation hiện có để nắm bối cảnh, schema, và logic hiện tại trước khi thay đổi code hay database. Cụ thể:
+   - `business_logic.md`: **Quy tắc nghiệp vụ** — hao hụt, forecast, phân loại trồng, RBAC. ĐỌC ĐẦU TIÊN.
    - `schema.md`: Cấu trúc DB, ý nghĩa các trường, ghi chú nghiệp vụ.
    - `codebase_summary.md`: Luồng dữ liệu, ý nghĩa các hàm, kiến trúc tổng quan.
    - `findings.md`: Các phát hiện, lưu ý kỹ thuật, bài học kinh nghiệm đã ghi nhận.
@@ -15,6 +16,7 @@ Trước khi bắt đầu thực hiện bất cứ tác vụ nào, **bắt buộ
    - `tech_stack.md`: Công nghệ đang dùng.
 
 Luôn phải đảm bảo duy trì và cập nhật các file markdown (md) sau đây trong thư mục `docs/`:
+- `business_logic.md`: Tổng hợp tất cả quy tắc nghiệp vụ (hao hụt, forecast, phân loại trồng, RBAC, ETL).
 - `changelog.md`: Lưu lại những thay đổi đã thực hiện.
 - `tech_stack.md`: Lưu danh sách những công cụ, framework và công nghệ đang dùng (VD: Streamlit, Node.js, v.v.).
 - `findings.md`: Ghi chép lại những khám phá, lưu ý, và bài học kinh nghiệm phát hiện được trong quá trình làm việc.
