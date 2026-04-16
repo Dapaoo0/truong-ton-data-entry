@@ -2495,12 +2495,6 @@ def render_global_data_tab(c_farm):
     # 1. Trồng mới / Trồng dặm
     if not ml_lots_df.empty and "ngay_trong" in ml_lots_df.columns:
         ml_lots_merged = ml_lots_df
-        if not df_seasons.empty and 'loai_trong' in df_seasons.columns:
-            seasons_dedup = df_seasons.drop_duplicates(subset=['farm', 'lo'])[['farm', 'lo', 'loai_trong']]
-            ml_lots_merged = pd.merge(ml_lots_df, seasons_dedup, on=['farm', 'lo'], how='left')
-        else:
-            ml_lots_merged = ml_lots_df.copy()
-            ml_lots_merged['loai_trong'] = None
         
         cols_to_keep = ["ngay_trong", "so_luong", "loai_trong"]
         if "lot_id" in ml_lots_merged.columns: cols_to_keep.append("lot_id")
