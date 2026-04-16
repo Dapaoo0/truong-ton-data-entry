@@ -2386,11 +2386,7 @@ def render_global_data_tab(c_farm):
 
     # Gom dữ liệu để vẽ grouped/stacked bar chart
     if not pipe_lots_df.empty:
-        # Merge lots with seasons to get loai_trong
         pipe_lots_merged = pipe_lots_df
-        if not df_seasons.empty and 'loai_trong' in df_seasons.columns:
-            seasons_dedup = df_seasons.drop_duplicates(subset=['farm', 'lo'])[['farm', 'lo', 'loai_trong']]
-            pipe_lots_merged = pd.merge(pipe_lots_df, seasons_dedup, on=['farm', 'lo'], how='left')
 
         lots = pipe_lots_merged["lo"].unique()
         pipeline_data = []
@@ -2401,12 +2397,10 @@ def render_global_data_tab(c_farm):
             l_lots = pipe_lots_merged[pipe_lots_merged["lo"] == l]
             sl_trong_moi = l_lots[l_lots["loai_trong"] == "Trồng mới"]["so_luong"].sum()
             sl_trong_dam = l_lots[l_lots["loai_trong"] == "Trồng dặm"]["so_luong"].sum()
-            # If no season match, default to 'Trồng mới'
-            sl_trong_khac = l_lots[l_lots["loai_trong"].isna()]["so_luong"].sum()
             dt = l_lots["dien_tich"].max()
             if pd.isna(dt): dt = 0
             
-            pipeline_data.append({"Lô": l, "Giai đoạn": "1a. Trồng mới", "Số lượng": sl_trong_moi + sl_trong_khac, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
+            pipeline_data.append({"Lô": l, "Giai đoạn": "1a. Trồng mới", "Số lượng": sl_trong_moi, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
             pipeline_data.append({"Lô": l, "Giai đoạn": "1b. Trồng dặm", "Số lượng": sl_trong_dam, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
             
             # 2. Chích bắp
