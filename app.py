@@ -1926,6 +1926,7 @@ def render_global_data_tab(c_farm):
         
         # ─── Tạo daily harvest data (3 mốc) ───
         daily_rows = []
+        lot_gen_midpoints = {}  # {(base_lot_id, gen_index): midpoint_date}
         for _, lot_row in df_lots_trong_moi.iterrows():
             ngay_trong_raw = lot_row.get("ngay_trong")
             lo_name = lot_row.get("lo", "")
@@ -1969,22 +1970,13 @@ def render_global_data_tab(c_farm):
                                   key=lambda g: abs((all_midpoints[g] - ngay).days))
                 cat_bap_by_gen[closest_gen] = cat_bap_by_gen.get(closest_gen, 0) + qty
             
-            # ── Match harvest records vào generation gần nhất ──
-            harvest_by_gen = {}  # {gen_index: total_qty}
-            for blid, ngay, qty in harvest_records:
-                if blid != base_lot_id:
-                    continue
-                closest_gen = min(range(len(all_midpoints)),
-                                  key=lambda g: abs((all_midpoints[g] - ngay).days))
-                harvest_by_gen[closest_gen] = harvest_by_gen.get(closest_gen, 0) + qty
-            
             harvest_midpoint = ngay_trong + timedelta(days=F0_DAYS_TO_THU)
             for gen in range(FORECAST_GENERATIONS):
                 vu_label = f"F{gen}"
+                lot_gen_midpoints[(base_lot_id, gen)] = harvest_midpoint
                 
-                # ── Mốc ②③ cho ĐÚNG generation này ──
+                # ── Mốc ② cho ĐÚNG generation này ──
                 so_cat_bap_gen = cat_bap_by_gen.get(gen, None)  # None = chưa cắt bắp cho vụ này
-                so_thu_thuc_te_gen = harvest_by_gen.get(gen, None)  # None = chưa thu hoạch cho vụ này
                 
                 # Window boundaries
                 win_start = harvest_midpoint - timedelta(days=WINDOW_HALF)
@@ -2024,7 +2016,7 @@ def render_global_data_tab(c_farm):
                         "so_xuat_huy": total_des,
                         "daily_qty": daily_qty,
                         "daily_qty_cat": daily_qty_cat,
-                        "so_thu_thuc_te_lot": so_thu_thuc_te_gen,
+
                         "window_label": wlabel,
                     })
                 
@@ -2083,20 +2075,42 @@ def render_global_data_tab(c_farm):
             # so_thu_cat_bap: keep as float/int or None
             df_harvest["so_thu_cat_bap"] = df_harvest["so_thu_cat_bap"].apply(
                 lambda x: int(x) if pd.notna(x) else None)
-            # so_thu_thuc_te: merge from daily distinct (base_lot_id, vu) → per row
-            # ⚠️ Thực tế thu hoạch là tổng cả vụ (per lot/gen), KHÔNG phải per-day.
-            # Chỉ gán cho rows "Thu rộ" (tháng chính) để tránh nhân bản số liệu sang Thu bói/Thu vét.
-            actual_lot = df_daily.drop_duplicates(subset=["base_lot_id", "vu"]).rename(
-                columns={"so_thu_thuc_te_lot": "so_thu_thuc_te"})[["base_lot_id", "vu", "so_thu_thuc_te"]]
-            actual_lot["so_thu_thuc_te"] = actual_lot["so_thu_thuc_te"].apply(
-                lambda x: int(x) if pd.notna(x) else None)
-            # Merge chỉ cho rows Thu rộ
-            df_harvest["so_thu_thuc_te"] = None
-            mask_ro = df_harvest["loai_thu"] == "Thu rộ"
-            if mask_ro.any():
-                df_ro_merged = df_harvest.loc[mask_ro, ["base_lot_id", "vu"]].merge(
-                    actual_lot, on=["base_lot_id", "vu"], how="left")
-                df_harvest.loc[mask_ro, "so_thu_thuc_te"] = df_ro_merged["so_thu_thuc_te"].values
+            # ── Mốc ③: Thu hoạch thực tế — match từng record theo (gen, phase, tháng) ──
+            # harvest_logs có từng ngày riêng lẻ, cần xác định mỗi record
+            # thuộc generation nào + phase nào (Thu bói/rộ/vét) + tháng nào.
+            actual_harvest_rows = []
+            for blid, ngay, qty in harvest_records:
+                # Tìm tất cả midpoints của lot này
+                lot_mps = [(g, mp) for (lid, g), mp in lot_gen_midpoints.items() if lid == blid]
+                if not lot_mps:
+                    continue
+                # Match vào generation gần nhất
+                closest_gen, closest_mp = min(lot_mps, key=lambda x: abs((x[1] - ngay).days))
+                # Xác định phase dựa trên khoảng cách đến midpoint
+                days_from_mp = (ngay - closest_mp).days
+                if days_from_mp < -(DAYS_RO_HALF):
+                    phase = "Thu bói"
+                elif days_from_mp <= DAYS_RO_HALF:
+                    phase = "Thu rộ"
+                else:
+                    phase = "Thu vét"
+                actual_harvest_rows.append({
+                    "base_lot_id": blid,
+                    "vu": f"F{closest_gen}",
+                    "loai_thu": phase,
+                    "thang": ngay.strftime("%m/%Y"),
+                    "so_thu_thuc_te": qty
+                })
+            if actual_harvest_rows:
+                df_actual = pd.DataFrame(actual_harvest_rows)
+                df_actual = df_actual.groupby(
+                    ["base_lot_id", "vu", "loai_thu", "thang"], as_index=False
+                ).agg(so_thu_thuc_te=("so_thu_thuc_te", "sum"))
+                df_actual["so_thu_thuc_te"] = df_actual["so_thu_thuc_te"].astype(int)
+                df_harvest = df_harvest.merge(
+                    df_actual, on=["base_lot_id", "vu", "loai_thu", "thang"], how="left")
+            else:
+                df_harvest["so_thu_thuc_te"] = None
             df_harvest.rename(columns={"thang": "thang_thu_hoach"}, inplace=True)
             
             # ─── Bộ lọc: Farm + Năm + Tháng ───
