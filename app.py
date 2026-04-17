@@ -1975,8 +1975,8 @@ def render_global_data_tab(c_farm):
                     actual_date = harvest_midpoint + timedelta(days=int(offset))
                     daily_qty = so_thu_after_loss * weight
                     
-                    # Mốc ②: phân bổ cắt bắp theo weight (nếu có data CHO VỤ NÀY)
-                    daily_qty_cat = (so_cat_bap_gen * weight) if so_cat_bap_gen is not None else None
+                    # Mốc ②: cắt bắp × (1 - 5% hao hụt cắt→thu) × weight (nếu có data CHO VỤ NÀY)
+                    daily_qty_cat = (so_cat_bap_gen * (1 - LOSS_RATE_TO_CHICH) * weight) if so_cat_bap_gen is not None else None
                     
                     # Window label cho phase này
                     if phase == "Thu bói":
@@ -2014,7 +2014,7 @@ def render_global_data_tab(c_farm):
             }
             df_harvest = df_daily.groupby(
                 ["farm", "lo", "base_lot_id", "vu", "loai_thu", "thang", "year", 
-                 "so_luong_trong", "so_xuat_huy", "so_thu_thuc_te_lot", "window_label"],
+                 "so_luong_trong", "so_xuat_huy", "window_label"],
                 as_index=False
             ).agg(**agg_dict)
             
@@ -2058,9 +2058,12 @@ def render_global_data_tab(c_farm):
             # so_thu_cat_bap: keep as float/int or None
             df_harvest["so_thu_cat_bap"] = df_harvest["so_thu_cat_bap"].apply(
                 lambda x: int(x) if pd.notna(x) else None)
-            # so_thu_thuc_te_lot: already per-lot (not daily), lấy first value
-            df_harvest["so_thu_thuc_te"] = df_harvest["so_thu_thuc_te_lot"].apply(
+            # so_thu_thuc_te: merge from daily distinct (base_lot_id, vu) → per row
+            actual_lot = df_daily.drop_duplicates(subset=["base_lot_id", "vu"]).rename(
+                columns={"so_thu_thuc_te_lot": "so_thu_thuc_te"})[["base_lot_id", "vu", "so_thu_thuc_te"]]
+            actual_lot["so_thu_thuc_te"] = actual_lot["so_thu_thuc_te"].apply(
                 lambda x: int(x) if pd.notna(x) else None)
+            df_harvest = df_harvest.merge(actual_lot, on=["base_lot_id", "vu"], how="left")
             df_harvest.rename(columns={"thang": "thang_thu_hoach"}, inplace=True)
             
             # ─── Bộ lọc: Farm + Năm + Tháng ───
