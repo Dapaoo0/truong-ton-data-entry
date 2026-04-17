@@ -2084,11 +2084,19 @@ def render_global_data_tab(c_farm):
             df_harvest["so_thu_cat_bap"] = df_harvest["so_thu_cat_bap"].apply(
                 lambda x: int(x) if pd.notna(x) else None)
             # so_thu_thuc_te: merge from daily distinct (base_lot_id, vu) → per row
+            # ⚠️ Thực tế thu hoạch là tổng cả vụ (per lot/gen), KHÔNG phải per-day.
+            # Chỉ gán cho rows "Thu rộ" (tháng chính) để tránh nhân bản số liệu sang Thu bói/Thu vét.
             actual_lot = df_daily.drop_duplicates(subset=["base_lot_id", "vu"]).rename(
                 columns={"so_thu_thuc_te_lot": "so_thu_thuc_te"})[["base_lot_id", "vu", "so_thu_thuc_te"]]
             actual_lot["so_thu_thuc_te"] = actual_lot["so_thu_thuc_te"].apply(
                 lambda x: int(x) if pd.notna(x) else None)
-            df_harvest = df_harvest.merge(actual_lot, on=["base_lot_id", "vu"], how="left")
+            # Merge chỉ cho rows Thu rộ
+            df_harvest["so_thu_thuc_te"] = None
+            mask_ro = df_harvest["loai_thu"] == "Thu rộ"
+            if mask_ro.any():
+                df_ro_merged = df_harvest.loc[mask_ro, ["base_lot_id", "vu"]].merge(
+                    actual_lot, on=["base_lot_id", "vu"], how="left")
+                df_harvest.loc[mask_ro, "so_thu_thuc_te"] = df_ro_merged["so_thu_thuc_te"].values
             df_harvest.rename(columns={"thang": "thang_thu_hoach"}, inplace=True)
             
             # ─── Bộ lọc: Farm + Năm + Tháng ───
