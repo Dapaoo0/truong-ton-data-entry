@@ -1712,7 +1712,12 @@ def render_global_data_tab(c_farm):
                         df_detail.columns = pd.MultiIndex.from_tuples(df_detail.columns)
                     
                     # Tính tổng các cột trước khi format chuỗi
-                    total_dien_tich = df_detail[("Thông tin", "Diện tích (ha)")].astype(float).sum()
+                    # ⚠️ Diện tích: sum unique theo lô vật lý (không đếm trùng nếu lô có nhiều đợt trồng)
+                    _area_col = df_detail[("Thông tin", "Diện tích (ha)")].astype(float)
+                    _lot_col = df_detail[("Thông tin", "Tên lô")].astype(str)
+                    _base_lot_names = _lot_col.str.replace(r"\s*\(đợt\s*\d+\)$", "", regex=True)
+                    _unique_area = pd.DataFrame({"base_lot": _base_lot_names, "area": _area_col}).drop_duplicates("base_lot")
+                    total_dien_tich = _unique_area["area"].sum()
                     total_row = {
                         ("Thông tin", "Thời gian vụ"): "",
                         ("Thông tin", "Tên lô"): "<b>TỔNG</b>",
