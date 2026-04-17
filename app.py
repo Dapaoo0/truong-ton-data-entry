@@ -1877,25 +1877,27 @@ def render_global_data_tab(c_farm):
                 if pd.notna(dlid):
                     lot_trees_by_lo[dlid] = lot_trees_by_lo.get(dlid, 0) + qty
         
-        # Cắt bắp: group by base_lot_id → tổng số cây đã cắt
-        cat_bap_by_base_lot = {}
+        # Cắt bắp: giữ raw records (base_lot_id, ngày, qty) để match theo generation
+        cat_bap_records = []  # [(base_lot_id, ngay, so_luong), ...]
         if not df_stg_all.empty:
             df_cat = df_stg_all[df_stg_all["giai_doan"] == "Cắt bắp"]
             if not df_cat.empty:
                 for _, s_row in df_cat.iterrows():
                     blid = s_row.get("base_lot_id")
+                    ngay = pd.to_datetime(s_row.get("ngay_thuc_hien"), errors="coerce")
                     qty = int(s_row.get("so_luong", 0)) if pd.notna(s_row.get("so_luong")) else 0
-                    if pd.notna(blid):
-                        cat_bap_by_base_lot[blid] = cat_bap_by_base_lot.get(blid, 0) + qty
+                    if pd.notna(blid) and pd.notna(ngay):
+                        cat_bap_records.append((blid, ngay, qty))
         
-        # Thu hoạch thực tế: group by base_lot_id → tổng buồng đã thu
-        harvest_by_base_lot = {}
+        # Thu hoạch thực tế: giữ raw records để match theo generation
+        harvest_records = []  # [(base_lot_id, ngay, so_luong), ...]
         if not df_har_all.empty:
             for _, h_row in df_har_all.iterrows():
                 blid = h_row.get("base_lot_id")
+                ngay = pd.to_datetime(h_row.get("ngay_thu_hoach"), errors="coerce")
                 qty = int(h_row.get("so_luong", 0)) if pd.notna(h_row.get("so_luong")) else 0
-                if pd.notna(blid):
-                    harvest_by_base_lot[blid] = harvest_by_base_lot.get(blid, 0) + qty
+                if pd.notna(blid) and pd.notna(ngay):
+                    harvest_records.append((blid, ngay, qty))
         
         # ─── Tạo daily harvest data (3 mốc) ───
         daily_rows = []
@@ -1926,15 +1928,38 @@ def render_global_data_tab(c_farm):
             so_luong_sau_huy = max(so_luong - total_des, 0)
             so_thu_after_loss = so_luong_sau_huy * (1 - LOSS_RATE)  # Trừ hao hụt ước tính
             
-            # ── Mốc ②: Dự báo từ Cắt bắp ──
-            so_cat_bap = cat_bap_by_base_lot.get(base_lot_id, None)  # None = chưa có
+            # ── Pre-compute midpoints cho tất cả generations ──
+            all_midpoints = []
+            mp = ngay_trong + timedelta(days=F0_DAYS_TO_THU)
+            for g in range(FORECAST_GENERATIONS):
+                all_midpoints.append(mp)
+                mp = mp + timedelta(days=FN_CYCLE_DAYS)
             
-            # ── Mốc ③: Thực tế Thu hoạch ──
-            so_thu_thuc_te = harvest_by_base_lot.get(base_lot_id, None)  # None = chưa có
+            # ── Match cắt bắp records vào generation gần nhất (closest midpoint) ──
+            cat_bap_by_gen = {}  # {gen_index: total_qty}
+            for blid, ngay, qty in cat_bap_records:
+                if blid != base_lot_id:
+                    continue
+                closest_gen = min(range(len(all_midpoints)),
+                                  key=lambda g: abs((all_midpoints[g] - ngay).days))
+                cat_bap_by_gen[closest_gen] = cat_bap_by_gen.get(closest_gen, 0) + qty
+            
+            # ── Match harvest records vào generation gần nhất ──
+            harvest_by_gen = {}  # {gen_index: total_qty}
+            for blid, ngay, qty in harvest_records:
+                if blid != base_lot_id:
+                    continue
+                closest_gen = min(range(len(all_midpoints)),
+                                  key=lambda g: abs((all_midpoints[g] - ngay).days))
+                harvest_by_gen[closest_gen] = harvest_by_gen.get(closest_gen, 0) + qty
             
             harvest_midpoint = ngay_trong + timedelta(days=F0_DAYS_TO_THU)
             for gen in range(FORECAST_GENERATIONS):
                 vu_label = f"F{gen}"
+                
+                # ── Mốc ②③ cho ĐÚNG generation này ──
+                so_cat_bap_gen = cat_bap_by_gen.get(gen, None)  # None = chưa cắt bắp cho vụ này
+                so_thu_thuc_te_gen = harvest_by_gen.get(gen, None)  # None = chưa thu hoạch cho vụ này
                 
                 # Window boundaries
                 win_start = harvest_midpoint - timedelta(days=WINDOW_HALF)
@@ -1950,8 +1975,8 @@ def render_global_data_tab(c_farm):
                     actual_date = harvest_midpoint + timedelta(days=int(offset))
                     daily_qty = so_thu_after_loss * weight
                     
-                    # Mốc ②: phân bổ cắt bắp theo weight (nếu có data)
-                    daily_qty_cat = (so_cat_bap * weight) if so_cat_bap is not None else None
+                    # Mốc ②: phân bổ cắt bắp theo weight (nếu có data CHO VỤ NÀY)
+                    daily_qty_cat = (so_cat_bap_gen * weight) if so_cat_bap_gen is not None else None
                     
                     # Window label cho phase này
                     if phase == "Thu bói":
@@ -1974,7 +1999,7 @@ def render_global_data_tab(c_farm):
                         "so_xuat_huy": total_des,
                         "daily_qty": daily_qty,
                         "daily_qty_cat": daily_qty_cat,
-                        "so_thu_thuc_te_lot": so_thu_thuc_te,
+                        "so_thu_thuc_te_lot": so_thu_thuc_te_gen,
                         "window_label": wlabel,
                     })
                 
