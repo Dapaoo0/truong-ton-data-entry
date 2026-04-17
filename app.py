@@ -1854,7 +1854,50 @@ def render_global_data_tab(c_farm):
         # Đảm bảo tổng = 1.0 (phòng floating point)
         pdf_weights /= pdf_weights.sum()
         
-        # ─── Tạo daily harvest data ───
+        # ─── Pre-compute: xuất hủy & cắt bắp & thu hoạch per (base_lot_id) ───
+        # Destruction: group by base_lot_id (trừ trực tiếp) và dim_lo_id (phân bổ tỉ lệ)
+        des_by_base_lot = {}  # {base_lot_id: total_destroyed}
+        des_by_lo_only = {}   # {dim_lo_id: total_destroyed} — chỉ records thiếu base_lot_id
+        if not df_des_all.empty:
+            for _, d_row in df_des_all.iterrows():
+                blid = d_row.get("base_lot_id")
+                dlid = d_row.get("dim_lo_id")
+                qty = int(d_row.get("so_luong", 0)) if pd.notna(d_row.get("so_luong")) else 0
+                if pd.notna(blid):
+                    des_by_base_lot[blid] = des_by_base_lot.get(blid, 0) + qty
+                elif pd.notna(dlid):
+                    des_by_lo_only[dlid] = des_by_lo_only.get(dlid, 0) + qty
+        
+        # Pre-compute tổng cây trồng mới theo dim_lo_id (cho phân bổ tỉ lệ)
+        lot_trees_by_lo = {}  # {dim_lo_id: total_trees_trong_moi}
+        if not df_lots_trong_moi.empty:
+            for _, lr in df_lots_trong_moi.iterrows():
+                dlid = lr.get("dim_lo_id")
+                qty = int(lr.get("so_luong", 0)) if pd.notna(lr.get("so_luong")) else 0
+                if pd.notna(dlid):
+                    lot_trees_by_lo[dlid] = lot_trees_by_lo.get(dlid, 0) + qty
+        
+        # Cắt bắp: group by base_lot_id → tổng số cây đã cắt
+        cat_bap_by_base_lot = {}
+        if not df_stg_all.empty:
+            df_cat = df_stg_all[df_stg_all["giai_doan"] == "Cắt bắp"]
+            if not df_cat.empty:
+                for _, s_row in df_cat.iterrows():
+                    blid = s_row.get("base_lot_id")
+                    qty = int(s_row.get("so_luong", 0)) if pd.notna(s_row.get("so_luong")) else 0
+                    if pd.notna(blid):
+                        cat_bap_by_base_lot[blid] = cat_bap_by_base_lot.get(blid, 0) + qty
+        
+        # Thu hoạch thực tế: group by base_lot_id → tổng buồng đã thu
+        harvest_by_base_lot = {}
+        if not df_har_all.empty:
+            for _, h_row in df_har_all.iterrows():
+                blid = h_row.get("base_lot_id")
+                qty = int(h_row.get("so_luong", 0)) if pd.notna(h_row.get("so_luong")) else 0
+                if pd.notna(blid):
+                    harvest_by_base_lot[blid] = harvest_by_base_lot.get(blid, 0) + qty
+        
+        # ─── Tạo daily harvest data (3 mốc) ───
         daily_rows = []
         for _, lot_row in df_lots_trong_moi.iterrows():
             ngay_trong_raw = lot_row.get("ngay_trong")
@@ -1862,12 +1905,32 @@ def render_global_data_tab(c_farm):
             so_luong = int(lot_row.get("so_luong", 0)) if pd.notna(lot_row.get("so_luong")) else 0
             farm_name = lot_row.get("farm", "")
             base_lot_id = lot_row.get("id")
+            dim_lo_id = lot_row.get("dim_lo_id")
             
             if pd.isna(ngay_trong_raw) or so_luong == 0:
                 continue
             
             ngay_trong = pd.to_datetime(ngay_trong_raw)
-            so_thu_after_loss = so_luong * (1 - LOSS_RATE)  # Reset mỗi vụ, không kép
+            
+            # ── Mốc ①: Dự báo từ Trồng (trừ xuất hủy thực tế) ──
+            # Xuất hủy trực tiếp (có base_lot_id)
+            direct_des = des_by_base_lot.get(base_lot_id, 0)
+            # Xuất hủy phân bổ tỉ lệ (chỉ dim_lo_id, không có base_lot_id)
+            proportional_des = 0
+            if pd.notna(dim_lo_id) and dim_lo_id in des_by_lo_only:
+                total_lo_trees = lot_trees_by_lo.get(dim_lo_id, so_luong)
+                if total_lo_trees > 0:
+                    lot_ratio = so_luong / total_lo_trees
+                    proportional_des = int(round(des_by_lo_only[dim_lo_id] * lot_ratio))
+            total_des = direct_des + proportional_des
+            so_luong_sau_huy = max(so_luong - total_des, 0)
+            so_thu_after_loss = so_luong_sau_huy * (1 - LOSS_RATE)  # Trừ hao hụt ước tính
+            
+            # ── Mốc ②: Dự báo từ Cắt bắp ──
+            so_cat_bap = cat_bap_by_base_lot.get(base_lot_id, None)  # None = chưa có
+            
+            # ── Mốc ③: Thực tế Thu hoạch ──
+            so_thu_thuc_te = harvest_by_base_lot.get(base_lot_id, None)  # None = chưa có
             
             harvest_midpoint = ngay_trong + timedelta(days=F0_DAYS_TO_THU)
             for gen in range(FORECAST_GENERATIONS):
@@ -1887,6 +1950,9 @@ def render_global_data_tab(c_farm):
                     actual_date = harvest_midpoint + timedelta(days=int(offset))
                     daily_qty = so_thu_after_loss * weight
                     
+                    # Mốc ②: phân bổ cắt bắp theo weight (nếu có data)
+                    daily_qty_cat = (so_cat_bap * weight) if so_cat_bap is not None else None
+                    
                     # Window label cho phase này
                     if phase == "Thu bói":
                         wlabel = f"{thu_boi_start.strftime('%d/%m')} – {thu_boi_end.strftime('%d/%m/%Y')}"
@@ -1905,7 +1971,10 @@ def render_global_data_tab(c_farm):
                         "thang": actual_date.strftime("%m/%Y"),
                         "year": actual_date.year,
                         "so_luong_trong": so_luong,
+                        "so_xuat_huy": total_des,
                         "daily_qty": daily_qty,
+                        "daily_qty_cat": daily_qty_cat,
+                        "so_thu_thuc_te_lot": so_thu_thuc_te,
                         "window_label": wlabel,
                     })
                 
@@ -1914,15 +1983,28 @@ def render_global_data_tab(c_farm):
         if daily_rows:
             df_daily = pd.DataFrame(daily_rows)
             
-            # Gom theo tháng + lô + vụ + loại thu (từ daily → monthly)
+            # Gom theo tháng + lô + vụ + loại thu (từ daily → monthly) — 3 mốc
+            agg_dict = {
+                "so_thu_hoach_dk": ("daily_qty", "sum"),
+            }
             df_harvest = df_daily.groupby(
                 ["farm", "lo", "base_lot_id", "vu", "loai_thu", "thang", "year", 
-                 "so_luong_trong", "window_label"],
+                 "so_luong_trong", "so_xuat_huy", "so_thu_thuc_te_lot", "window_label"],
                 as_index=False
-            ).agg(so_thu_hoach_dk=("daily_qty", "sum"))
+            ).agg(**agg_dict)
+            
+            # Mốc ②: Cắt bắp (sum daily_qty_cat nếu có)
+            if "daily_qty_cat" in df_daily.columns:
+                cat_agg = df_daily.groupby(
+                    ["base_lot_id", "vu", "loai_thu", "thang"],
+                    as_index=False
+                ).agg(so_thu_cat_bap=("daily_qty_cat", lambda x: x.sum() if x.notna().all() else None))
+                df_harvest = df_harvest.merge(cat_agg, on=["base_lot_id", "vu", "loai_thu", "thang"], how="left")
+            else:
+                df_harvest["so_thu_cat_bap"] = None
             
             # Largest Remainder Method: làm tròn mà đảm bảo tổng mỗi (lô, vụ) chính xác
-            # Dùng loop thay vì groupby().apply() để tránh pandas index issues
+            # Áp dụng cho Mốc ① (so_thu_hoach_dk)
             for (lo_k, bid_k, vu_k), grp_idx in df_harvest.groupby(["lo", "base_lot_id", "vu"]).groups.items():
                 vals = df_harvest.loc[grp_idx, "so_thu_hoach_dk"].values.astype(float)
                 target_total = int(round(vals.sum()))
@@ -1933,8 +2015,27 @@ def render_global_data_tab(c_farm):
                     top_idx = np.argsort(-remainders)[:deficit]
                     floors[top_idx] += 1
                 df_harvest.loc[grp_idx, "so_thu_hoach_dk"] = floors
+                
+                # Áp dụng cho Mốc ② (so_thu_cat_bap) nếu có data
+                cat_vals = df_harvest.loc[grp_idx, "so_thu_cat_bap"]
+                if cat_vals.notna().all():
+                    cv = cat_vals.values.astype(float)
+                    ct_total = int(round(cv.sum()))
+                    ct_floors = np.floor(cv).astype(int)
+                    ct_rem = cv - ct_floors
+                    ct_deficit = ct_total - ct_floors.sum()
+                    if ct_deficit > 0:
+                        ct_top = np.argsort(-ct_rem)[:ct_deficit]
+                        ct_floors[ct_top] += 1
+                    df_harvest.loc[grp_idx, "so_thu_cat_bap"] = ct_floors
             
             df_harvest["so_thu_hoach_dk"] = df_harvest["so_thu_hoach_dk"].astype(int)
+            # so_thu_cat_bap: keep as float/int or None
+            df_harvest["so_thu_cat_bap"] = df_harvest["so_thu_cat_bap"].apply(
+                lambda x: int(x) if pd.notna(x) else None)
+            # so_thu_thuc_te_lot: already per-lot (not daily), lấy first value
+            df_harvest["so_thu_thuc_te"] = df_harvest["so_thu_thuc_te_lot"].apply(
+                lambda x: int(x) if pd.notna(x) else None)
             df_harvest.rename(columns={"thang": "thang_thu_hoach"}, inplace=True)
             
             # ─── Bộ lọc: Farm + Năm + Tháng ───
@@ -1995,15 +2096,35 @@ def render_global_data_tab(c_farm):
                     df_month["_sort"] = df_month["lo"].apply(_nat_key_pop)
                     df_month = df_month.sort_values(["_sort", "vu", "loai_thu"]).drop(columns=["_sort"])
                     
-                    # Header
+                    # Header — Mốc ①
                     total_buong = df_month["so_thu_hoach_dk"].sum()
-                    # Tính kg theo từng dòng (mỗi dòng có vụ riêng → kg/buồng khác nhau)
                     df_month["_kg"] = df_month.apply(lambda r: r["so_thu_hoach_dk"] * get_kg_per_tree(r["vu"]), axis=1)
                     total_kg = df_month["_kg"].sum()
                     so_thung = int(total_kg // KG_PER_BOX)
                     so_container = so_thung / BOXES_PER_CONTAINER
-                    st.markdown(f"### Tháng {month_key} — {total_buong:,} buồng ≈ {total_kg:,.0f} kg")
-                    st.markdown(f"📦 **Ước tính: ~{so_thung:,} thùng** (13 kg/thùng) · 🚛 **~{so_container:,.1f} container** (1320 thùng/cont)")
+                    st.markdown(f"### Tháng {month_key}")
+                    
+                    # 3 mốc summary
+                    col_m1, col_m2, col_m3 = st.columns(3)
+                    with col_m1:
+                        st.metric("① Từ Trồng", f"{total_buong:,} buồng", f"≈ {total_kg:,.0f} kg")
+                    with col_m2:
+                        cat_total = df_month["so_thu_cat_bap"].sum() if df_month["so_thu_cat_bap"].notna().any() else None
+                        if cat_total is not None:
+                            cat_kg = df_month.apply(lambda r: r["so_thu_cat_bap"] * get_kg_per_tree(r["vu"]) if pd.notna(r.get("so_thu_cat_bap")) else 0, axis=1).sum()
+                            st.metric("② Từ Cắt bắp", f"{int(cat_total):,} buồng", f"≈ {cat_kg:,.0f} kg")
+                        else:
+                            st.metric("② Từ Cắt bắp", "Chưa có TT", "")
+                    with col_m3:
+                        # Thực tế: distinct per (base_lot_id, vu)
+                        tt_df = df_month.drop_duplicates(subset=["base_lot_id", "vu"])
+                        tt_total = tt_df["so_thu_thuc_te"].sum() if tt_df["so_thu_thuc_te"].notna().any() else None
+                        if tt_total is not None:
+                            st.metric("③ Thực tế", f"{int(tt_total):,} buồng", "")
+                        else:
+                            st.metric("③ Thực tế", "Chưa có TT", "")
+                    
+                    st.markdown(f"📦 **~{so_thung:,} thùng** (13 kg/thùng) · 🚛 **~{so_container:,.1f} container** (1320 thùng/cont)")
                     
                     # Tổng hợp theo loại thu
                     summary_by_type = df_month.groupby("loai_thu")["so_thu_hoach_dk"].sum()
@@ -2014,9 +2135,11 @@ def render_global_data_tab(c_farm):
                     st.markdown(" · ".join(type_parts))
                     st.markdown("---")
                     
-                    # Bảng chi tiết
-                    df_pop = df_month[["lo", "vu", "loai_thu", "so_thu_hoach_dk", "window_label"]].copy()
-                    df_pop.columns = ["Lô", "Vụ", "Loại thu", "Số buồng", "Khoảng thời gian"]
+                    # Bảng chi tiết — 3 mốc
+                    df_pop = df_month[["lo", "vu", "loai_thu", "so_thu_hoach_dk", "so_thu_cat_bap", "so_thu_thuc_te", "window_label"]].copy()
+                    df_pop["so_thu_cat_bap"] = df_pop["so_thu_cat_bap"].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "—")
+                    df_pop["so_thu_thuc_te"] = df_pop["so_thu_thuc_te"].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "—")
+                    df_pop.columns = ["Lô", "Vụ", "Loại thu", "① Từ Trồng", "② Cắt bắp", "③ Thực tế", "Khoảng TG"]
                     
                     styled_pop = df_pop.style.set_properties(**{'text-align': 'center', 'font-size': '0.85rem'})
                     styled_pop = styled_pop.set_table_styles([
@@ -2039,7 +2162,7 @@ def render_global_data_tab(c_farm):
                     box-shadow: 0 2px 8px rgba(0,0,0,0.08);
                     cursor: pointer;
                     transition: transform 0.15s, box-shadow 0.15s;
-                    min-height: 110px;
+                    min-height: 180px;
                 }
                 .st-key-harvest-cards button:hover {
                     transform: translateY(-2px);
@@ -2054,6 +2177,7 @@ def render_global_data_tab(c_farm):
                 .st-key-harvest-cards button p {
                     color: #1b4332 !important;
                     margin: 0;
+                    font-size: 0.85rem;
                 }
                 </style>
                 """, unsafe_allow_html=True)
@@ -2061,11 +2185,28 @@ def render_global_data_tab(c_farm):
                 # ─── Metric cards (buttons) trong container scoped ───
                 # Tính kg theo từng dòng trước khi gộp (vì mỗi vụ có kg/buồng khác nhau)
                 df_hv["_kg_est"] = df_hv.apply(lambda r: r["so_thu_hoach_dk"] * get_kg_per_tree(r["vu"]), axis=1)
+                df_hv["_kg_cat"] = df_hv.apply(
+                    lambda r: r["so_thu_cat_bap"] * get_kg_per_tree(r["vu"]) if pd.notna(r.get("so_thu_cat_bap")) else None, axis=1)
                 monthly_summary = df_hv.groupby("thang_thu_hoach").agg(
                     tong_cay=("so_thu_hoach_dk", "sum"),
                     kg_est=("_kg_est", "sum"),
                     so_lo=("lo", "nunique")
                 ).reset_index()
+                
+                # Mốc ②: tổng cắt bắp theo tháng (None nếu chưa có data nào)
+                cat_month = df_hv.groupby("thang_thu_hoach").agg(
+                    tong_cat=("so_thu_cat_bap", lambda x: int(x.sum()) if x.notna().any() else None),
+                    kg_cat=("_kg_cat", lambda x: x.sum() if x.notna().any() else None)
+                ).reset_index()
+                monthly_summary = monthly_summary.merge(cat_month, on="thang_thu_hoach", how="left")
+                
+                # Mốc ③: tổng thực tế theo tháng — dùng unique lot-level values
+                # so_thu_thuc_te là per-lot, cần distinct trước khi sum
+                actual_by_month = df_hv.drop_duplicates(subset=["base_lot_id", "vu", "thang_thu_hoach"]).groupby("thang_thu_hoach").agg(
+                    tong_thuc_te=("so_thu_thuc_te", lambda x: int(x.sum()) if x.notna().any() else None)
+                ).reset_index()
+                monthly_summary = monthly_summary.merge(actual_by_month, on="thang_thu_hoach", how="left")
+                
                 monthly_summary = monthly_summary.sort_values("thang_thu_hoach",
                     key=lambda x: pd.to_datetime(x, format="%m/%Y"))
                 
@@ -2082,7 +2223,27 @@ def render_global_data_tab(c_farm):
                                 with col:
                                     so_thung_card = int(kg_est // KG_PER_BOX)
                                     so_cont_card = so_thung_card / BOXES_PER_CONTAINER
-                                    btn_label = f"📅 Tháng {month_key}\n\n**{m['tong_cay']:,} buồng**\n\n≈ {kg_est:,.0f} kg · ~{so_thung_card:,} thùng\n\n🚛 ~{so_cont_card:,.1f} cont · {m['so_lo']} lô"
+                                    
+                                    # Mốc ① — Từ Trồng
+                                    line1 = f"① Trồng: **{m['tong_cay']:,}** buồng ≈ {kg_est:,.0f} kg"
+                                    
+                                    # Mốc ② — Từ Cắt bắp
+                                    tong_cat = m.get("tong_cat")
+                                    if pd.notna(tong_cat) and tong_cat is not None:
+                                        kg_cat_val = m.get("kg_cat", 0) or 0
+                                        line2 = f"② Cắt bắp: **{int(tong_cat):,}** buồng ≈ {kg_cat_val:,.0f} kg"
+                                    else:
+                                        line2 = "② Cắt bắp: _Chưa có TT_"
+                                    
+                                    # Mốc ③ — Thực tế
+                                    tong_tt = m.get("tong_thuc_te")
+                                    if pd.notna(tong_tt) and tong_tt is not None:
+                                        kg_tt = int(tong_tt) * KG_PER_TREE_F0  # approx
+                                        line3 = f"③ Thực tế: **{int(tong_tt):,}** buồng ≈ {kg_tt:,} kg"
+                                    else:
+                                        line3 = "③ Thực tế: _Chưa có TT_"
+                                    
+                                    btn_label = f"📅 Tháng {month_key}\n\n{line1}\n\n{line2}\n\n{line3}\n\n🚛 ~{so_cont_card:,.1f} cont · {m['so_lo']} lô"
                                     if st.button(btn_label, key=f"hv_card_{month_key}",
                                                use_container_width=True):
                                         _show_harvest_detail(month_key, df_hv)
@@ -2094,11 +2255,15 @@ def render_global_data_tab(c_farm):
                         return (int(m.group(1)), m.group(2)) if m else (9999, str(name))
                     
                     df_display = df_hv[["lo", "vu", "loai_thu", "thang_thu_hoach",
-                                        "so_luong_trong", "so_thu_hoach_dk", "window_label"]].copy()
+                                        "so_luong_trong", "so_xuat_huy", "so_thu_hoach_dk", 
+                                        "so_thu_cat_bap", "so_thu_thuc_te", "window_label"]].copy()
+                    df_display["so_thu_cat_bap"] = df_display["so_thu_cat_bap"].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "—")
+                    df_display["so_thu_thuc_te"] = df_display["so_thu_thuc_te"].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "—")
                     df_display["_sort"] = df_display["lo"].apply(lambda x: _nat_key(x))
                     df_display = df_display.sort_values(["_sort", "vu", "loai_thu"]).drop(columns=["_sort"])
-                    df_display.columns = ["Lô", "Vụ", "Loại thu", "Tháng thu hoạch",
-                                         "Cây trồng", "Thu hoạch DK (buồng)", "Khoảng TG"]
+                    df_display.columns = ["Lô", "Vụ", "Loại thu", "Tháng TH",
+                                         "Trồng", "Xuất hủy", "① Từ Trồng", 
+                                         "② Cắt bắp", "③ Thực tế", "Khoảng TG"]
                     
                     styled = df_display.style.set_properties(**{'text-align': 'center'})
                     styled = styled.set_table_styles([
