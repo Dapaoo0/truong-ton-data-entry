@@ -1711,6 +1711,31 @@ def render_global_data_tab(c_farm):
                     if not isinstance(df_detail.columns, pd.MultiIndex):
                         df_detail.columns = pd.MultiIndex.from_tuples(df_detail.columns)
                     
+                    # Tính tổng các cột trước khi format chuỗi
+                    total_dien_tich = df_detail[("Thông tin", "Diện tích (ha)")].astype(float).sum()
+                    total_row = {
+                        ("Thông tin", "Thời gian vụ"): "",
+                        ("Thông tin", "Tên lô"): "<b>TỔNG</b>",
+                        ("Thông tin", "Diện tích (ha)"): f"<b>{total_dien_tich:.2f}</b>",
+                        ("Thông tin", "Cây đã trồng"): f"<b>{df_detail[('Thông tin', 'Cây đã trồng')].sum():,}</b>",
+                        ("Chích bắp", "Dự toán"): f"<b>{df_detail[('Chích bắp', 'Dự toán')].sum():,}</b>",
+                        ("Chích bắp", "Thực tế"): f"<b>{df_detail[('Chích bắp', 'Thực tế')].sum():,}</b>",
+                        ("Cắt bắp", "Dự toán"): f"<b>{df_detail[('Cắt bắp', 'Dự toán')].sum():,}</b>",
+                        ("Cắt bắp", "Thực tế"): f"<b>{df_detail[('Cắt bắp', 'Thực tế')].sum():,}</b>",
+                        ("Thu hoạch", "Dự toán"): f"<b>{df_detail[('Thu hoạch', 'Dự toán')].sum():,}</b>",
+                        ("Thu hoạch", "Thực tế"): f"<b>{df_detail[('Thu hoạch', 'Thực tế')].sum():,}</b>",
+                        ("Tổng khối lượng (kg)", "Dự toán"): f"<b>{df_detail[('Tổng khối lượng (kg)', 'Dự toán')].sum():,}</b>",
+                        ("Tổng khối lượng (kg)", "Thực tế"): f"<b>{df_detail[('Tổng khối lượng (kg)', 'Thực tế')].sum():,}</b>"
+                    }
+                    
+                    # Format số nguyên có dấu phẩy cho các dòng dữ liệu
+                    for c in df_detail.columns:
+                        if df_detail[c].dtype.kind in 'iuf' and c[1] != "Diện tích (ha)":
+                            df_detail[c] = df_detail[c].apply(lambda x: f"{int(x):,}")
+                            
+                    # Thêm dòng tổng vào DataFrame
+                    df_detail = pd.concat([df_detail, pd.DataFrame([total_row])], ignore_index=True)
+                    
                     # Căn giữa MultiIndex Header và các ô
                     styled_df = df_detail.style.set_properties(**{'text-align': 'center'})
                     styled_df = styled_df.set_table_styles([
