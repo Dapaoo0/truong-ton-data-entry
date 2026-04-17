@@ -2,6 +2,12 @@
 
 Tài liệu này lưu lại tóm tắt các yêu cầu của người dùng để theo dõi tiến độ và nhiệm vụ.
 
+## Ngày 17/04/2026
+
+- Nâng cấp thẻ Lịch Thu hoạch Dự kiến: Thêm 3 mốc dự báo (① Từ Trồng − xuất hủy, ② Từ Cắt bắp, ③ Thực tế). Card UI, dialog, bảng tổng hợp đều hiển thị 3 mốc. Fallback "Chưa có TT" khi thiếu data.
+- Implement logic phân bổ xuất hủy theo tỉ lệ (proportional allocation): trừ trực tiếp nếu có `base_lot_id`, phân bổ `hủy × (batch/tổng_lô)` nếu chỉ có `dim_lo_id`.
+- Cập nhật `business_logic.md` §3.3 + §3.4, `changelog.md`, `command.md`.
+
 ## Ngày 15/04/2026
 
 - Kiểm tra cấu trúc dữ liệu chích bắp (báo cáo chi phí hàng ngày) trong `fact_nhat_ky_san_xuat` Farm 157 — phát hiện 575/576 records `lo_id = NULL`.

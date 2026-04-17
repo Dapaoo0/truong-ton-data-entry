@@ -67,6 +67,29 @@ Cửa sổ thu hoạch cố định **55 ngày**, chia 3 phase:
 - Helper: `get_kg_per_tree(vu)` trả về 15 hoặc 18.
 - Hằng số đóng gói: `KG_PER_BOX = 13` kg/thùng, `BOXES_PER_CONTAINER = 1,320` thùng/container.
 
+### 3.3 Ba Mốc Dự báo (3-Milestone Forecast)
+Mỗi thẻ tháng thu hoạch hiển thị **3 mốc** để so sánh chênh lệch:
+
+| Mốc | Ký hiệu | Nguồn dữ liệu | Công thức |
+|-----|---------|---------------|-----------|
+| Từ Trồng | ① | `base_lots.so_luong` − xuất hủy | `(trồng − hủy) × (1 − LOSS_RATE)` |
+| Từ Cắt bắp | ② | `stage_logs` (Cắt bắp) | `so_luong` cắt bắp trực tiếp |
+| Thực tế | ③ | `harvest_logs` | `so_luong` thu hoạch thực tế |
+
+- Nếu mốc ②③ chưa có dữ liệu → hiển thị "Chưa có TT".
+- Dialog chi tiết: `st.metric` 3 cột + bảng 7 cột (Lô, Vụ, Loại thu, ①, ②, ③, Khoảng TG).
+
+### 3.4 Phân bổ Xuất hủy theo Tỉ lệ
+Khi `destruction_logs` có `base_lot_id` → trừ trực tiếp cho đợt trồng đó.
+
+Khi chỉ có `dim_lo_id` (nhiều đợt trồng chung 1 lô, thiếu `base_lot_id`):
+```
+total_lot_trees = SUM(base_lots.so_luong) WHERE dim_lo_id = same lot
+lot_ratio = this_batch.so_luong / total_lot_trees
+destruction_share = lot_level_destruction × lot_ratio
+```
+Ví dụ: Lô 1000 cây, 3 đợt (300/600/100), hủy 100 → mỗi đợt giảm 10% → 270/540/90.
+
 ---
 
 ## 4. Auto Batch Mapping

@@ -2,6 +2,21 @@
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
 
+## [17/04/2026] - 3-Milestone Harvest Forecast
+
+#### Feature: Ba Mốc Dự báo trên Thẻ Thu hoạch (`app.py`)
+- **[Mốc ① Từ Trồng]**: Dự báo từ `base_lots.so_luong` − xuất hủy thực tế × (1 − hao hụt 10%). Trừ destruction trực tiếp hoặc phân bổ tỉ lệ (proportional allocation).
+- **[Mốc ② Từ Cắt bắp]**: Dự báo từ `stage_logs` (Cắt bắp). Hiển thị "Chưa có TT" nếu chưa có data.
+- **[Mốc ③ Thực tế]**: Số buồng thực tế từ `harvest_logs`. Hiển thị "Chưa có TT" nếu chưa chốt.
+- **[Card UI]**: Mỗi thẻ tháng hiển thị 3 hàng (①②③), min-height 180px.
+- **[Dialog]**: `st.metric` 3 cột + bảng 7 cột (Lô, Vụ, Loại thu, ①, ②, ③, Khoảng TG).
+- **[Bảng tổng hợp]**: 10 cột bao gồm Trồng, Xuất hủy, ① ② ③.
+
+#### Logic: Phân bổ Xuất hủy theo Tỉ lệ (`app.py`)
+- **[Direct]**: `destruction_logs` có `base_lot_id` → trừ trực tiếp.
+- **[Proportional]**: Chỉ có `dim_lo_id` (lô nhiều đợt) → phân bổ: `hủy × (batch/tổng_lô)`.
+- **[Docs]**: Cập nhật `business_logic.md` §3.3 + §3.4.
+
 ## [15/04/2026] - Custom Harvest Phase Percentages & Chích Bắp Data
 
 #### Feature: Tùy chỉnh tỷ lệ Thu bói / Thu rộ / Thu vét (`app.py`)
