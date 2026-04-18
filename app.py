@@ -1814,10 +1814,10 @@ def render_global_data_tab(c_farm):
         
         LOSS_RATE = LOSS_RATE_TO_THU  # Sử dụng constant trung tâm
         FORECAST_GENERATIONS = 4  # F0, F1, F2, F3
-        # Khoảng thời gian (ngày) — CỐ ĐỊNH theo chu kỳ sinh trưởng
-        DAYS_RO_HALF  = 13  # ±13 ngày quanh mốc = 26 ngày thu rộ
-        DAYS_BOI_VET  = 14  # 14 ngày cho thu bói / thu vét
-        WINDOW_HALF   = DAYS_RO_HALF + DAYS_BOI_VET  # 27 ngày mỗi bên
+        # Mặc định khoảng thời gian (ngày) — có thể tùy chỉnh bởi user
+        DEFAULT_DAYS_BOI = 14   # 14 ngày thu bói
+        DEFAULT_DAYS_RO  = 26   # 26 ngày thu rộ
+        DEFAULT_DAYS_VET = 14   # 14 ngày thu vét
         
         # ─── Tùy chỉnh tỷ lệ phân phối thu hoạch ───
         with st.expander("⚙️ Tùy chỉnh tỷ lệ phân phối thu hoạch", expanded=False):
@@ -1837,12 +1837,35 @@ def render_global_data_tab(c_farm):
             if total_pct != 100:
                 st.warning(f"⚠️ Tổng tỷ lệ = {total_pct}%, cần = 100%. Đang dùng mặc định 10/80/10.")
                 pct_boi, pct_ro, pct_vet = 10, 80, 10
+
+            st.divider()
+            st.caption(f"Mặc định: Thu bói {DEFAULT_DAYS_BOI} ngày · Thu rộ {DEFAULT_DAYS_RO} ngày · Thu vét {DEFAULT_DAYS_VET} ngày (tổng {DEFAULT_DAYS_BOI + DEFAULT_DAYS_RO + DEFAULT_DAYS_VET} ngày). Thay đổi để điều chỉnh cửa sổ thu hoạch.")
+            col_d_boi, col_d_ro, col_d_vet = st.columns(3)
+            with col_d_boi:
+                days_boi = st.number_input("Thu bói (ngày)", min_value=1, max_value=60, 
+                                            value=DEFAULT_DAYS_BOI, step=1, key="days_thu_boi")
+            with col_d_ro:
+                days_ro = st.number_input("Thu rộ (ngày)", min_value=1, max_value=120, 
+                                           value=DEFAULT_DAYS_RO, step=1, key="days_thu_ro")
+            with col_d_vet:
+                days_vet = st.number_input("Thu vét (ngày)", min_value=1, max_value=60, 
+                                            value=DEFAULT_DAYS_VET, step=1, key="days_thu_vet")
+            
+            total_days = days_boi + days_ro + days_vet
+            st.caption(f"📐 Tổng cửa sổ: **{total_days} ngày** (Thu bói {days_boi} + Thu rộ {days_ro} + Thu vét {days_vet})")
         
-        # σ tính từ: P(|X| ≤ 13) = 0.80 → Φ(13/σ) = 0.90 → σ = 13/1.2816 ≈ 10.14
-        SIGMA = 13.0 / scipy_norm.ppf(0.90)  # ≈ 10.14 ngày
+        # Tính lại DAYS_RO_HALF, WINDOW_HALF từ input user
+        DAYS_RO_HALF  = days_ro // 2   # Nửa cửa sổ thu rộ (VD: 26 → 13)
+        DAYS_BOI_VET  = max(days_boi, days_vet)  # Lấy max để window cân đối
+        WINDOW_HALF   = DAYS_RO_HALF + days_boi  # Tổng nửa window = nửa rộ + bói
+        # Đảm bảo window đủ chứa cả vét: nếu vét > bói thì mở rộng phía sau
+        WINDOW_HALF_RIGHT = DAYS_RO_HALF + days_vet
         
-        # Tính trọng số PDF cho 55 ngày (day -27 → +27)
-        day_offsets = np.arange(-WINDOW_HALF, WINDOW_HALF + 1)  # [-27..+27] = 55 ngày
+        # σ tính từ: P(|X| ≤ DAYS_RO_HALF) = 0.80 → σ = DAYS_RO_HALF / Φ⁻¹(0.90)
+        SIGMA = DAYS_RO_HALF / scipy_norm.ppf(0.90) if DAYS_RO_HALF > 0 else 10.14
+        
+        # Tính trọng số PDF cho cửa sổ thu hoạch (bất đối xứng nếu bói ≠ vét)
+        day_offsets = np.arange(-WINDOW_HALF, WINDOW_HALF_RIGHT + 1)  # [-bói-rộ/2 .. +vét+rộ/2]
         pdf_weights = scipy_norm.pdf(day_offsets, loc=0, scale=SIGMA)
         pdf_weights /= pdf_weights.sum()  # Normalize tổng = 1.0
         
@@ -1983,14 +2006,14 @@ def render_global_data_tab(c_farm):
                 # ── Mốc ② cho ĐÚNG generation này ──
                 so_cat_bap_gen = cat_bap_by_gen.get(gen, None)  # None = chưa cắt bắp cho vụ này
                 
-                # Window boundaries
+                # Window boundaries (hỗ trợ bất đối xứng: bói ≠ vét)
                 win_start = harvest_midpoint - timedelta(days=WINDOW_HALF)
                 thu_boi_start = win_start
                 thu_boi_end   = harvest_midpoint - timedelta(days=DAYS_RO_HALF + 1)
                 thu_ro_start  = harvest_midpoint - timedelta(days=DAYS_RO_HALF)
                 thu_ro_end    = harvest_midpoint + timedelta(days=DAYS_RO_HALF)
                 thu_vet_start = harvest_midpoint + timedelta(days=DAYS_RO_HALF + 1)
-                thu_vet_end   = harvest_midpoint + timedelta(days=WINDOW_HALF)
+                thu_vet_end   = harvest_midpoint + timedelta(days=WINDOW_HALF_RIGHT)
                 
                 # Tạo row cho mỗi ngày
                 for idx, (offset, weight, phase) in enumerate(zip(day_offsets, pdf_weights, day_phases)):

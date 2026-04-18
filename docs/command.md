@@ -2,6 +2,12 @@
 
 Tài liệu này lưu lại tóm tắt các yêu cầu của người dùng để theo dõi tiến độ và nhiệm vụ.
 
+## Ngày 18/04/2026
+
+- Cập nhật diện tích D6 = 2.50 ha trong DB.
+- Thêm tính năng tùy chỉnh số ngày thu hoạch (Thu bói/Thu rộ/Thu vét) bên cạnh tỷ lệ % hiện có. Mặc định 14/26/14 ngày. Hỗ trợ bất đối xứng. SIGMA tính động.
+- Cập nhật `business_logic.md` §3.1, `changelog.md`, `command.md`.
+
 ## Ngày 17/04/2026
 
 - Nâng cấp thẻ Lịch Thu hoạch Dự kiến: Thêm 3 mốc dự báo (① Từ Trồng − xuất hủy, ② Từ Cắt bắp, ③ Thực tế). Card UI, dialog, bảng tổng hợp đều hiển thị 3 mốc. Fallback "Chưa có TT" khi thiếu data.

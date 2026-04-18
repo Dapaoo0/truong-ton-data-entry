@@ -2,6 +2,15 @@
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
 
+## [18/04/2026] - Customizable Harvest Window Days
+
+#### Feature: Tùy chỉnh số ngày thu hoạch (`app.py`)
+- **[UI]**: Thêm 3 `number_input` (Thu bói ngày, Thu rộ ngày, Thu vét ngày) trong expander "Tùy chỉnh tỷ lệ phân phối thu hoạch".
+- **[Logic]**: `DAYS_RO_HALF`, `WINDOW_HALF`, `WINDOW_HALF_RIGHT`, `SIGMA` tính động từ input user thay vì hardcode.
+- **[Asymmetric]**: Hỗ trợ window bất đối xứng (Thu bói ≠ Thu vét), `day_offsets` tạo từ `[-WINDOW_HALF .. +WINDOW_HALF_RIGHT]`.
+- **[Mặc định]**: 14/26/14 ngày (tổng 54 ngày), giữ nguyên hiển thị như cũ nếu không chỉnh.
+- **[DB]**: Cập nhật `area_ha` cho D6 (2.50).
+
 ## [17/04/2026] - 3-Milestone Harvest Forecast
 
 #### Bugfix: Thu hoạch thực tế (Mốc ③) bị nhân bản qua các tháng (`app.py`)

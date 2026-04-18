@@ -46,16 +46,17 @@ Farm 126 lô D6: 4,900 cây trồng mới + 607 cây dặm (5 đợt nhỏ) → 
 ## 3. Dự báo thu hoạch (Harvest Forecast)
 
 ### 3.1 Mô hình Normal Distribution Truncated
-Cửa sổ thu hoạch cố định **55 ngày**, chia 3 phase:
+Cửa sổ thu hoạch mặc định **54 ngày**, chia 3 phase:
 
-| Phase | Thời gian | Tỷ lệ mặc định | Ý nghĩa |
+| Phase | Thời gian (mặc định) | Tỷ lệ mặc định | Ý nghĩa |
 |-------|-----------|----------------|---------|
 | Thu bói | 14 ngày đầu | 10% | Buồng chín sớm, quả nhỏ |
 | Thu rộ | 26 ngày giữa | 80% | Giai đoạn thu hoạch chính |
 | Thu vét | 14 ngày cuối | 10% | Buồng chín muộn, quả nhỏ |
 
 - **Tỷ lệ % có thể tùy chỉnh** bởi người dùng (mặc định 10/80/10, validation tổng = 100%).
-- Kỹ thuật: Rescale PDF weights cho mỗi phase khớp % mong muốn, giữ nguyên timeline 14/26/14 ngày cố định.
+- **Số ngày mỗi phase có thể tùy chỉnh** bởi người dùng (mặc định 14/26/14). Hỗ trợ bất đối xứng (Thu bói ≠ Thu vét).
+- Kỹ thuật: Rescale PDF weights cho mỗi phase khớp % mong muốn. SIGMA tự động tính lại theo `DAYS_RO_HALF / Φ⁻¹(0.90)`.
 - Mỗi phase được gán vào **tháng chứa midpoint** của khoảng thời gian.
 
 ### 3.2 Sản lượng dự toán
