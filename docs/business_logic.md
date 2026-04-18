@@ -68,17 +68,20 @@ Cửa sổ thu hoạch mặc định **54 ngày**, chia 3 phase:
 - Helper: `get_kg_per_tree(vu)` trả về 15 hoặc 18.
 - Hằng số đóng gói: `KG_PER_BOX = 13` kg/thùng, `BOXES_PER_CONTAINER = 1,320` thùng/container.
 
-### 3.3 Ba Mốc Dự báo (3-Milestone Forecast)
-Mỗi thẻ tháng thu hoạch hiển thị **3 mốc** để so sánh chênh lệch:
+### 3.3 Bốn Mốc Dự báo (4-Milestone Forecast)
+Mỗi thẻ tháng thu hoạch hiển thị **4 mốc** để so sánh chênh lệch:
 
 | Mốc | Ký hiệu | Nguồn dữ liệu | Công thức |
 |-----|---------|---------------|-----------|
 | Từ Trồng | ① | `base_lots.so_luong` − xuất hủy | `(trồng − hủy) × (1 − LOSS_RATE)` |
-| Từ Cắt bắp | ② | `stage_logs` (Cắt bắp) | `so_luong` cắt bắp trực tiếp |
-| Thực tế | ③ | `harvest_logs` | `so_luong` thu hoạch thực tế |
+| Từ Chích bắp | ② | `stage_logs` (Chích bắp) | `chích_bắp × (1 − LOSS_RATE_TO_CHICH)` |
+| Từ Cắt bắp | ③ | `stage_logs` (Cắt bắp) | `cắt_bắp × (1 − LOSS_RATE_TO_CHICH)` |
+| Thực tế | ④ | `harvest_logs` | `so_luong` thu hoạch thực tế |
 
-- Nếu mốc ②③ chưa có dữ liệu → hiển thị "Chưa có TT".
-- Dialog chi tiết: `st.metric` 3 cột + bảng 7 cột (Lô, Vụ, Loại thu, ①, ②, ③, Khoảng TG).
+- Nếu mốc ②③④ chưa có dữ liệu → hiển thị "Chưa có TT".
+- Dialog chi tiết: `st.metric` 4 cột + bảng 8 cột (Lô, Vụ, Loại thu, ①, ②, ③, ④, Khoảng TG).
+- `LOSS_RATE_TO_CHICH = 0.05` (5% hao hụt) áp dụng cho cả Mốc ② và ③.
+- Chích bắp thường chỉ xảy ra ở F0 (xúc tiến ra hoa), Fn cây tự ra hoa tự nhiên.
 
 ### 3.4 Phân bổ Xuất hủy theo Tỉ lệ
 Khi `destruction_logs` có `base_lot_id` → trừ trực tiếp cho đợt trồng đó.

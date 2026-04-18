@@ -1,6 +1,15 @@
 # Changelog
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
+## [18/04/2026] - 4-Milestone Harvest Forecast (Chích bắp)
+
+#### Feature: Thêm Mốc ② Chích bắp vào dự báo (`app.py`)
+- **[Data Pipeline]**: Extract `chich_bap_records` từ `stage_logs` (giai_doan = 'Chích bắp'), match vào generation nearest-midpoint.
+- **[Mốc ② Computation]**: `daily_qty_chich = so_chich_bap × 0.95 × pdf_weight`. Largest Remainder rounding đảm bảo tổng chính xác.
+- **[UI Cards]**: 4 dòng: ① Trồng → ② Chích → ③ Cắt → ④ TT (thay vì 3 dòng cũ).
+- **[Dialog]**: 4 metric columns (thay vì 3), bảng chi tiết 8 cột (thêm ② Chích bắp).
+- **[Expander Table]**: Thêm cột ② Chích bắp giữa ① Trồng và ③ Cắt bắp.
+- **[Constants]**: `LOSS_RATE_TO_CHICH = 0.05` áp dụng cho cả Chích bắp lẫn Cắt bắp.
 
 ## [18/04/2026] - Customizable Harvest Window Days
 
