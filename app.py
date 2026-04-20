@@ -300,8 +300,8 @@ def fetch_table_data(table_name: str, farm: str) -> pd.DataFrame:
     df = pd.DataFrame(res.data)
     
     if table_name in tables_with_lo:
-        df["farm"] = df["dim_lo"].apply(lambda x: x.get("dim_farm", {}).get("farm_name") if isinstance(x, dict) and x else None)
-        df["team"] = df["dim_lo"].apply(lambda x: x.get("dim_doi", {}).get("doi_name") if isinstance(x, dict) and x else None)
+        df["farm"] = df["dim_lo"].apply(lambda x: (x.get("dim_farm") or {}).get("farm_name") if isinstance(x, dict) and x else None)
+        df["team"] = df["dim_lo"].apply(lambda x: (x.get("dim_doi") or {}).get("doi_name") if isinstance(x, dict) and x else None)
         df["lo"] = df["dim_lo"].apply(lambda x: x.get("lo_name") if isinstance(x, dict) and x else None)
         df["dien_tich"] = df["dim_lo"].apply(lambda x: x.get("area_ha") if isinstance(x, dict) and x else None)
         df["lot_id"] = df["lo"]
