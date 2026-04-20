@@ -2,6 +2,12 @@
 
 Tài liệu này lưu lại tóm tắt các yêu cầu của người dùng để theo dõi tiến độ và nhiệm vụ.
 
+## Ngày 20/04/2026
+
+- Chuyển hiển thị diện tích từ `dim_lo.area_ha` (tối đa lô) sang `base_lots.dien_tich_trong` (diện tích trồng thực tế per-batch). Fallback area_ha nếu NULL.
+- Đổi header cột "Diện tích (ha)" → "DT trồng (ha)". Bỏ dedup sum (mỗi đợt có area riêng).
+- Cập nhật tất cả charts (Dự toán, Thực tế, Pipeline, Timeline, Kiểm kê).
+
 ## Ngày 18/04/2026
 
 - Cập nhật diện tích D6 = 2.50 ha trong DB.

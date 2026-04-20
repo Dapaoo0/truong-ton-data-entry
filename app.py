@@ -1500,6 +1500,12 @@ def render_global_data_tab(c_farm):
             df_dt_seasons = df_dt_seasons[df_dt_seasons["team"] == dt_team]
         if dt_lot != "Tất cả" and "lo" in df_dt_seasons.columns:
             df_dt_seasons = df_dt_seasons[df_dt_seasons["lo"] == dt_lot]
+        
+        # ── Merge diện tích trồng thực tế từ base_lots ──
+        # dien_tich_trong (per-batch) thay thế area_ha (per-lot max)
+        if not df_lots_trong_moi.empty and "id" in df_lots_trong_moi.columns and "dien_tich_trong" in df_lots_trong_moi.columns:
+            _dt_map = df_lots_trong_moi.set_index("id")["dien_tich_trong"].to_dict()
+            df_dt_seasons["dien_tich_trong"] = df_dt_seasons["base_lot_id"].map(_dt_map)
 
     if not df_dt_seasons.empty:
         detail_rows_by_vu = {}
@@ -1568,7 +1574,10 @@ def render_global_data_tab(c_farm):
             lo_name = row.get("lo")
             lot_id = row.get("lot_id") or row.get("dim_lo_id")
             season_blid = row.get("base_lot_id")
-            dien_tich = float(row.get("dien_tich", 0)) if pd.notna(row.get("dien_tich")) else 0.0
+            dien_tich_trong = row.get("dien_tich_trong")
+            dien_tich_fallback = row.get("dien_tich", 0)
+            # Ưu tiên diện tích trồng thực tế (per-batch), fallback diện tích lô tối đa (per-lot)
+            dien_tich = float(dien_tich_trong) if pd.notna(dien_tich_trong) else (float(dien_tich_fallback) if pd.notna(dien_tich_fallback) else 0.0)
 
             # Skip duplicate (vu, base_lot_id) - giữ dòng đầu tiên
             if pd.notna(season_blid):
@@ -1660,7 +1669,7 @@ def render_global_data_tab(c_farm):
             detail_rows_by_vu[f_vu].append({
                 ("Thông tin", "Thời gian vụ"): thoi_gian_vu,
                 ("Thông tin", "Tên lô"): display_lo,
-                ("Thông tin", "Diện tích (ha)"): f"{dien_tich:.2f}",
+                ("Thông tin", "DT trồng (ha)"): f"{dien_tich:.2f}",
                 ("Thông tin", "Cây đã trồng"): so_luong_trong,
                 ("Chích bắp", "Dự toán"): dt_chich_est,
                 ("Chích bắp", "Thực tế"): so_chich_bap,
@@ -1712,16 +1721,13 @@ def render_global_data_tab(c_farm):
                         df_detail.columns = pd.MultiIndex.from_tuples(df_detail.columns)
                     
                     # Tính tổng các cột trước khi format chuỗi
-                    # ⚠️ Diện tích: sum unique theo lô vật lý (không đếm trùng nếu lô có nhiều đợt trồng)
-                    _area_col = df_detail[("Thông tin", "Diện tích (ha)")].astype(float)
-                    _lot_col = df_detail[("Thông tin", "Tên lô")].astype(str)
-                    _base_lot_names = _lot_col.str.replace(r"\s*\(đợt\s*\d+\)$", "", regex=True)
-                    _unique_area = pd.DataFrame({"base_lot": _base_lot_names, "area": _area_col}).drop_duplicates("base_lot")
-                    total_dien_tich = _unique_area["area"].sum()
+                    # Diện tích trồng (per-batch): mỗi đợt có diện tích riêng → sum trực tiếp
+                    _area_col = df_detail[("Thông tin", "DT trồng (ha)")].astype(float)
+                    total_dien_tich = _area_col.sum()
                     total_row = {
                         ("Thông tin", "Thời gian vụ"): "",
                         ("Thông tin", "Tên lô"): "<b>TỔNG</b>",
-                        ("Thông tin", "Diện tích (ha)"): f"<b>{total_dien_tich:.2f}</b>",
+                        ("Thông tin", "DT trồng (ha)"): f"<b>{total_dien_tich:.2f}</b>",
                         ("Thông tin", "Cây đã trồng"): f"<b>{df_detail[('Thông tin', 'Cây đã trồng')].sum():,}</b>",
                         ("Chích bắp", "Dự toán"): f"<b>{df_detail[('Chích bắp', 'Dự toán')].sum():,}</b>",
                         ("Chích bắp", "Thực tế"): f"<b>{df_detail[('Chích bắp', 'Thực tế')].sum():,}</b>",
@@ -2537,8 +2543,8 @@ def render_global_data_tab(c_farm):
             batch_total = _batch_totals.iloc[idx]
             label = f"{lo_name} (đợt {batch_num})" if batch_total > 1 else lo_name
             sl = int(lot_row["so_luong"])
-            dt = lot_row.get("dien_tich", 0)
-            if pd.isna(dt): dt = 0
+            _dt_trong = lot_row.get("dien_tich_trong")
+            dt = float(_dt_trong) if pd.notna(_dt_trong) else (float(lot_row.get("dien_tich", 0)) if pd.notna(lot_row.get("dien_tich")) else 0)
             d_trong = pd.to_datetime(lot_row["ngay_trong"])
             d_chich = d_trong + timedelta(days=180)
             d_cat = d_chich + timedelta(days=14)
@@ -2605,8 +2611,8 @@ def render_global_data_tab(c_farm):
             batch_total = _batch_totals2.iloc[idx]
             label = f"{lo_name} (đợt {batch_num})" if batch_total > 1 else lo_name
             sl_trong = int(lot_row["so_luong"])
-            dt = lot_row.get("dien_tich", 0)
-            if pd.isna(dt): dt = 0
+            _dt_trong = lot_row.get("dien_tich_trong")
+            dt = float(_dt_trong) if pd.notna(_dt_trong) else (float(lot_row.get("dien_tich", 0)) if pd.notna(lot_row.get("dien_tich")) else 0)
             ngay_trong = pd.to_datetime(lot_row["ngay_trong"])
 
             # Sự kiện Trồng
@@ -2743,8 +2749,12 @@ def render_global_data_tab(c_farm):
             l_lots = pipe_lots_merged[pipe_lots_merged["lo"] == l]
             sl_trong_moi = l_lots[l_lots["loai_trong"] == "Trồng mới"]["so_luong"].sum()
             sl_trong_dam = l_lots[l_lots["loai_trong"] == "Trồng dặm"]["so_luong"].sum()
-            dt = l_lots["dien_tich"].max()
-            if pd.isna(dt): dt = 0
+            # Ưu tiên dien_tich_trong (per-batch), fallback dien_tich (per-lot max)
+            if "dien_tich_trong" in l_lots.columns and l_lots["dien_tich_trong"].notna().any():
+                dt = l_lots["dien_tich_trong"].sum()
+            else:
+                dt = l_lots["dien_tich"].max()
+                if pd.isna(dt): dt = 0
             
             pipeline_data.append({"Lô": l, "Giai đoạn": "1a. Trồng mới", "Số lượng": sl_trong_moi, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
             pipeline_data.append({"Lô": l, "Giai đoạn": "1b. Trồng dặm", "Số lượng": sl_trong_dam, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
@@ -2901,7 +2911,9 @@ def render_global_data_tab(c_farm):
         if not ml_lots_df.empty and "lot_id" in ml_lots_df.columns:
             if "lo" in ml_lots_df.columns:
                 lot_name_map = ml_lots_df.set_index("lot_id")["lo"].to_dict()
-            if "dien_tich" in ml_lots_df.columns:
+            if "dien_tich_trong" in ml_lots_df.columns:
+                lot_dt_map = ml_lots_df.set_index("lot_id")["dien_tich_trong"].fillna(ml_lots_df.set_index("lot_id")["dien_tich"]).to_dict()
+            elif "dien_tich" in ml_lots_df.columns:
                 lot_dt_map = ml_lots_df.set_index("lot_id")["dien_tich"].to_dict()
         
         if "lot_id" in df_combined.columns:
@@ -2997,7 +3009,10 @@ def render_global_data_tab(c_farm):
         # Ánh xạ lot_id sang lo và dien_tich
         if not df_lots_all.empty:
             mapped_dict_lo = df_lots_all.set_index("lot_id")["lo"].to_dict()
-            mapped_dict_dt = df_lots_all.set_index("lot_id")["dien_tich"].to_dict()
+            if "dien_tich_trong" in df_lots_all.columns:
+                mapped_dict_dt = df_lots_all.set_index("lot_id")["dien_tich_trong"].fillna(df_lots_all.set_index("lot_id")["dien_tich"]).to_dict()
+            else:
+                mapped_dict_dt = df_lots_all.set_index("lot_id")["dien_tich"].to_dict()
         else:
             mapped_dict_lo, mapped_dict_dt = {}, {}
             

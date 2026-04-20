@@ -1,6 +1,14 @@
 # Changelog
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
+## [20/04/2026] - Diện tích trồng thực tế (per-batch)
+
+#### Feature: Chuyển từ `dim_lo.area_ha` → `base_lots.dien_tich_trong` (`app.py`)
+- **[Detail Table]**: Cột "DT trồng (ha)" hiển thị diện tích trồng thực tế của từng đợt (không còn là diện tích tối đa của lô).
+- **[Sum Logic]**: Sum trực tiếp (mỗi đợt có area riêng), bỏ dedup cũ theo tên lô.
+- **[Fallback]**: Nếu `dien_tich_trong` NULL → fallback `dim_lo.area_ha` (Farm 126 chưa có data).
+- **[Charts]**: Cập nhật tất cả biểu đồ (Dự toán, Thực tế, Pipeline, Timeline, Kiểm kê) dùng `dien_tich_trong`.
+
 ## [18/04/2026] - 4-Milestone Harvest Forecast (Chích bắp)
 
 #### Feature: Thêm Mốc ② Chích bắp vào dự báo (`app.py`)
