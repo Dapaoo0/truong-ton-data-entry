@@ -1014,6 +1014,227 @@ def render_login():
         st.divider()
         st.markdown("<p style='text-align: center; color: #888888; font-size: 0.85rem;'>💡 Vui lòng chọn đúng vai trò của mình để thao tác đúng nghiệp vụ.</p>", unsafe_allow_html=True)
 
+def generate_chich_bap_excel(df_lots, df_stg) -> bytes:
+    """Tạo file Excel báo cáo Chích bắp theo ngày.
+    Cột = từng ngày nhóm theo tuần, Hàng = Lô (đợt trồng).
+    Hiển thị lũy kế từng tuần + lũy kế tổng."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Báo cáo Chích bắp"
+
+    # Styles
+    thin_border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin')
+    )
+    header_font = Font(bold=True, size=10)
+    header_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    week_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+    subtotal_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+    grand_total_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+    center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+    # Filter chích bắp from stage_logs
+    df_chich = df_stg[df_stg["giai_doan"] == "Chích bắp"].copy() if not df_stg.empty and "giai_doan" in df_stg.columns else pd.DataFrame()
+
+    if df_chich.empty:
+        ws.cell(row=1, column=1, value="Chưa có dữ liệu Chích bắp.")
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        return output.getvalue()
+
+    # Parse dates
+    df_chich["ngay_thuc_hien"] = pd.to_datetime(df_chich["ngay_thuc_hien"])
+    df_chich["tuan"] = df_chich["tuan"].fillna(
+        df_chich["ngay_thuc_hien"].dt.isocalendar().week
+    ).astype(int)
+
+    # Build lot display names with đợt trồng
+    lot_batch_keys = []  # list of (lo_name, base_lot_id, display_name)
+    if not df_lots.empty and "id" in df_lots.columns:
+        lot_groups = df_lots.groupby("lo")
+        for lo_name, grp in lot_groups:
+            if len(grp) > 1:
+                sorted_grp = grp.sort_values("ngay_trong") if "ngay_trong" in grp.columns else grp
+                for i, (_, b_row) in enumerate(sorted_grp.iterrows(), 1):
+                    lot_batch_keys.append((lo_name, b_row["id"], f"{lo_name} (đợt {i})"))
+            else:
+                for _, b_row in grp.iterrows():
+                    lot_batch_keys.append((lo_name, b_row["id"], lo_name))
+
+    # Only keep lots that have chích bắp data
+    active_blids = set(df_chich["base_lot_id"].dropna().astype(int).unique())
+    lot_batch_keys = [x for x in lot_batch_keys if x[1] in active_blids]
+
+    # Also add lots from df_chich that might not be in df_lots (orphans)
+    mapped_blids = {x[1] for x in lot_batch_keys}
+    for blid in active_blids - mapped_blids:
+        lo_name = df_chich[df_chich["base_lot_id"] == blid]["lo"].iloc[0] if "lo" in df_chich.columns else f"Lot_{blid}"
+        lot_batch_keys.append((lo_name, blid, lo_name))
+
+    # Natural sort
+    import re as _re_chich
+    def _nat_sort(item):
+        name = item[2]
+        m_batch = _re_chich.match(r"^(.+?)\s*\(đợt\s*(\d+)\)$", name)
+        if m_batch:
+            base_name, batch_num = m_batch.group(1), int(m_batch.group(2))
+        else:
+            base_name, batch_num = name, 0
+        m_num = _re_chich.match(r"^(\d+)(.*)", base_name)
+        if m_num:
+            return (int(m_num.group(1)), m_num.group(2), batch_num)
+        return (9999, base_name, batch_num)
+    lot_batch_keys.sort(key=_nat_sort)
+
+    # Determine weeks and dates
+    weeks = sorted(df_chich["tuan"].unique())
+    week_dates = {}  # {week: [sorted date list]}
+    for wk in weeks:
+        dates = sorted(df_chich[df_chich["tuan"] == wk]["ngay_thuc_hien"].dt.date.unique())
+        week_dates[wk] = dates
+
+    # === BUILD HEADER ===
+    # Row 1: "Lô" (merged 1-2) | Tuần X (merged over date cols + 1 subtotal col) | ... | Lũy kế
+    # Row 2: (merged)           | dd/mm | dd/mm | ... | Σ tuần | ... | Tổng
+    ws.merge_cells(start_row=1, start_column=1, end_row=2, end_column=1)
+    c_lo = ws.cell(row=1, column=1, value="Lô")
+    c_lo.font = Font(bold=True, size=11)
+    c_lo.fill = header_fill
+    c_lo.alignment = center_align
+    c_lo.border = thin_border
+    ws.cell(row=2, column=1).border = thin_border
+
+    col = 2
+    week_col_map = {}  # {week: {"start": col, "date_cols": {date: col}, "subtotal_col": col}}
+
+    for wk in weeks:
+        dates = week_dates[wk]
+        n_dates = len(dates)
+        start_col = col
+
+        # Row 1: merge "Tuần X" across date cols + subtotal col
+        end_col = col + n_dates  # n_dates + 1 subtotal
+        ws.merge_cells(start_row=1, start_column=start_col, end_row=1, end_column=end_col)
+        c_wk = ws.cell(row=1, column=start_col, value=f"Tuần {wk}")
+        c_wk.font = Font(bold=True, size=11)
+        c_wk.fill = week_fill
+        c_wk.alignment = center_align
+        c_wk.border = thin_border
+
+        date_cols = {}
+        for d in dates:
+            c_d = ws.cell(row=2, column=col, value=d.strftime("%d/%m"))
+            c_d.font = Font(size=9)
+            c_d.fill = header_fill
+            c_d.alignment = center_align
+            c_d.border = thin_border
+            date_cols[d] = col
+            col += 1
+
+        # Subtotal column for this week
+        c_sub = ws.cell(row=2, column=col, value="Σ tuần")
+        c_sub.font = Font(bold=True, size=9)
+        c_sub.fill = subtotal_fill
+        c_sub.alignment = center_align
+        c_sub.border = thin_border
+        subtotal_col = col
+        col += 1
+
+        week_col_map[wk] = {"start": start_col, "date_cols": date_cols, "subtotal_col": subtotal_col}
+
+    # Grand total column (lũy kế)
+    ws.merge_cells(start_row=1, start_column=col, end_row=1, end_column=col)
+    c_gt = ws.cell(row=1, column=col, value="Lũy kế")
+    c_gt.font = Font(bold=True, size=11)
+    c_gt.fill = grand_total_fill
+    c_gt.alignment = center_align
+    c_gt.border = thin_border
+    c_gt2 = ws.cell(row=2, column=col, value="Tổng")
+    c_gt2.font = Font(bold=True, size=9)
+    c_gt2.fill = grand_total_fill
+    c_gt2.alignment = center_align
+    c_gt2.border = thin_border
+    grand_total_col = col
+    total_col_end = col
+
+    # Apply borders to all header cells
+    for r in range(1, 3):
+        for ci in range(1, total_col_end + 1):
+            ws.cell(row=r, column=ci).border = thin_border
+
+    # === DATA ROWS ===
+    data_start_row = 3
+    for li, (lo_name, blid, display_name) in enumerate(lot_batch_keys):
+        row_idx = data_start_row + li
+        c = ws.cell(row=row_idx, column=1, value=display_name)
+        c.font = Font(bold=True)
+        c.border = thin_border
+        c.alignment = center_align
+
+        lot_total = 0
+        for wk in weeks:
+            wm = week_col_map[wk]
+            week_sum = 0
+            for d, d_col in wm["date_cols"].items():
+                val = 0
+                if not df_chich.empty:
+                    mask = (df_chich["base_lot_id"] == blid) & (df_chich["ngay_thuc_hien"].dt.date == d)
+                    val = int(df_chich[mask]["so_luong"].sum())
+                cell = ws.cell(row=row_idx, column=d_col, value=val if val > 0 else "")
+                cell.border = thin_border
+                cell.alignment = center_align
+                week_sum += val
+
+            # Week subtotal
+            c_ws = ws.cell(row=row_idx, column=wm["subtotal_col"], value=week_sum if week_sum > 0 else "")
+            c_ws.font = Font(bold=True)
+            c_ws.fill = PatternFill(start_color="FFFDE7", end_color="FFFDE7", fill_type="solid")
+            c_ws.border = thin_border
+            c_ws.alignment = center_align
+            lot_total += week_sum
+
+        # Grand total
+        c_gt_val = ws.cell(row=row_idx, column=grand_total_col, value=lot_total if lot_total > 0 else "")
+        c_gt_val.font = Font(bold=True)
+        c_gt_val.fill = PatternFill(start_color="FFF3E0", end_color="FFF3E0", fill_type="solid")
+        c_gt_val.border = thin_border
+        c_gt_val.alignment = center_align
+
+    # === TOTAL ROW ===
+    total_row = data_start_row + len(lot_batch_keys)
+    c = ws.cell(row=total_row, column=1, value="TỔNG")
+    c.font = Font(bold=True, size=11)
+    c.fill = grand_total_fill
+    c.border = thin_border
+    c.alignment = center_align
+
+    for ci in range(2, total_col_end + 1):
+        col_sum = 0
+        for r in range(data_start_row, total_row):
+            v = ws.cell(row=r, column=ci).value
+            if v and isinstance(v, (int, float)):
+                col_sum += int(v)
+        c_tot = ws.cell(row=total_row, column=ci, value=col_sum if col_sum > 0 else "")
+        c_tot.font = Font(bold=True)
+        c_tot.fill = grand_total_fill
+        c_tot.border = thin_border
+        c_tot.alignment = center_align
+
+    # Auto column widths
+    ws.column_dimensions[get_column_letter(1)].width = 16
+    for ci in range(2, total_col_end + 1):
+        ws.column_dimensions[get_column_letter(ci)].width = 9
+
+    # Freeze panes: fix column "Lô" + header rows
+    ws.freeze_panes = "B3"
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output.getvalue()
+
 def generate_cut_bap_excel(df_lots, df_stg, df_des) -> bytes:
     """Tạo file Excel báo cáo Cắt bắp theo tuần.
     Mỗi tuần cắt bắp có 1 màu dây duy nhất → 2 cột: CẮT BẮP + XUẤT HỦY."""
@@ -1294,7 +1515,7 @@ def render_global_data_tab(c_farm):
     df_lots_trong_dam = df_lots_all[df_lots_all['loai_trong'] == 'Trồng dặm'] if not df_lots_all.empty else pd.DataFrame()
 
     # Nút Xuất Báo cáo Excel 
-    col_t1, col_t2, col_t3, col_t4 = st.columns([2, 1, 1, 1])
+    col_t1, col_t2, col_t3, col_t4, col_t5 = st.columns([2, 1, 1, 1, 1])
     with col_t2:
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -1313,6 +1534,16 @@ def render_global_data_tab(c_farm):
             type="secondary"
         )
     with col_t3:
+        chich_excel = generate_chich_bap_excel(df_lots_all, df_stg_all)
+        st.download_button(
+            label="🌽 Báo cáo Chích bắp",
+            data=chich_excel,
+            file_name=f"Bao_cao_chich_bap_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            type="secondary"
+        )
+    with col_t4:
         cut_excel = generate_cut_bap_excel(df_lots_all, df_stg_all, df_des_all)
         st.download_button(
             label="✂️ Báo cáo Cắt bắp",
@@ -1322,7 +1553,7 @@ def render_global_data_tab(c_farm):
             use_container_width=True,
             type="secondary"
         )
-    with col_t4:
+    with col_t5:
         plant_excel = generate_planting_excel(df_lots_all, df_seasons)
         st.download_button(
             label="🌱 Báo cáo Trồng mới",
