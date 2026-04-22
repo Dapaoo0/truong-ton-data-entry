@@ -1015,67 +1015,62 @@ def render_login():
         st.markdown("<p style='text-align: center; color: #888888; font-size: 0.85rem;'>💡 Vui lòng chọn đúng vai trò của mình để thao tác đúng nghiệp vụ.</p>", unsafe_allow_html=True)
 
 def generate_chich_bap_excel(df_lots, df_stg) -> bytes:
-    """Tạo file Excel báo cáo Chích bắp theo ngày.
-    Cột = từng ngày nhóm theo tuần, Hàng = Lô (đợt trồng).
-    Hiển thị lũy kế từng tuần + lũy kế tổng."""
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Báo cáo Chích bắp"
+    """Tạo file Excel báo cáo Chích bắp theo ngày, chia sheet theo năm.
+    Mỗi sheet = 1 năm. Cột = từng ngày nhóm theo tuần, Hàng = Lô (đợt trồng)."""
+    import re as _re_chich
 
-    # Styles
+    # ── Styles ──
     thin_border = Border(
         left=Side(style='thin'), right=Side(style='thin'),
         top=Side(style='thin'), bottom=Side(style='thin')
     )
-    header_font = Font(bold=True, size=10)
     header_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
     week_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
     subtotal_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
     grand_total_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
     center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
-    # Filter chích bắp from stage_logs
+    # ── Filter chích bắp ──
     df_chich = df_stg[df_stg["giai_doan"] == "Chích bắp"].copy() if not df_stg.empty and "giai_doan" in df_stg.columns else pd.DataFrame()
 
-    # Chỉ lấy đợt trồng mới (loại bỏ trồng dặm + đợt cũ)
+    # Chỉ lấy đợt trồng mới
     if not df_lots.empty and "loai_trong" in df_lots.columns:
         valid_blids = set(df_lots[df_lots["loai_trong"] == "Trồng mới"]["id"].dropna().astype(int).tolist())
         if not df_chich.empty and "base_lot_id" in df_chich.columns:
             df_chich = df_chich[df_chich["base_lot_id"].isin(valid_blids)]
 
-    # Loại bỏ records chích bắp trước ngày trồng (thuộc đợt cũ, vô lý)
+    # Loại bỏ records trước ngày trồng
     if not df_chich.empty and not df_lots.empty and "ngay_trong" in df_lots.columns:
-        planting_date_map = {}  # {base_lot_id: ngay_trong}
+        planting_date_map = {}
         for _, lr in df_lots.iterrows():
             if pd.notna(lr.get("id")) and pd.notna(lr.get("ngay_trong")):
                 planting_date_map[int(lr["id"])] = pd.to_datetime(lr["ngay_trong"])
-        
         def _is_after_planting(row):
             blid = row.get("base_lot_id")
-            if pd.isna(blid):
-                return True
+            if pd.isna(blid): return True
             plant_dt = planting_date_map.get(int(blid))
-            if plant_dt is None:
-                return True
+            if plant_dt is None: return True
             return pd.to_datetime(row["ngay_thuc_hien"]) >= plant_dt
-        
         df_chich = df_chich[df_chich.apply(_is_after_planting, axis=1)]
 
+    wb = Workbook()
+
     if df_chich.empty:
+        ws = wb.active
+        ws.title = "Báo cáo Chích bắp"
         ws.cell(row=1, column=1, value="Chưa có dữ liệu Chích bắp.")
-        output = io.BytesIO()
-        wb.save(output)
-        output.seek(0)
+        output = io.BytesIO(); wb.save(output); output.seek(0)
         return output.getvalue()
 
-    # Parse dates
+    # Parse dates & year
     df_chich["ngay_thuc_hien"] = pd.to_datetime(df_chich["ngay_thuc_hien"])
     df_chich["tuan"] = df_chich["tuan"].fillna(
         df_chich["ngay_thuc_hien"].dt.isocalendar().week
     ).astype(int)
+    df_chich["_year"] = df_chich["ngay_thuc_hien"].dt.year
 
-    # Build lot display names with đợt trồng
-    lot_batch_keys = []  # list of (lo_name, base_lot_id, display_name)
+    # ── Build lot display names ──
+    lot_batch_keys = []
     if not df_lots.empty and "id" in df_lots.columns:
         lot_groups = df_lots.groupby("lo")
         for lo_name, grp in lot_groups:
@@ -1086,199 +1081,139 @@ def generate_chich_bap_excel(df_lots, df_stg) -> bytes:
             else:
                 for _, b_row in grp.iterrows():
                     lot_batch_keys.append((lo_name, b_row["id"], lo_name))
-
-    # Only keep lots that have chích bắp data
     active_blids = set(df_chich["base_lot_id"].dropna().astype(int).unique())
     lot_batch_keys = [x for x in lot_batch_keys if x[1] in active_blids]
-
-    # Also add lots from df_chich that might not be in df_lots (orphans)
     mapped_blids = {x[1] for x in lot_batch_keys}
     for blid in active_blids - mapped_blids:
         lo_name = df_chich[df_chich["base_lot_id"] == blid]["lo"].iloc[0] if "lo" in df_chich.columns else f"Lot_{blid}"
         lot_batch_keys.append((lo_name, blid, lo_name))
 
-    # Natural sort
-    import re as _re_chich
     def _nat_sort(item):
         name = item[2]
         m_batch = _re_chich.match(r"^(.+?)\s*\(đợt\s*(\d+)\)$", name)
-        if m_batch:
-            base_name, batch_num = m_batch.group(1), int(m_batch.group(2))
-        else:
-            base_name, batch_num = name, 0
+        base_name, batch_num = (m_batch.group(1), int(m_batch.group(2))) if m_batch else (name, 0)
         m_num = _re_chich.match(r"^(\d+)(.*)", base_name)
-        if m_num:
-            return (int(m_num.group(1)), m_num.group(2), batch_num)
-        return (9999, base_name, batch_num)
+        return (int(m_num.group(1)), m_num.group(2), batch_num) if m_num else (9999, base_name, batch_num)
     lot_batch_keys.sort(key=_nat_sort)
 
-    # Determine weeks and dates
-    weeks = sorted(df_chich["tuan"].unique())
-    week_dates = {}  # {week: [sorted date list]}
-    for wk in weeks:
-        dates = sorted(df_chich[df_chich["tuan"] == wk]["ngay_thuc_hien"].dt.date.unique())
-        week_dates[wk] = dates
+    # ── Build one sheet per year ──
+    years = sorted(df_chich["_year"].unique())
+    wb.remove(wb.active)  # remove default empty sheet
 
-    # === BUILD HEADER ===
-    # Row 1: "Lô" (merged 1-2) | Tuần X (merged over date cols + 1 subtotal col) | ... | Lũy kế
-    # Row 2: (merged)           | dd/mm | dd/mm | ... | Σ tuần | ... | Tổng
-    ws.merge_cells(start_row=1, start_column=1, end_row=2, end_column=1)
-    c_lo = ws.cell(row=1, column=1, value="Lô")
-    c_lo.font = Font(bold=True, size=11)
-    c_lo.fill = header_fill
-    c_lo.alignment = center_align
-    c_lo.border = thin_border
-    ws.cell(row=2, column=1).border = thin_border
+    for year in years:
+        ws = wb.create_sheet(title=str(year))
+        df_yr = df_chich[df_chich["_year"] == year]
 
-    col = 2
-    week_col_map = {}  # {week: {"start": col, "date_cols": {date: col}, "subtotal_col": col}}
+        weeks = sorted(df_yr["tuan"].unique())
+        week_dates = {}
+        for wk in weeks:
+            week_dates[wk] = sorted(df_yr[df_yr["tuan"] == wk]["ngay_thuc_hien"].dt.date.unique())
 
-    for wk in weeks:
-        dates = week_dates[wk]
-        n_dates = len(dates)
-        start_col = col
+        # Lọc lot_batch_keys chỉ giữ lô có data năm này
+        yr_blids = set(df_yr["base_lot_id"].dropna().astype(int).unique())
+        yr_lots = [x for x in lot_batch_keys if x[1] in yr_blids]
 
-        # Row 1: merge "Tuần X" across date cols + subtotal col
-        end_col = col + n_dates  # n_dates + 1 subtotal
-        ws.merge_cells(start_row=1, start_column=start_col, end_row=1, end_column=end_col)
-        c_wk = ws.cell(row=1, column=start_col, value=f"Tuần {wk}")
-        c_wk.font = Font(bold=True, size=11)
-        c_wk.fill = week_fill
-        c_wk.alignment = center_align
-        c_wk.border = thin_border
+        # === HEADER ===
+        ws.merge_cells(start_row=1, start_column=1, end_row=2, end_column=1)
+        c_lo = ws.cell(row=1, column=1, value="Lô")
+        c_lo.font = Font(bold=True, size=11); c_lo.fill = header_fill
+        c_lo.alignment = center_align; c_lo.border = thin_border
+        ws.cell(row=2, column=1).border = thin_border
 
-        date_cols = {}
-        for d in dates:
-            c_d = ws.cell(row=2, column=col, value=d.strftime("%d/%m"))
-            c_d.font = Font(size=9)
-            c_d.fill = header_fill
-            c_d.alignment = center_align
-            c_d.border = thin_border
-            date_cols[d] = col
+        col = 2
+        week_col_map = {}
+        for wk in weeks:
+            dates = week_dates[wk]
+            start_col = col
+            end_col = col + len(dates)  # dates + subtotal
+            ws.merge_cells(start_row=1, start_column=start_col, end_row=1, end_column=end_col)
+            c_wk = ws.cell(row=1, column=start_col, value=f"Tuần {wk}")
+            c_wk.font = Font(bold=True, size=11); c_wk.fill = week_fill
+            c_wk.alignment = center_align; c_wk.border = thin_border
+
+            date_cols = {}
+            for d in dates:
+                c_d = ws.cell(row=2, column=col, value=d.strftime("%d/%m"))
+                c_d.font = Font(size=9); c_d.fill = header_fill
+                c_d.alignment = center_align; c_d.border = thin_border
+                date_cols[d] = col; col += 1
+
+            c_sub = ws.cell(row=2, column=col, value="Σ tuần")
+            c_sub.font = Font(bold=True, size=9); c_sub.fill = subtotal_fill
+            c_sub.alignment = center_align; c_sub.border = thin_border
+            week_col_map[wk] = {"date_cols": date_cols, "subtotal_col": col}
             col += 1
 
-        # Subtotal column for this week
-        c_sub = ws.cell(row=2, column=col, value="Σ tuần")
-        c_sub.font = Font(bold=True, size=9)
-        c_sub.fill = subtotal_fill
-        c_sub.alignment = center_align
-        c_sub.border = thin_border
-        subtotal_col = col
-        col += 1
+        # Lũy kế column
+        c_gt = ws.cell(row=1, column=col, value="Lũy kế")
+        c_gt.font = Font(bold=True, size=11); c_gt.fill = grand_total_fill
+        c_gt.alignment = center_align; c_gt.border = thin_border
+        c_gt2 = ws.cell(row=2, column=col, value="Tổng")
+        c_gt2.font = Font(bold=True, size=9); c_gt2.fill = grand_total_fill
+        c_gt2.alignment = center_align; c_gt2.border = thin_border
+        grand_total_col = col; total_col_end = col
 
-        week_col_map[wk] = {"start": start_col, "date_cols": date_cols, "subtotal_col": subtotal_col}
+        for r in range(1, 3):
+            for ci in range(1, total_col_end + 1):
+                ws.cell(row=r, column=ci).border = thin_border
 
-    # Grand total column (lũy kế)
-    ws.merge_cells(start_row=1, start_column=col, end_row=1, end_column=col)
-    c_gt = ws.cell(row=1, column=col, value="Lũy kế")
-    c_gt.font = Font(bold=True, size=11)
-    c_gt.fill = grand_total_fill
-    c_gt.alignment = center_align
-    c_gt.border = thin_border
-    c_gt2 = ws.cell(row=2, column=col, value="Tổng")
-    c_gt2.font = Font(bold=True, size=9)
-    c_gt2.fill = grand_total_fill
-    c_gt2.alignment = center_align
-    c_gt2.border = thin_border
-    grand_total_col = col
-    total_col_end = col
+        # === DATA ROWS ===
+        data_start_row = 3
+        for li, (_, blid, display_name) in enumerate(yr_lots):
+            row_idx = data_start_row + li
+            c = ws.cell(row=row_idx, column=1, value=display_name)
+            c.font = Font(bold=True); c.border = thin_border; c.alignment = center_align
+            lot_total = 0
+            for wk in weeks:
+                wm = week_col_map[wk]; week_sum = 0
+                for d, d_col in wm["date_cols"].items():
+                    mask = (df_yr["base_lot_id"] == blid) & (df_yr["ngay_thuc_hien"].dt.date == d)
+                    val = int(df_yr[mask]["so_luong"].sum())
+                    cell = ws.cell(row=row_idx, column=d_col, value=val if val > 0 else "")
+                    cell.border = thin_border; cell.alignment = center_align
+                    week_sum += val
+                c_ws = ws.cell(row=row_idx, column=wm["subtotal_col"], value=week_sum if week_sum > 0 else "")
+                c_ws.font = Font(bold=True); c_ws.fill = PatternFill(start_color="FFFDE7", end_color="FFFDE7", fill_type="solid")
+                c_ws.border = thin_border; c_ws.alignment = center_align
+                lot_total += week_sum
+            c_gt_val = ws.cell(row=row_idx, column=grand_total_col, value=lot_total if lot_total > 0 else "")
+            c_gt_val.font = Font(bold=True); c_gt_val.fill = PatternFill(start_color="FFF3E0", end_color="FFF3E0", fill_type="solid")
+            c_gt_val.border = thin_border; c_gt_val.alignment = center_align
 
-    # Apply borders to all header cells
-    for r in range(1, 3):
-        for ci in range(1, total_col_end + 1):
-            ws.cell(row=r, column=ci).border = thin_border
+        # === TOTAL ROW ===
+        total_row = data_start_row + len(yr_lots)
+        c = ws.cell(row=total_row, column=1, value="TỔNG")
+        c.font = Font(bold=True, size=11); c.fill = grand_total_fill
+        c.border = thin_border; c.alignment = center_align
+        for ci in range(2, total_col_end + 1):
+            col_sum = sum(int(ws.cell(row=r, column=ci).value) for r in range(data_start_row, total_row) if isinstance(ws.cell(row=r, column=ci).value, (int, float)))
+            c_tot = ws.cell(row=total_row, column=ci, value=col_sum if col_sum > 0 else "")
+            c_tot.font = Font(bold=True); c_tot.fill = grand_total_fill
+            c_tot.border = thin_border; c_tot.alignment = center_align
 
-    # === DATA ROWS ===
-    data_start_row = 3
-    for li, (lo_name, blid, display_name) in enumerate(lot_batch_keys):
-        row_idx = data_start_row + li
-        c = ws.cell(row=row_idx, column=1, value=display_name)
-        c.font = Font(bold=True)
-        c.border = thin_border
-        c.alignment = center_align
+        ws.column_dimensions[get_column_letter(1)].width = 16
+        for ci in range(2, total_col_end + 1):
+            ws.column_dimensions[get_column_letter(ci)].width = 9
+        ws.freeze_panes = "B3"
 
-        lot_total = 0
-        for wk in weeks:
-            wm = week_col_map[wk]
-            week_sum = 0
-            for d, d_col in wm["date_cols"].items():
-                val = 0
-                if not df_chich.empty:
-                    mask = (df_chich["base_lot_id"] == blid) & (df_chich["ngay_thuc_hien"].dt.date == d)
-                    val = int(df_chich[mask]["so_luong"].sum())
-                cell = ws.cell(row=row_idx, column=d_col, value=val if val > 0 else "")
-                cell.border = thin_border
-                cell.alignment = center_align
-                week_sum += val
-
-            # Week subtotal
-            c_ws = ws.cell(row=row_idx, column=wm["subtotal_col"], value=week_sum if week_sum > 0 else "")
-            c_ws.font = Font(bold=True)
-            c_ws.fill = PatternFill(start_color="FFFDE7", end_color="FFFDE7", fill_type="solid")
-            c_ws.border = thin_border
-            c_ws.alignment = center_align
-            lot_total += week_sum
-
-        # Grand total
-        c_gt_val = ws.cell(row=row_idx, column=grand_total_col, value=lot_total if lot_total > 0 else "")
-        c_gt_val.font = Font(bold=True)
-        c_gt_val.fill = PatternFill(start_color="FFF3E0", end_color="FFF3E0", fill_type="solid")
-        c_gt_val.border = thin_border
-        c_gt_val.alignment = center_align
-
-    # === TOTAL ROW ===
-    total_row = data_start_row + len(lot_batch_keys)
-    c = ws.cell(row=total_row, column=1, value="TỔNG")
-    c.font = Font(bold=True, size=11)
-    c.fill = grand_total_fill
-    c.border = thin_border
-    c.alignment = center_align
-
-    for ci in range(2, total_col_end + 1):
-        col_sum = 0
-        for r in range(data_start_row, total_row):
-            v = ws.cell(row=r, column=ci).value
-            if v and isinstance(v, (int, float)):
-                col_sum += int(v)
-        c_tot = ws.cell(row=total_row, column=ci, value=col_sum if col_sum > 0 else "")
-        c_tot.font = Font(bold=True)
-        c_tot.fill = grand_total_fill
-        c_tot.border = thin_border
-        c_tot.alignment = center_align
-
-    # Auto column widths
-    ws.column_dimensions[get_column_letter(1)].width = 16
-    for ci in range(2, total_col_end + 1):
-        ws.column_dimensions[get_column_letter(ci)].width = 9
-
-    # Freeze panes: fix column "Lô" + header rows
-    ws.freeze_panes = "B3"
-
-    output = io.BytesIO()
-    wb.save(output)
-    output.seek(0)
+    output = io.BytesIO(); wb.save(output); output.seek(0)
     return output.getvalue()
 
+
 def generate_cut_bap_excel(df_lots, df_stg, df_des) -> bytes:
-    """Tạo file Excel báo cáo Cắt bắp theo tuần.
-    Mỗi tuần cắt bắp có 1 màu dây duy nhất → 2 cột: CẮT BẮP + XUẤT HỦY."""
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Báo cáo Cắt bắp"
-    
+    """Tạo file Excel báo cáo Cắt bắp theo tuần, chia sheet theo năm.
+    Mỗi sheet = 1 năm. Mỗi tuần = 2 cột: CẮT BẮP + XUẤT HỦY."""
     # Styles
     thin_border = Border(
         left=Side(style='thin'), right=Side(style='thin'),
         top=Side(style='thin'), bottom=Side(style='thin')
     )
-    header_font = Font(bold=True, size=10)
     header_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
     cut_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
     des_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
     total_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
     center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
-    
-    # Bảng màu pastel nhạt cho header Màu dây
+
     COLOR_MAP = {
         "đỏ": "FFB3B3", "cam": "FFD9B3", "vàng": "FFFFB3",
         "xanh lá": "B3FFB3", "xanh dương": "B3D9FF", "tím": "D9B3FF",
@@ -1287,233 +1222,206 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des) -> bytes:
     def get_mau_day_fill(mau_day_name):
         base = mau_day_name.split("-")[0].strip().lower() if mau_day_name else ""
         hex_color = COLOR_MAP.get(base)
-        if hex_color:
-            return PatternFill(start_color=hex_color, end_color=hex_color, fill_type="solid")
-        return None
-    
-    # Get unique lots (sorted)
+        return PatternFill(start_color=hex_color, end_color=hex_color, fill_type="solid") if hex_color else None
+
+    # Get lots
     lot_names = sorted(df_lots["lo"].unique().tolist()) if not df_lots.empty else []
     lot_id_map = {}
     if not df_lots.empty:
         for _, row in df_lots.iterrows():
             lo = row["lo"]
-            if lo not in lot_id_map:
-                lot_id_map[lo] = []
+            if lo not in lot_id_map: lot_id_map[lo] = []
             lot_id_map[lo].append(row["lot_id"])
-    
-    # Filter Cắt bắp from stage_logs
+
+    # Filter data
     df_cut = df_stg[df_stg["giai_doan"] == "Cắt bắp"].copy() if not df_stg.empty and "giai_doan" in df_stg.columns else pd.DataFrame()
-    
-    # Determine weeks and their mau_day (1 color per week)
-    week_color = {}  # {week_number: "Đỏ"}
-    if not df_cut.empty and "tuan" in df_cut.columns and "mau_day" in df_cut.columns:
-        for tuan_val in df_cut["tuan"].dropna().unique():
-            week_num = int(tuan_val)
-            colors_in_week = df_cut[df_cut["tuan"] == tuan_val]["mau_day"].dropna().unique()
-            week_color[week_num] = str(colors_in_week[0]) if len(colors_in_week) > 0 else ""
-    
-    # Also include destruction weeks (they share the same week/color mapping)
-    if not df_des.empty and "tuan" in df_des.columns:
-        for tuan_val in df_des["tuan"].dropna().unique():
-            week_num = int(tuan_val)
-            if week_num not in week_color:
-                colors_in_week = df_des[df_des["tuan"] == tuan_val]["mau_day"].dropna().unique() if "mau_day" in df_des.columns else []
-                week_color[week_num] = str(colors_in_week[0]) if len(colors_in_week) > 0 else ""
-    
-    weeks = sorted(week_color.keys())
-    
-    if not weeks:
-        # No data at all
+
+    wb = Workbook()
+
+    # Determine years from ngay_thuc_hien
+    all_years = set()
+    if not df_cut.empty and "ngay_thuc_hien" in df_cut.columns:
+        df_cut["ngay_thuc_hien"] = pd.to_datetime(df_cut["ngay_thuc_hien"])
+        df_cut["_year"] = df_cut["ngay_thuc_hien"].dt.year
+        all_years.update(df_cut["_year"].dropna().unique())
+    if not df_des.empty and "ngay_thuc_hien" in df_des.columns:
+        df_des = df_des.copy()
+        df_des["ngay_thuc_hien"] = pd.to_datetime(df_des["ngay_thuc_hien"])
+        df_des["_year"] = df_des["ngay_thuc_hien"].dt.year
+        all_years.update(df_des["_year"].dropna().unique())
+
+    if not all_years:
+        ws = wb.active; ws.title = "Báo cáo Cắt bắp"
         ws.cell(row=1, column=1, value="Chưa có dữ liệu Cắt bắp.")
-        output = io.BytesIO()
-        wb.save(output)
-        output.seek(0)
+        output = io.BytesIO(); wb.save(output); output.seek(0)
         return output.getvalue()
-    
-    # === BUILD HEADER ===
-    # Row 1: "Lô" + Week group headers (each week = 2 cols merged)
-    # Row 2: CẮT BẮP | XUẤT HỦY per week
-    # Row 3: Màu dây (colored) | Màu dây (colored) per week
-    
-    ws.cell(row=1, column=1, value="Lô").font = header_font
-    ws.cell(row=1, column=1).fill = header_fill
-    ws.cell(row=1, column=1).border = thin_border
-    ws.cell(row=1, column=1).alignment = center_align
-    ws.merge_cells(start_row=1, start_column=1, end_row=3, end_column=1)
-    
-    col_offset = 2
-    week_col_map = {}  # {week: {"cut_col": int, "des_col": int}}
-    
-    for week in weeks:
-        cut_col = col_offset
-        des_col = col_offset + 1
-        week_col_map[week] = {"cut_col": cut_col, "des_col": des_col}
-        
-        color_name = week_color.get(week, "")
-        color_fill_cell = get_mau_day_fill(color_name)
-        
-        # Row 1: Week header (merged over 2 cols)
-        ws.merge_cells(start_row=1, start_column=cut_col, end_row=1, end_column=des_col)
-        c = ws.cell(row=1, column=cut_col, value=f"Tuần {week}")
-        c.font = Font(bold=True, size=11)
-        c.fill = header_fill
-        c.alignment = center_align
-        c.border = thin_border
-        
-        # Row 2: CẮT BẮP | XUẤT HỦY
-        c1 = ws.cell(row=2, column=cut_col, value="CẮT BẮP")
-        c1.font = Font(bold=True, color="006100")
-        c1.fill = cut_fill
-        c1.alignment = center_align
-        c1.border = thin_border
-        
-        c2 = ws.cell(row=2, column=des_col, value="XUẤT HỦY")
-        c2.font = Font(bold=True, color="9C0006")
-        c2.fill = des_fill
-        c2.alignment = center_align
-        c2.border = thin_border
-        
-        # Row 3: Màu dây (colored header)
-        c3 = ws.cell(row=3, column=cut_col, value=color_name)
-        c3.font = Font(bold=True, size=9)
-        c3.fill = color_fill_cell if color_fill_cell else cut_fill
-        c3.alignment = center_align
-        c3.border = thin_border
-        
-        c4 = ws.cell(row=3, column=des_col, value=color_name)
-        c4.font = Font(bold=True, size=9)
-        c4.fill = color_fill_cell if color_fill_cell else des_fill
-        c4.alignment = center_align
-        c4.border = thin_border
-        
-        col_offset += 2
-    
-    # Apply borders to merged header cells
-    for r in range(1, 4):
-        for c_idx in range(1, col_offset):
-            ws.cell(row=r, column=c_idx).border = thin_border
-    
-    # === FILL DATA ROWS ===
-    data_start_row = 4
-    for li, lo_name in enumerate(lot_names):
-        row_idx = data_start_row + li
-        c = ws.cell(row=row_idx, column=1, value=lo_name)
-        c.font = Font(bold=True)
-        c.border = thin_border
-        c.alignment = center_align
-        
-        valid_ids = lot_id_map.get(lo_name, [])
-        
+
+    years = sorted(all_years)
+    wb.remove(wb.active)
+
+    for year in years:
+        ws = wb.create_sheet(title=str(int(year)))
+        df_cut_yr = df_cut[df_cut["_year"] == year] if not df_cut.empty and "_year" in df_cut.columns else pd.DataFrame()
+        df_des_yr = df_des[df_des["_year"] == year] if not df_des.empty and "_year" in df_des.columns else pd.DataFrame()
+
+        # Week-color map for this year
+        week_color = {}
+        if not df_cut_yr.empty and "tuan" in df_cut_yr.columns and "mau_day" in df_cut_yr.columns:
+            for tuan_val in df_cut_yr["tuan"].dropna().unique():
+                wn = int(tuan_val)
+                colors = df_cut_yr[df_cut_yr["tuan"] == tuan_val]["mau_day"].dropna().unique()
+                week_color[wn] = str(colors[0]) if len(colors) > 0 else ""
+        if not df_des_yr.empty and "tuan" in df_des_yr.columns:
+            for tuan_val in df_des_yr["tuan"].dropna().unique():
+                wn = int(tuan_val)
+                if wn not in week_color:
+                    colors = df_des_yr[df_des_yr["tuan"] == tuan_val]["mau_day"].dropna().unique() if "mau_day" in df_des_yr.columns else []
+                    week_color[wn] = str(colors[0]) if len(colors) > 0 else ""
+
+        weeks = sorted(week_color.keys())
+        if not weeks:
+            ws.cell(row=1, column=1, value=f"Chưa có dữ liệu Cắt bắp năm {int(year)}.")
+            continue
+
+        # === HEADER ===
+        ws.cell(row=1, column=1, value="Lô").font = Font(bold=True, size=10)
+        ws.cell(row=1, column=1).fill = header_fill
+        ws.cell(row=1, column=1).border = thin_border
+        ws.cell(row=1, column=1).alignment = center_align
+        ws.merge_cells(start_row=1, start_column=1, end_row=3, end_column=1)
+
+        col_offset = 2
+        week_col_map = {}
+        for week in weeks:
+            cut_col, des_col = col_offset, col_offset + 1
+            week_col_map[week] = {"cut_col": cut_col, "des_col": des_col}
+            color_name = week_color.get(week, "")
+            color_fill_cell = get_mau_day_fill(color_name)
+
+            ws.merge_cells(start_row=1, start_column=cut_col, end_row=1, end_column=des_col)
+            c = ws.cell(row=1, column=cut_col, value=f"Tuần {week}")
+            c.font = Font(bold=True, size=11); c.fill = header_fill
+            c.alignment = center_align; c.border = thin_border
+
+            c1 = ws.cell(row=2, column=cut_col, value="CẮT BẮP")
+            c1.font = Font(bold=True, color="006100"); c1.fill = cut_fill
+            c1.alignment = center_align; c1.border = thin_border
+            c2 = ws.cell(row=2, column=des_col, value="XUẤT HỦY")
+            c2.font = Font(bold=True, color="9C0006"); c2.fill = des_fill
+            c2.alignment = center_align; c2.border = thin_border
+
+            c3 = ws.cell(row=3, column=cut_col, value=color_name)
+            c3.font = Font(bold=True, size=9); c3.fill = color_fill_cell if color_fill_cell else cut_fill
+            c3.alignment = center_align; c3.border = thin_border
+            c4 = ws.cell(row=3, column=des_col, value=color_name)
+            c4.font = Font(bold=True, size=9); c4.fill = color_fill_cell if color_fill_cell else des_fill
+            c4.alignment = center_align; c4.border = thin_border
+            col_offset += 2
+
+        for r in range(1, 4):
+            for ci in range(1, col_offset):
+                ws.cell(row=r, column=ci).border = thin_border
+
+        # === DATA ===
+        data_start_row = 4
+        for li, lo_name in enumerate(lot_names):
+            row_idx = data_start_row + li
+            c = ws.cell(row=row_idx, column=1, value=lo_name)
+            c.font = Font(bold=True); c.border = thin_border; c.alignment = center_align
+            valid_ids = lot_id_map.get(lo_name, [])
+            for week in weeks:
+                wm = week_col_map[week]
+                val_cut = int(df_cut_yr[df_cut_yr["lot_id"].isin(valid_ids) & (df_cut_yr["tuan"] == week)]["so_luong"].sum()) if not df_cut_yr.empty else 0
+                cell = ws.cell(row=row_idx, column=wm["cut_col"], value=val_cut if val_cut > 0 else "")
+                cell.border = thin_border; cell.alignment = center_align
+                val_des = int(df_des_yr[df_des_yr["lot_id"].isin(valid_ids) & (df_des_yr["tuan"] == week)]["so_luong"].sum()) if not df_des_yr.empty else 0
+                cell = ws.cell(row=row_idx, column=wm["des_col"], value=val_des if val_des > 0 else "")
+                cell.border = thin_border; cell.alignment = center_align
+
+        # === TOTAL ===
+        total_row = data_start_row + len(lot_names)
+        c = ws.cell(row=total_row, column=1, value="Tổng")
+        c.font = Font(bold=True, size=11); c.fill = total_fill
+        c.border = thin_border; c.alignment = center_align
         for week in weeks:
             wm = week_col_map[week]
-            
-            # CẮT BẮP: sum so_luong for this lot × this week
-            val_cut = 0
-            if not df_cut.empty:
-                mask = (df_cut["lot_id"].isin(valid_ids)) & (df_cut["tuan"] == week)
-                val_cut = int(df_cut[mask]["so_luong"].sum())
-            cell = ws.cell(row=row_idx, column=wm["cut_col"], value=val_cut if val_cut > 0 else "")
-            cell.border = thin_border
-            cell.alignment = center_align
-            
-            # XUẤT HỦY: sum so_luong for this lot × this week
-            val_des = 0
-            if not df_des.empty:
-                mask = (df_des["lot_id"].isin(valid_ids)) & (df_des["tuan"] == week)
-                val_des = int(df_des[mask]["so_luong"].sum())
-            cell = ws.cell(row=row_idx, column=wm["des_col"], value=val_des if val_des > 0 else "")
-            cell.border = thin_border
-            cell.alignment = center_align
-    
-    # === TOTAL ROW ===
-    total_row = data_start_row + len(lot_names)
-    c = ws.cell(row=total_row, column=1, value="Tổng")
-    c.font = Font(bold=True, size=11)
-    c.fill = total_fill
-    c.border = thin_border
-    c.alignment = center_align
-    
-    for week in weeks:
-        wm = week_col_map[week]
-        for col_idx in [wm["cut_col"], wm["des_col"]]:
-            total = 0
-            for r in range(data_start_row, total_row):
-                v = ws.cell(row=r, column=col_idx).value
-                if v and isinstance(v, (int, float)):
-                    total += int(v)
-            c = ws.cell(row=total_row, column=col_idx, value=total if total > 0 else "")
-            c.font = Font(bold=True)
-            c.fill = total_fill
-            c.border = thin_border
-            c.alignment = center_align
-    
-    # Auto column width
-    ws.column_dimensions[get_column_letter(1)].width = 8
-    for c_idx in range(2, col_offset):
-        ws.column_dimensions[get_column_letter(c_idx)].width = 12
-    
-    # Save to bytes
-    output = io.BytesIO()
-    wb.save(output)
-    output.seek(0)
+            for col_idx in [wm["cut_col"], wm["des_col"]]:
+                total = sum(int(ws.cell(row=r, column=col_idx).value) for r in range(data_start_row, total_row) if isinstance(ws.cell(row=r, column=col_idx).value, (int, float)))
+                c = ws.cell(row=total_row, column=col_idx, value=total if total > 0 else "")
+                c.font = Font(bold=True); c.fill = total_fill
+                c.border = thin_border; c.alignment = center_align
+
+        ws.column_dimensions[get_column_letter(1)].width = 8
+        for ci in range(2, col_offset):
+            ws.column_dimensions[get_column_letter(ci)].width = 12
+
+    output = io.BytesIO(); wb.save(output); output.seek(0)
     return output.getvalue()
 
 def generate_planting_excel(df_lots, df_seasons):
-    output = io.BytesIO()
+    """Tạo file Excel báo cáo Trồng mới, chia sheet theo năm."""
     wb = Workbook()
-    ws = wb.active
-    ws.title = "Báo cáo Trồng mới"
-
+    thin_border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin')
+    )
+    header_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+    center_align = Alignment(horizontal="center", vertical="center")
     headers = ["Ngày trồng", "Lô", "Số lượng cây", "Loại trồng"]
-    for col_num, header_title in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col_num, value=header_title)
-        cell.font = Font(bold=True)
-        cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-        cell.border = Border(
-            left=Side(style='thin'), right=Side(style='thin'),
-            top=Side(style='thin'), bottom=Side(style='thin')
-        )
 
-    if not df_lots.empty:
-        df_plot = df_lots[['ngay_trong', 'farm', 'lo', 'so_luong', 'lot_id']].copy()
-        df_plot.dropna(subset=['ngay_trong'], inplace=True)
-        df_plot.sort_values(by='ngay_trong', inplace=True)
-        
-        # Map loai_trong from seasons (by lot_id via seasons.lo)
-        if not df_seasons.empty and 'loai_trong' in df_seasons.columns and 'lo' in df_seasons.columns:
-            # Build lot_id -> loai_trong map via lots -> seasons (on lo+farm)
-            seasons_map = df_seasons.drop_duplicates(subset=['farm', 'lo'])[['farm', 'lo', 'loai_trong']]
-            df_plot = pd.merge(df_plot, seasons_map, on=['farm', 'lo'], how='left')
-        else:
-            df_plot['loai_trong'] = None
-        
-        df_plot['loai_trong'] = df_plot['loai_trong'].fillna('Trồng mới')
-        
-        for r_idx, row in df_plot.iterrows():
-            ngay_str = pd.to_datetime(row['ngay_trong']).strftime('%d/%m/%Y')
+    if df_lots.empty:
+        ws = wb.active; ws.title = "Báo cáo Trồng mới"
+        ws.cell(row=1, column=1, value="Chưa có dữ liệu Trồng mới.")
+        output = io.BytesIO(); wb.save(output); output.seek(0)
+        return output.getvalue()
+
+    df_plot = df_lots[['ngay_trong', 'farm', 'lo', 'so_luong', 'lot_id']].copy()
+    df_plot.dropna(subset=['ngay_trong'], inplace=True)
+    df_plot['ngay_trong'] = pd.to_datetime(df_plot['ngay_trong'])
+    df_plot.sort_values(by='ngay_trong', inplace=True)
+
+    # Map loai_trong
+    if not df_seasons.empty and 'loai_trong' in df_seasons.columns and 'lo' in df_seasons.columns:
+        seasons_map = df_seasons.drop_duplicates(subset=['farm', 'lo'])[['farm', 'lo', 'loai_trong']]
+        df_plot = pd.merge(df_plot, seasons_map, on=['farm', 'lo'], how='left')
+    else:
+        df_plot['loai_trong'] = None
+    df_plot['loai_trong'] = df_plot['loai_trong'].fillna('Trồng mới')
+    df_plot['_year'] = df_plot['ngay_trong'].dt.year
+
+    years = sorted(df_plot['_year'].unique())
+    wb.remove(wb.active)
+
+    for year in years:
+        ws = wb.create_sheet(title=str(int(year)))
+        # Header row
+        for col_num, header_title in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_num, value=header_title)
+            cell.font = Font(bold=True)
+            cell.fill = header_fill
+            cell.alignment = center_align
+            cell.border = thin_border
+
+        df_yr = df_plot[df_plot['_year'] == year]
+        for r_idx, row in df_yr.iterrows():
+            ngay_str = row['ngay_trong'].strftime('%d/%m/%Y')
             loai = row.get('loai_trong', 'Trồng mới') or 'Trồng mới'
             ws.append([ngay_str, row['lo'], row['so_luong'], loai])
-            
-            # Apply borders
             current_row = ws.max_row
             for col_idx in range(1, 5):
-                ws.cell(row=current_row, column=col_idx).border = Border(
-                    left=Side(style='thin'), right=Side(style='thin'),
-                    top=Side(style='thin'), bottom=Side(style='thin')
-                )
+                ws.cell(row=current_row, column=col_idx).border = thin_border
 
-    for col in ws.columns:
-        max_length = 0
-        column = [cell for cell in col]
-        for cell in column:
-            try:
-                if len(str(cell.value)) > max_length: max_length = len(cell.value)
-            except: pass
-        ws.column_dimensions[get_column_letter(column[0].column)].width = (max_length + 2)
+        # Auto column widths
+        for col in ws.columns:
+            max_length = 0
+            column = [cell for cell in col]
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length: max_length = len(cell.value)
+                except: pass
+            ws.column_dimensions[get_column_letter(column[0].column)].width = max_length + 2
 
-    wb.save(output)
-    output.seek(0)
+    output = io.BytesIO(); wb.save(output); output.seek(0)
     return output.getvalue()
 
 def render_global_data_tab(c_farm):
