@@ -1447,39 +1447,35 @@ def render_global_data_tab(c_farm):
     df_lots_trong_dam = df_lots_all[df_lots_all['loai_trong'] == 'Trồng dặm'] if not df_lots_all.empty else pd.DataFrame()
 
     # Nút Xuất Báo cáo Excel 
-    st.markdown('<div class="report-buttons-wrapper"></div>', unsafe_allow_html=True)
+    import base64
     st.markdown("""
     <style>
-    div.element-container:has(.report-buttons-wrapper) + div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-child(2) button {
-        background-color: #e3f2fd !important; color: #1565c0 !important; border: 1px solid #90caf9 !important; font-weight: bold;
+    .custom-dl-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 600;
+        padding: 0.35rem 0.75rem;
+        border-radius: 0.5rem;
+        line-height: 1.6;
+        width: 100%;
+        text-decoration: none !important;
+        transition: opacity 0.2s ease, filter 0.2s ease;
+        box-sizing: border-box;
     }
-    div.element-container:has(.report-buttons-wrapper) + div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-child(2) button:hover {
-        background-color: #bbdefb !important; border-color: #64b5f6 !important; color: #1565c0 !important;
+    .custom-dl-btn:hover {
+        opacity: 0.85;
+        filter: brightness(0.95);
     }
-    
-    div.element-container:has(.report-buttons-wrapper) + div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-child(3) button {
-        background-color: #fff8e1 !important; color: #f57f17 !important; border: 1px solid #ffe082 !important; font-weight: bold;
-    }
-    div.element-container:has(.report-buttons-wrapper) + div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-child(3) button:hover {
-        background-color: #ffecb3 !important; border-color: #ffd54f !important; color: #f57f17 !important;
-    }
-    
-    div.element-container:has(.report-buttons-wrapper) + div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-child(4) button {
-        background-color: #ffebee !important; color: #c62828 !important; border: 1px solid #ef9a9a !important; font-weight: bold;
-    }
-    div.element-container:has(.report-buttons-wrapper) + div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-child(4) button:hover {
-        background-color: #ffcdd2 !important; border-color: #e57373 !important; color: #c62828 !important;
-    }
-    
-    div.element-container:has(.report-buttons-wrapper) + div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-child(5) button {
-        background-color: #e8f5e9 !important; color: #2e7d32 !important; border: 1px solid #a5d6a7 !important; font-weight: bold;
-    }
-    div.element-container:has(.report-buttons-wrapper) + div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-child(5) button:hover {
-        background-color: #c8e6c9 !important; border-color: #81c784 !important; color: #2e7d32 !important;
-    }
+    .btn-excel { background-color: #e3f2fd; color: #1565c0 !important; border: 1px solid #90caf9; }
+    .btn-chich { background-color: #fff8e1; color: #f57f17 !important; border: 1px solid #ffe082; }
+    .btn-cat   { background-color: #ffebee; color: #c62828 !important; border: 1px solid #ef9a9a; }
+    .btn-trong { background-color: #e8f5e9; color: #2e7d32 !important; border: 1px solid #a5d6a7; }
     </style>
     """, unsafe_allow_html=True)
+    
     col_t1, col_t2, col_t3, col_t4, col_t5 = st.columns([2, 1, 1, 1, 1])
+    
     with col_t2:
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -1488,45 +1484,31 @@ def render_global_data_tab(c_farm):
             df_des_all.to_excel(writer, sheet_name='Destruction Logs', index=False)
             df_har_all.to_excel(writer, sheet_name='Harvest Logs (Thu Hoạch)', index=False)
             df_bsr_all.to_excel(writer, sheet_name='BSR Logs (Tỷ lệ)', index=False)
-        output.seek(0)
-        st.download_button(
-            label="Xuất Báo Cáo Excel",
-            data=output.getvalue(),
-            file_name=f"Bao_cao_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-            type="secondary"
-        )
+        b64 = base64.b64encode(output.getvalue()).decode()
+        fn = f"Bao_cao_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx"
+        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{fn}" class="custom-dl-btn btn-excel">Xuất Báo Cáo Excel</a>'
+        st.markdown(href, unsafe_allow_html=True)
+
     with col_t3:
         chich_excel = generate_chich_bap_excel(df_lots_all, df_stg_all)
-        st.download_button(
-            label="Báo cáo Chích bắp",
-            data=chich_excel,
-            file_name=f"Bao_cao_chich_bap_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-            type="secondary"
-        )
+        b64 = base64.b64encode(chich_excel).decode()
+        fn = f"Bao_cao_chich_bap_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx"
+        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{fn}" class="custom-dl-btn btn-chich">Báo cáo Chích bắp</a>'
+        st.markdown(href, unsafe_allow_html=True)
+
     with col_t4:
         cut_excel = generate_cut_bap_excel(df_lots_all, df_stg_all, df_des_all)
-        st.download_button(
-            label="Báo cáo Cắt bắp",
-            data=cut_excel,
-            file_name=f"Bao_cao_cat_bap_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-            type="secondary"
-        )
+        b64 = base64.b64encode(cut_excel).decode()
+        fn = f"Bao_cao_cat_bap_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx"
+        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{fn}" class="custom-dl-btn btn-cat">Báo cáo Cắt bắp</a>'
+        st.markdown(href, unsafe_allow_html=True)
+
     with col_t5:
         plant_excel = generate_planting_excel(df_lots_all, df_seasons)
-        st.download_button(
-            label="Báo cáo Trồng mới",
-            data=plant_excel,
-            file_name=f"Bao_cao_trong_moi_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-            type="secondary"
-        )
+        b64 = base64.b64encode(plant_excel).decode()
+        fn = f"Bao_cao_trong_moi_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx"
+        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{fn}" class="custom-dl-btn btn-trong">Báo cáo Trồng mới</a>'
+        st.markdown(href, unsafe_allow_html=True)
 
     st.divider()
 
