@@ -1447,6 +1447,38 @@ def render_global_data_tab(c_farm):
     df_lots_trong_dam = df_lots_all[df_lots_all['loai_trong'] == 'Trồng dặm'] if not df_lots_all.empty else pd.DataFrame()
 
     # Nút Xuất Báo cáo Excel 
+    st.markdown('<div class="report-buttons-wrapper"></div>', unsafe_allow_html=True)
+    st.markdown("""
+    <style>
+    div.element-container:has(.report-buttons-wrapper) + div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-child(2) button {
+        background-color: #e3f2fd !important; color: #1565c0 !important; border: 1px solid #90caf9 !important; font-weight: bold;
+    }
+    div.element-container:has(.report-buttons-wrapper) + div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-child(2) button:hover {
+        background-color: #bbdefb !important; border-color: #64b5f6 !important; color: #1565c0 !important;
+    }
+    
+    div.element-container:has(.report-buttons-wrapper) + div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-child(3) button {
+        background-color: #fff8e1 !important; color: #f57f17 !important; border: 1px solid #ffe082 !important; font-weight: bold;
+    }
+    div.element-container:has(.report-buttons-wrapper) + div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-child(3) button:hover {
+        background-color: #ffecb3 !important; border-color: #ffd54f !important; color: #f57f17 !important;
+    }
+    
+    div.element-container:has(.report-buttons-wrapper) + div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-child(4) button {
+        background-color: #ffebee !important; color: #c62828 !important; border: 1px solid #ef9a9a !important; font-weight: bold;
+    }
+    div.element-container:has(.report-buttons-wrapper) + div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-child(4) button:hover {
+        background-color: #ffcdd2 !important; border-color: #e57373 !important; color: #c62828 !important;
+    }
+    
+    div.element-container:has(.report-buttons-wrapper) + div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-child(5) button {
+        background-color: #e8f5e9 !important; color: #2e7d32 !important; border: 1px solid #a5d6a7 !important; font-weight: bold;
+    }
+    div.element-container:has(.report-buttons-wrapper) + div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-child(5) button:hover {
+        background-color: #c8e6c9 !important; border-color: #81c784 !important; color: #2e7d32 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
     col_t1, col_t2, col_t3, col_t4, col_t5 = st.columns([2, 1, 1, 1, 1])
     with col_t2:
         output = io.BytesIO()
