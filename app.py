@@ -1459,6 +1459,8 @@ def render_global_data_tab(c_farm):
         border-radius: 0.5rem;
         line-height: 1.6;
         width: 100%;
+        min-height: 64px;
+        text-align: center;
         text-decoration: none !important;
         transition: opacity 0.2s ease, filter 0.2s ease;
         box-sizing: border-box;
