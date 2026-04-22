@@ -1037,6 +1037,30 @@ def generate_chich_bap_excel(df_lots, df_stg) -> bytes:
     # Filter chích bắp from stage_logs
     df_chich = df_stg[df_stg["giai_doan"] == "Chích bắp"].copy() if not df_stg.empty and "giai_doan" in df_stg.columns else pd.DataFrame()
 
+    # Chỉ lấy đợt trồng mới (loại bỏ trồng dặm + đợt cũ)
+    if not df_lots.empty and "loai_trong" in df_lots.columns:
+        valid_blids = set(df_lots[df_lots["loai_trong"] == "Trồng mới"]["id"].dropna().astype(int).tolist())
+        if not df_chich.empty and "base_lot_id" in df_chich.columns:
+            df_chich = df_chich[df_chich["base_lot_id"].isin(valid_blids)]
+
+    # Loại bỏ records chích bắp trước ngày trồng (thuộc đợt cũ, vô lý)
+    if not df_chich.empty and not df_lots.empty and "ngay_trong" in df_lots.columns:
+        planting_date_map = {}  # {base_lot_id: ngay_trong}
+        for _, lr in df_lots.iterrows():
+            if pd.notna(lr.get("id")) and pd.notna(lr.get("ngay_trong")):
+                planting_date_map[int(lr["id"])] = pd.to_datetime(lr["ngay_trong"])
+        
+        def _is_after_planting(row):
+            blid = row.get("base_lot_id")
+            if pd.isna(blid):
+                return True
+            plant_dt = planting_date_map.get(int(blid))
+            if plant_dt is None:
+                return True
+            return pd.to_datetime(row["ngay_thuc_hien"]) >= plant_dt
+        
+        df_chich = df_chich[df_chich.apply(_is_after_planting, axis=1)]
+
     if df_chich.empty:
         ws.cell(row=1, column=1, value="Chưa có dữ liệu Chích bắp.")
         output = io.BytesIO()
