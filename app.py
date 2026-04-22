@@ -1458,7 +1458,7 @@ def render_global_data_tab(c_farm):
             df_bsr_all.to_excel(writer, sheet_name='BSR Logs (Tỷ lệ)', index=False)
         output.seek(0)
         st.download_button(
-            label="📥 Xuất Báo Cáo Excel",
+            label="Xuất Báo Cáo Excel",
             data=output.getvalue(),
             file_name=f"Bao_cao_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1468,7 +1468,7 @@ def render_global_data_tab(c_farm):
     with col_t3:
         chich_excel = generate_chich_bap_excel(df_lots_all, df_stg_all)
         st.download_button(
-            label="🌽 Báo cáo Chích bắp",
+            label="Báo cáo Chích bắp",
             data=chich_excel,
             file_name=f"Bao_cao_chich_bap_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1478,7 +1478,7 @@ def render_global_data_tab(c_farm):
     with col_t4:
         cut_excel = generate_cut_bap_excel(df_lots_all, df_stg_all, df_des_all)
         st.download_button(
-            label="✂️ Báo cáo Cắt bắp",
+            label="Báo cáo Cắt bắp",
             data=cut_excel,
             file_name=f"Bao_cao_cat_bap_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1488,7 +1488,7 @@ def render_global_data_tab(c_farm):
     with col_t5:
         plant_excel = generate_planting_excel(df_lots_all, df_seasons)
         st.download_button(
-            label="🌱 Báo cáo Trồng mới",
+            label="Báo cáo Trồng mới",
             data=plant_excel,
             file_name=f"Bao_cao_trong_moi_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
