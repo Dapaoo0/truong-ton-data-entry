@@ -1818,7 +1818,10 @@ def render_global_data_tab(c_farm):
             if pd.notna(season_blid):
                 next_start = _next_season_map.get((int(season_blid), f_vu))
                 if next_start is not None and not sub_har.empty and "ngay_thu_hoach" in sub_har.columns:
-                    sub_har = sub_har[pd.to_datetime(sub_har["ngay_thu_hoach"]).dt.date < next_start.date()]
+                    # F0: upper bound = next_season_start + growth buffer
+                    # (Thu hoạch F0 có thể kéo dài sau ngày bắt đầu hành chính F1)
+                    harvest_upper = next_start + pd.Timedelta(weeks=18)
+                    sub_har = sub_har[pd.to_datetime(sub_har["ngay_thu_hoach"]).dt.date < harvest_upper.date()]
             elif pd.notna(end):
                 # Fallback: dùng season end date cho harvest nếu không có next_season_map
                 if not sub_har.empty and "ngay_thu_hoach" in sub_har.columns:
@@ -1829,9 +1832,17 @@ def render_global_data_tab(c_farm):
             so_cat_bap = int(sub_stg[sub_stg["giai_doan"] == "Cắt bắp"]["so_luong"].sum()) if not sub_stg.empty else 0
             so_thu_hoach = int(sub_har["so_luong"].sum()) if not sub_har.empty else 0
             
-            # ─── Safety: thu hoạch chưa thể xảy ra nếu chưa có chích bắp ───
-            # Vụ Fn: nếu chưa có chích bắp trong khoảng date range → harvest = 0
-            # (Tránh gán nhầm harvest F0 vào F1 khi overlap date range)
+            # ─── Safety: thu hoạch chưa thể xảy ra nếu chưa đủ thời gian sinh trưởng ───
+            # Vụ Fn (n>=1): cây cần ít nhất ~18 tuần từ khi bắt đầu vụ mới đến khi thu hoạch.
+            # Nếu harvest_date < season_start + 18 tuần → đó là harvest F(n-1) bị overlap, loại bỏ.
+            HARVEST_MIN_GROWTH_WEEKS = 18
+            if f_vu != "F0" and pd.notna(start):
+                harvest_earliest = start + pd.Timedelta(weeks=HARVEST_MIN_GROWTH_WEEKS)
+                if not sub_har.empty and "ngay_thu_hoach" in sub_har.columns:
+                    sub_har = sub_har[pd.to_datetime(sub_har["ngay_thu_hoach"]).dt.date >= harvest_earliest.date()]
+                so_thu_hoach = int(sub_har["so_luong"].sum()) if not sub_har.empty else 0
+            
+            # Fallback: nếu F1+ mà chưa có chích bắp → chắc chắn chưa thu hoạch
             if f_vu != "F0" and so_chich_bap == 0:
                 so_thu_hoach = 0
 
