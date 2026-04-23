@@ -1,6 +1,28 @@
 # Changelog
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
+## [23/04/2026] - Fix Harvest F0→F1 Bleeding + Interactive Farm Map Tool
+
+#### Bugfix: Thu hoạch F0 bị gán nhầm vào vụ F1 (`app.py`)
+- **[Root Cause]**: Khi vụ F1 bắt đầu (11/01/2026) nhưng F0 vẫn đang thu hoạch (đến 02/2026), filter `harvest >= season_start` hớt lấy 772 cây thu hoạch F0 gán vào F1. Guard `so_chich_bap == 0` không chặn được vì F1 đã có 85 chích bắp.
+- **[Fix]**: Thêm `HARVEST_MIN_GROWTH_WEEKS = 18` — với vụ F1+, harvest chỉ được tính nếu `ngay >= season_start + 18 tuần` (thời gian sinh trưởng tối thiểu). F0 upper bound cũng nới ra `+ 18 tuần` để không mất harvest cuối vụ.
+- **[Impact]**: F1 lô 3B (base_lot_id=25): Thu hoạch 772 → 0 (đúng). F0: giữ đủ 6 lần thu hoạch.
+
+#### Feature: Polygon Tracer Tool (`polygon_tracer.html`)
+- **[Mục đích]**: Công cụ HTML vẽ polygon lên ảnh bản đồ farm để tạo tọa độ cho interactive map component.
+- **[Tính năng]**: Click to trace, undo, delete, export/import JSON, drag-drop image, keyboard shortcuts.
+
+## [22/04/2026] - Excel Reports Multi-Year + Button Styling
+
+#### Feature: Phân chia báo cáo Excel theo năm (`app.py`)
+- **[Chích bắp/Cắt bắp/Trồng mới]**: Tự động chia dữ liệu thành nhiều sheet theo năm (VD: "2025", "2026"). Sort theo tuần/ngày trong mỗi sheet.
+- **[Logic]**: Năm trích từ `ngay_thuc_hien` (chích/cắt) hoặc `ngay_trong` (trồng).
+
+#### Style: Tô màu nút tải Excel (`app.py`)
+- **[Approach]**: Thay `st.download_button` bằng HTML `<a>` base64-encoded với CSS classes riêng (Streamlit không hỗ trợ custom button styling trực tiếp).
+- **[Bỏ emoji]**: Xóa icon emoji khỏi text nút.
+- **[Màu sắc]**: Xuất Excel (xanh dương), Chích bắp (vàng cam), Cắt bắp (đỏ nhạt), Trồng mới (xanh lá). Min-height đồng nhất.
+
 ## [20/04/2026] - Diện tích trồng thực tế (per-batch)
 
 #### Feature: Chuyển từ `dim_lo.area_ha` → `base_lots.dien_tich_trong` (`app.py`)

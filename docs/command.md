@@ -2,6 +2,20 @@
 
 Tài liệu này lưu lại tóm tắt các yêu cầu của người dùng để theo dõi tiến độ và nhiệm vụ.
 
+## Ngày 23/04/2026
+
+- Phát hiện và fix bug thu hoạch F0 bị gán nhầm vào F1 (lô 3B, base_lot_id=25, 772 cây). Thêm `HARVEST_MIN_GROWTH_WEEKS = 18` vào logic filter.
+- Tạo công cụ Polygon Tracer (`polygon_tracer.html`) để vẽ tọa độ polygon lên ảnh bản đồ Farm 157 cho interactive map component.
+- Cập nhật docs: `changelog.md`, `findings.md`, `business_logic.md`, `command.md`.
+
+## Ngày 22/04/2026
+
+- Phân chia báo cáo Excel (Chích bắp, Cắt bắp, Trồng mới) thành nhiều sheet theo năm.
+- Bỏ emoji khỏi text nút tải Excel.
+- Tô màu cho 4 nút tải báo cáo Excel (pastel colors) — dùng HTML `<a>` base64 thay `st.download_button`.
+- Căn giữa (align) các nút tải Excel bằng `min-height` đồng nhất.
+
+
 ## Ngày 20/04/2026
 
 - Chuyển hiển thị diện tích từ `dim_lo.area_ha` (tối đa lô) sang `base_lots.dien_tich_trong` (diện tích trồng thực tế per-batch). Fallback area_ha nếu NULL.
