@@ -1736,7 +1736,7 @@ def render_global_data_tab(c_farm):
         stage_colors_json = json.dumps(stage_colors, ensure_ascii=False)
         default_color = "#636e72"
 
-        # ── Pole of Inaccessibility — tìm điểm xa biên nhất trong polygon ──
+        # ── Label placement: geometric centroid + fallback ──
         def _point_in_polygon(px, py, pts):
             """Ray casting algorithm."""
             n = len(pts)
@@ -1749,6 +1749,25 @@ def render_global_data_tab(c_farm):
                     inside = not inside
                 j = i
             return inside
+
+        def _geometric_centroid(pts):
+            """Shoelace-based area centroid — trọng tâm diện tích chính xác."""
+            n = len(pts)
+            if n < 3:
+                return sum(p[0] for p in pts)/n, sum(p[1] for p in pts)/n
+            signed_area = 0
+            cx = cy = 0
+            for i in range(n):
+                x0, y0 = pts[i]
+                x1, y1 = pts[(i + 1) % n]
+                cross = x0 * y1 - x1 * y0
+                signed_area += cross
+                cx += (x0 + x1) * cross
+                cy += (y0 + y1) * cross
+            area6 = 3 * signed_area  # 6A = 3 * 2A
+            if abs(area6) < 1e-6:
+                return sum(p[0] for p in pts)/n, sum(p[1] for p in pts)/n
+            return cx / area6, cy / area6
 
         def _dist_to_edge(px, py, pts):
             """Min distance from point to polygon edges."""
@@ -1766,8 +1785,8 @@ def render_global_data_tab(c_farm):
                 min_d = min(min_d, d)
             return min_d
 
-        def _pole_of_inaccessibility(pts, precision=10):
-            """Find the point inside polygon furthest from any edge (iterative grid search)."""
+        def _pole_of_inaccessibility(pts):
+            """Fallback: tìm điểm xa biên nhất (cho polygon lõm nặng)."""
             xs = [p[0] for p in pts]
             ys = [p[1] for p in pts]
             min_x, max_x = min(xs), max(xs)
@@ -1775,11 +1794,11 @@ def render_global_data_tab(c_farm):
             best_x = (min_x + max_x) / 2
             best_y = (min_y + max_y) / 2
             best_d = -1
-            step_x = (max_x - min_x) / 8
-            step_y = (max_y - min_y) / 8
-            for _iteration in range(4):  # 4 rounds of refinement
-                for ix in range(9):
-                    for iy in range(9):
+            step_x = (max_x - min_x) / 10
+            step_y = (max_y - min_y) / 10
+            for _ in range(5):
+                for ix in range(11):
+                    for iy in range(11):
                         cx = min_x + ix * step_x
                         cy = min_y + iy * step_y
                         if _point_in_polygon(cx, cy, pts):
@@ -1788,14 +1807,20 @@ def render_global_data_tab(c_farm):
                                 best_d = d
                                 best_x = cx
                                 best_y = cy
-                # Zoom into best region
                 min_x = best_x - step_x
                 max_x = best_x + step_x
                 min_y = best_y - step_y
                 max_y = best_y + step_y
-                step_x /= 4
-                step_y /= 4
+                step_x /= 5
+                step_y /= 5
             return best_x, best_y
+
+        def _best_label_pos(pts):
+            """Hybrid: geometric centroid nếu nằm trong polygon, else pole of inaccessibility."""
+            cx, cy = _geometric_centroid(pts)
+            if _point_in_polygon(cx, cy, pts):
+                return cx, cy
+            return _pole_of_inaccessibility(pts)
 
         # ── Build SVG polygons ──
         img_w = polygon_data.get("image_width", 4000)
@@ -1814,9 +1839,9 @@ def render_global_data_tab(c_farm):
             # Encode batches as JSON string for JS tooltip
             batches_json = json.dumps(info.get("batches", []), ensure_ascii=False).replace('"', '&quot;')
 
-            # Pole of inaccessibility for optimal label placement
+            # Hybrid label placement: geometric centroid → fallback pole of inaccessibility
             poly_pts = [(p["x"], p["y"]) for p in lot["points"]]
-            cx, cy = _pole_of_inaccessibility(poly_pts)
+            cx, cy = _best_label_pos(poly_pts)
 
             svg_polygons += f'''
             <polygon class="lot-poly" points="{points_str}" fill="{fill}"
