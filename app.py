@@ -1891,7 +1891,12 @@ def render_global_data_tab(c_farm):
                     # Dùng batch_label_map chung (đã build ở trên) cho display label
                     display_label = batch_label_map.get(blid, lo_name) if blid else lo_name
                     is_multi = total_batches > 1
-                    batches.append({"vu": vu, "ngay_bd": ngay_bd, "so_cay": so_cay, "gd": gd, "chich": chich, "cat": cat, "thu": thu, "label": display_label, "multi": is_multi})
+                    # Đợt number: parse từ label "3B (đợt 2)" → 2
+                    dot_num = 0
+                    if is_multi and "đợt " in display_label:
+                        _n = display_label.split("đợt ")[-1].rstrip(")")
+                        dot_num = int(_n) if _n.isdigit() else 0
+                    batches.append({"vu": vu, "ngay_bd": ngay_bd, "so_cay": so_cay, "gd": gd, "chich": chich, "cat": cat, "thu": thu, "dot": dot_num, "multi": is_multi})
 
                 # Dominant batch = nhiều cây nhất → quyết định màu polygon
                 dominant = max(batches, key=lambda b: b["so_cay"]) if batches else batches[0]
@@ -2199,11 +2204,7 @@ def render_global_data_tab(c_farm):
                         var b = batches[i];
                         var sc = stageColors[b.gd] || "#636e72";
                         html += '<div style="margin-bottom:' + (i < batches.length-1 ? '8' : '0') + 'px;padding:6px 8px;background:rgba(255,255,255,0.04);border-radius:6px;border-left:3px solid ' + sc + '">';
-                        var batchTitle = b.vu;
-                        if (b.multi && b.label) {
-                            var m = b.label.match(/\(đợt\s*(\d+)\)/);
-                            if (m) batchTitle = 'Đợt ' + m[1] + ' (' + b.vu + ')';
-                        }
+                        var batchTitle = (b.multi && b.dot) ? ('Đợt ' + b.dot + ' (' + b.vu + ')') : b.vu;
                         html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px"><span style="font-weight:700;color:#fff">' + batchTitle + '</span><span class="tt-stage" style="background:' + sc + ';color:#fff">' + b.gd + '</span></div>';
                         html += '<div class="tt-row"><span class="tt-label">Bắt đầu</span><span class="tt-value">' + b.ngay_bd + '</span></div>';
                         html += '<div class="tt-row"><span class="tt-label">Số cây</span><span class="tt-value">' + b.so_cay.toLocaleString() + '</span></div>';
