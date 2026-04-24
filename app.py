@@ -2480,7 +2480,6 @@ def render_global_data_tab(c_farm):
     st.caption(f"Hao hụt từ Trồng → Thu hoạch: **{LOSS_RATE_TO_THU*100:.0f}%/vụ** · Sản lượng: **F0 = {KG_PER_TREE_F0} kg/buồng**, **Fn = {KG_PER_TREE_FN} kg/buồng**")
 
     if not df_lots_trong_moi.empty and "ngay_trong" in df_lots_trong_moi.columns and "lo" in df_lots_trong_moi.columns:
-        from datetime import timedelta
         from scipy.stats import norm as scipy_norm
         import numpy as np
         import re as _re
