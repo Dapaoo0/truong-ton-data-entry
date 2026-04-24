@@ -1,6 +1,14 @@
 # Changelog
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
+## [24/04/2026] - Reset & Re-insert Chích Bắp từ Excel nguồn gốc
+
+#### Data: Xóa toàn bộ chích bắp cũ, insert mới từ "mặt bằng chích bắp tuần 16" (`stage_logs`)
+- **[Mô tả]**: Xóa 68 records chích bắp cũ (hỗn hợp vụ cũ + vụ mới, không chính xác). Insert lại 42 records từ file Excel gốc (tuần 14-16, 30/03-19/04/2026).
+- **[Phân loại vụ]**: Dùng timeline `ngay_trong + 120..240 ngày` → xác định 3A, 8A fact data = vụ cũ (bỏ qua). 7A = vụ cũ (bỏ qua).
+- **[3BF convention]**: 3BF = lô 3B đợt 1 (batch 25, F1), 3B = đợt 2 (batch 7, F0). Set `base_lot_id` thủ công (FIFO trigger skip khi đã set).
+- **[Kết quả]**: 3A=2636 (batch 6), 3B đợt 1=85 (batch 25), 3B đợt 2=1044 (batch 7), 8A=308 (batch 14), 8B=525 (batch 15). Tổng 4,598 cây.
+
 ## [24/04/2026] - FIFO Batch Allocation cho Stage/Harvest/Destruction Logs
 
 #### Feature: FIFO phân bổ tự động theo đợt trồng (`app.py`)

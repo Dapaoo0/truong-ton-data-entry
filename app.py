@@ -1832,6 +1832,19 @@ def render_global_data_tab(c_farm):
                     else:
                         _map_next_season[(int(blid), vu_val)] = None
 
+        # ─── Shared batch_label_map: "Tên lô (đợt N)" cho các lô nhiều đợt trồng ───
+        # Dùng chung cho Map tooltip VÀ Bảng chi tiết
+        batch_label_map = {}  # {base_lot_id: "Tên lô (đợt N)" hoặc "Tên lô"}
+        if not df_lots_trong_moi.empty and "id" in df_lots_trong_moi.columns and "lo" in df_lots_trong_moi.columns:
+            for lo_name_grp, grp_df in df_lots_trong_moi.groupby("lo"):
+                if len(grp_df) > 1:
+                    sorted_grp = grp_df.sort_values("ngay_trong") if "ngay_trong" in grp_df.columns else grp_df
+                    for i, (_, b_row) in enumerate(sorted_grp.iterrows(), 1):
+                        batch_label_map[b_row["id"]] = f"{lo_name_grp} (đợt {i})"
+                else:
+                    for _, b_row in grp_df.iterrows():
+                        batch_label_map[b_row["id"]] = lo_name_grp
+
         if not df_seasons.empty and not df_lots_trong_moi.empty:
             for lo_name in df_lots_trong_moi["lo"].dropna().unique():
                 lo_lots = df_lots_trong_moi[df_lots_trong_moi["lo"] == lo_name]
@@ -1844,6 +1857,7 @@ def render_global_data_tab(c_farm):
 
                 # Build per-batch info
                 batches = []
+                total_batches = len(lo_seasons)
                 for _, s_row in lo_seasons.iterrows():
                     vu = s_row.get("vu", "?")
                     ngay_bd_raw = s_row.get("ngay_bat_dau")
@@ -1874,7 +1888,10 @@ def render_global_data_tab(c_farm):
                         )
                     else:
                         gd, chich, cat, thu = "Đang sinh trưởng", 0, 0, 0
-                    batches.append({"vu": vu, "ngay_bd": ngay_bd, "so_cay": so_cay, "gd": gd, "chich": chich, "cat": cat, "thu": thu})
+                    # Dùng batch_label_map chung (đã build ở trên) cho display label
+                    display_label = batch_label_map.get(blid, lo_name) if blid else lo_name
+                    is_multi = total_batches > 1
+                    batches.append({"vu": vu, "ngay_bd": ngay_bd, "so_cay": so_cay, "gd": gd, "chich": chich, "cat": cat, "thu": thu, "label": display_label, "multi": is_multi})
 
                 # Dominant batch = nhiều cây nhất → quyết định màu polygon
                 dominant = max(batches, key=lambda b: b["so_cay"]) if batches else batches[0]
@@ -2182,7 +2199,12 @@ def render_global_data_tab(c_farm):
                         var b = batches[i];
                         var sc = stageColors[b.gd] || "#636e72";
                         html += '<div style="margin-bottom:' + (i < batches.length-1 ? '8' : '0') + 'px;padding:6px 8px;background:rgba(255,255,255,0.04);border-radius:6px;border-left:3px solid ' + sc + '">';
-                        html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px"><span style="font-weight:700;color:#fff">' + b.vu + '</span><span class="tt-stage" style="background:' + sc + ';color:#fff">' + b.gd + '</span></div>';
+                        var batchTitle = b.vu;
+                        if (b.multi && b.label) {
+                            var m = b.label.match(/\(đợt\s*(\d+)\)/);
+                            if (m) batchTitle = 'Đợt ' + m[1] + ' (' + b.vu + ')';
+                        }
+                        html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px"><span style="font-weight:700;color:#fff">' + batchTitle + '</span><span class="tt-stage" style="background:' + sc + ';color:#fff">' + b.gd + '</span></div>';
                         html += '<div class="tt-row"><span class="tt-label">Bắt đầu</span><span class="tt-value">' + b.ngay_bd + '</span></div>';
                         html += '<div class="tt-row"><span class="tt-label">Số cây</span><span class="tt-value">' + b.so_cay.toLocaleString() + '</span></div>';
                         html += '<div class="tt-row"><span class="tt-label">Chích bắp</span><span class="tt-value">' + b.chich.toLocaleString() + '</span></div>';
@@ -2310,20 +2332,7 @@ def render_global_data_tab(c_farm):
     if not df_dt_seasons.empty:
         detail_rows_by_vu = {}
         
-        # ─── Xây dựng label "đợt X" cho các lô có nhiều đợt trồng (chỉ trồng mới) ───
-        batch_label_map = {}  # {base_lot_id: "Tên lô (đợt N)" hoặc "Tên lô"}
-        if not df_lots_trong_moi.empty and "id" in df_lots_trong_moi.columns and "lo" in df_lots_trong_moi.columns:
-            lot_groups = df_lots_trong_moi.groupby("lo")
-            for lo_name_grp, grp_df in lot_groups:
-                if len(grp_df) > 1:
-                    # Nhiều đợt → sort theo ngày trồng, đánh số
-                    sorted_grp = grp_df.sort_values("ngay_trong") if "ngay_trong" in grp_df.columns else grp_df
-                    for i, (_, b_row) in enumerate(sorted_grp.iterrows(), 1):
-                        batch_label_map[b_row["id"]] = f"{lo_name_grp} (đợt {i})"
-                else:
-                    # Chỉ 1 đợt → giữ nguyên tên lô
-                    for _, b_row in grp_df.iterrows():
-                        batch_label_map[b_row["id"]] = lo_name_grp
+        # ─── batch_label_map đã được build ở trên (shared với Map tooltip) ───
 
         # ─── Dedup: bỏ season trùng (vu, base_lot_id) ───
         # Sort: ưu tiên season đã kết thúc (có ngay_ket_thuc_thuc_te), rồi ngay_bat_dau mới nhất

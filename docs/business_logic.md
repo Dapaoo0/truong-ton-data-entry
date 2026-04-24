@@ -116,6 +116,9 @@ Hệ thống tự động liên kết log entries (stage_logs, harvest_logs, des
 - Nếu đợt cũ đã full → tự động tràn sang đợt kế tiếp.
 - Kết quả: mỗi allocation kèm `base_lot_id` → ghi chính xác vào DB.
 - **Ví dụ**: Lô 3B có đợt 1 (1376 cây, đã chích 1149, còn 227) và đợt 2 (500 cây, chưa chích). User nhập "chích bắp 3B = 300" → đợt 1 nhận 227, đợt 2 nhận 73.
+- **Hai chế độ phân bổ**:
+  1. **User chỉ định đợt trồng** → set `base_lot_id` thủ công. Trigger FIFO skip (`IF NEW.base_lot_id IS NOT NULL`).
+  2. **Không chỉ định** → FIFO mặc định (trigger tự gán batch cũ nhất có capacity).
 
 ### 4.3 Closest-match fallback (resolve_base_lot_id)
 - Dùng cho trường hợp auto-resolve khi `base_lot_id` chưa được set bởi FIFO.
