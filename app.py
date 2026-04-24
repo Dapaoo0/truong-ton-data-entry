@@ -1772,18 +1772,26 @@ def render_global_data_tab(c_farm):
 
         html_content = f'''
         <style>
+            html, body {{
+                background: transparent !important;
+                margin: 0;
+                padding: 0;
+                overflow: hidden;
+            }}
             .farm-map-container {{
                 position: relative;
                 width: 100%;
                 background: #1a1a2e;
                 border-radius: 12px;
-                overflow: hidden;
+                overflow: visible;
                 border: 1px solid #2d3460;
             }}
             .farm-map-container svg {{
                 display: block;
                 width: 100%;
                 height: auto;
+                border-radius: 12px;
+                overflow: hidden;
             }}
             .lot-poly {{
                 fill-opacity: 0.45;
@@ -1818,11 +1826,9 @@ def render_global_data_tab(c_farm):
                 font-family: 'Segoe UI', system-ui, sans-serif;
                 font-size: 13px;
                 line-height: 1.65;
-                pointer-events: auto;
+                pointer-events: none;
                 z-index: 1000;
                 min-width: 220px;
-                max-height: 420px;
-                overflow-y: auto;
                 box-shadow: 0 8px 32px rgba(0,0,0,0.45);
                 backdrop-filter: blur(8px);
             }}
@@ -1894,24 +1900,16 @@ def render_global_data_tab(c_farm):
             const polys = container.querySelectorAll('.lot-poly');
             const stageColors = {stage_colors_json};
             stageColors["Chưa có dữ liệu"] = "#636e72";
-            let hideTimeout = null;
-
-            function showTooltip() {{ clearTimeout(hideTimeout); tooltip.style.display = 'block'; }}
-            function scheduleHide() {{ hideTimeout = setTimeout(() => {{ tooltip.style.display = 'none'; }}, 300); }}
-
-            tooltip.addEventListener('mouseenter', showTooltip);
-            tooltip.addEventListener('mouseleave', () => {{ tooltip.style.display = 'none'; }});
 
             polys.forEach(poly => {{
                 poly.addEventListener('mouseenter', function(e) {{
-                    clearTimeout(hideTimeout);
                     const d = this.dataset;
                     let batches = [];
                     try {{ batches = JSON.parse(d.batches || '[]'); }} catch(e) {{}}
 
                     let html = `<div class="tt-title">Lô ${{d.name}}</div>`;
-                    html += `<div class="tt-row"><span class="tt-label">Dien tich</span><span class="tt-value">${{d.dt}}</span></div>`;
-                    html += `<div class="tt-row"><span class="tt-label">Tong so cay</span><span class="tt-value">${{parseInt(d.total||0).toLocaleString()}}</span></div>`;
+                    html += `<div class="tt-row"><span class="tt-label">Diện tích</span><span class="tt-value">${{d.dt}}</span></div>`;
+                    html += `<div class="tt-row"><span class="tt-label">Tổng số cây</span><span class="tt-value">${{parseInt(d.total||0).toLocaleString()}}</span></div>`;
 
                     if (batches.length > 0) {{
                         html += `<div style="border-top:1px solid rgba(255,255,255,0.1);margin:8px 0"></div>`;
@@ -1919,19 +1917,18 @@ def render_global_data_tab(c_farm):
                             const sc = stageColors[b.gd] || "#636e72";
                             html += `<div style="margin-bottom:${{i < batches.length-1 ? '8' : '0'}}px;padding:6px 8px;background:rgba(255,255,255,0.04);border-radius:6px;border-left:3px solid ${{sc}}">`;
                             html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px"><span style="font-weight:700;color:#fff">${{b.vu}}</span><span class="tt-stage" style="background:${{sc}};color:#fff">${{b.gd}}</span></div>`;
-                            html += `<div class="tt-row"><span class="tt-label">Bat dau</span><span class="tt-value">${{b.ngay_bd}}</span></div>`;
-                            html += `<div class="tt-row"><span class="tt-label">So cay</span><span class="tt-value">${{b.so_cay.toLocaleString()}}</span></div>`;
-                            html += `<div class="tt-row"><span class="tt-label">Chich bap</span><span class="tt-value">${{b.chich.toLocaleString()}}</span></div>`;
-                            html += `<div class="tt-row"><span class="tt-label">Cat bap</span><span class="tt-value">${{b.cat.toLocaleString()}}</span></div>`;
-                            html += `<div class="tt-row"><span class="tt-label">Thu hoach</span><span class="tt-value">${{b.thu.toLocaleString()}}</span></div>`;
+                            html += `<div class="tt-row"><span class="tt-label">Bắt đầu</span><span class="tt-value">${{b.ngay_bd}}</span></div>`;
+                            html += `<div class="tt-row"><span class="tt-label">Số cây</span><span class="tt-value">${{b.so_cay.toLocaleString()}}</span></div>`;
+                            html += `<div class="tt-row"><span class="tt-label">Chích bắp</span><span class="tt-value">${{b.chich.toLocaleString()}}</span></div>`;
+                            html += `<div class="tt-row"><span class="tt-label">Cắt bắp</span><span class="tt-value">${{b.cat.toLocaleString()}}</span></div>`;
+                            html += `<div class="tt-row"><span class="tt-label">Thu hoạch</span><span class="tt-value">${{b.thu.toLocaleString()}}</span></div>`;
                             html += `</div>`;
                         }});
                     }} else {{
-                        html += `<div style="color:#94a3b8;margin-top:6px">Chua co du lieu</div>`;
+                        html += `<div style="color:#94a3b8;margin-top:6px">Chưa có dữ liệu</div>`;
                     }}
                     tooltip.innerHTML = html;
-                    tooltip.scrollTop = 0;
-                    showTooltip();
+                    tooltip.style.display = 'block';
                 }});
 
                 poly.addEventListener('mousemove', function(e) {{
@@ -1939,18 +1936,19 @@ def render_global_data_tab(c_farm):
                     let x = e.clientX - rect.left + 16;
                     let y = e.clientY - rect.top + 16;
                     if (x + 260 > rect.width) x = e.clientX - rect.left - 270;
-                    if (y + 300 > rect.height) y = e.clientY - rect.top - 310;
                     tooltip.style.left = x + 'px';
                     tooltip.style.top = y + 'px';
                 }});
 
-                poly.addEventListener('mouseleave', scheduleHide);
+                poly.addEventListener('mouseleave', function() {{
+                    tooltip.style.display = 'none';
+                }});
             }});
         }})();
         </script>
         '''
 
-        components.html(html_content, height=700, scrolling=False)
+        components.html(html_content, height=1100, scrolling=False)
 
     st.divider()
 
