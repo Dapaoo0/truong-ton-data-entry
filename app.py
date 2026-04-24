@@ -1673,32 +1673,92 @@ def render_global_data_tab(c_farm):
         # ── Build lot info từ DB data (per-batch tracking) ──
         lot_info_map = {}  # lo_name → {info dict with batches}
 
-        def _get_batch_stage(lo_name, base_lot_id, vu="F0", season_start=None):
-            """Xác định giai đoạn của 1 đợt trồng cụ thể dựa trên logs.
-            Áp dụng Harvest Growth Buffer (§1.2.1): F1+ chỉ tính harvest nếu >= season_start + 18 tuần.
+        # ─── Shared: compute_batch_stats ───
+        # Hàm dùng chung cho Map & Table để đảm bảo đồng bộ logic xác định giai đoạn.
+        HARVEST_MIN_GROWTH_WEEKS = 18
+
+        def compute_batch_stats(lo_name, base_lot_id, vu="F0", season_start=None,
+                                season_end=None, next_season_start=None, next_vu_producing=False):
+            """Tính (giai_doan, so_chich, so_cat, so_thu) cho 1 batch/season.
+            Áp dụng đầy đủ business rules (business_logic.md):
+              1. Filter stage_logs/harvest theo season date range (start ≤ date)
+              2. Harvest Growth Buffer: F1+ chỉ tính harvest >= season_start + 18w
+              3. Harvest upper bound: next_season_start + 18w (nếu next vu đang sản xuất)
+              4. F1+ chưa có chích bắp → so_thu = 0
             """
             so_chich, so_cat, so_thu = 0, 0, 0
+            season_start_ts = pd.Timestamp(season_start) if season_start is not None else None
+
+            # ── Stage logs (chích bắp, cắt bắp) ──
             if not df_stg_all.empty and "lo" in df_stg_all.columns and "base_lot_id" in df_stg_all.columns:
                 stg = df_stg_all[(df_stg_all["lo"] == lo_name) & (df_stg_all["base_lot_id"] == base_lot_id)]
+                # Filter theo season start date
+                if season_start_ts is not None and not stg.empty and "ngay_thuc_hien" in stg.columns:
+                    stg = stg[pd.to_datetime(stg["ngay_thuc_hien"], errors="coerce") >= season_start_ts]
                 if not stg.empty:
                     c = stg[stg["giai_doan"] == "Chích bắp"]
                     k = stg[stg["giai_doan"] == "Cắt bắp"]
                     so_chich = int(c["so_luong"].sum()) if not c.empty else 0
                     so_cat = int(k["so_luong"].sum()) if not k.empty else 0
+
+            # ── Harvest logs ──
             if not df_har_all.empty and "lo" in df_har_all.columns and "base_lot_id" in df_har_all.columns:
                 har = df_har_all[(df_har_all["lo"] == lo_name) & (df_har_all["base_lot_id"] == base_lot_id)]
-                # Harvest Growth Buffer: F1+ chỉ tính harvest >= season_start + 18 tuần
-                if vu != "F0" and season_start is not None:
-                    harvest_min_date = season_start + timedelta(weeks=18)
-                    if "ngay_thu_hoach" in har.columns and not har.empty:
+                if not har.empty and "ngay_thu_hoach" in har.columns:
+                    har_dates = pd.to_datetime(har["ngay_thu_hoach"], errors="coerce")
+                    # Filter >= season start
+                    if season_start_ts is not None:
+                        har = har[har_dates >= season_start_ts]
                         har_dates = pd.to_datetime(har["ngay_thu_hoach"], errors="coerce")
-                        har = har[har_dates >= pd.Timestamp(harvest_min_date)]
+                    # Harvest Growth Buffer: F1+ chỉ tính harvest >= season_start + 18w
+                    if vu != "F0" and season_start is not None:
+                        harvest_min = pd.Timestamp(season_start) + pd.Timedelta(weeks=HARVEST_MIN_GROWTH_WEEKS)
+                        har = har[har_dates >= harvest_min]
+                        har_dates = pd.to_datetime(har["ngay_thu_hoach"], errors="coerce")
+                    # Upper bound: next_season_start + 18w (nếu vụ kế đang sản xuất)
+                    if next_season_start is not None and next_vu_producing:
+                        harvest_upper = pd.Timestamp(next_season_start) + pd.Timedelta(weeks=HARVEST_MIN_GROWTH_WEEKS)
+                        har = har[har_dates < harvest_upper]
                 so_thu = int(har["so_luong"].sum()) if not har.empty else 0
+
+            # Safety: F1+ chưa có chích bắp → chắc chắn chưa thu hoạch
+            if vu != "F0" and so_chich == 0:
+                so_thu = 0
+
+            # Xác định giai đoạn
             gd = "Đang sinh trưởng"
             if so_thu > 0: gd = "Thu hoạch"
             elif so_cat > 0: gd = "Cắt bắp"
             elif so_chich > 0: gd = "Chích bắp"
             return gd, so_chich, so_cat, so_thu
+
+        # ─── Build next_season_map cho Map (dùng chung logic với Table) ───
+        _map_next_season = {}  # (base_lot_id, vu) → next_season_start or None
+        _map_next_producing = set()  # (base_lot_id, vu) đã có chích bắp
+        if not df_seasons.empty and not df_stg_all.empty and "base_lot_id" in df_stg_all.columns:
+            stg_chich_all = df_stg_all[df_stg_all["giai_doan"] == "Chích bắp"]
+            for _, s_row in df_seasons[df_seasons["base_lot_id"].notna()].iterrows():
+                s_blid = int(s_row["base_lot_id"])
+                s_vu = s_row["vu"]
+                s_start = pd.to_datetime(s_row["ngay_bat_dau"])
+                chich_batch = stg_chich_all[stg_chich_all["base_lot_id"] == s_blid]
+                if not chich_batch.empty and "ngay_thuc_hien" in chich_batch.columns:
+                    chich_in = chich_batch[pd.to_datetime(chich_batch["ngay_thuc_hien"], errors="coerce") >= s_start]
+                    if not chich_in.empty:
+                        _map_next_producing.add((s_blid, s_vu))
+        if not df_seasons.empty and "base_lot_id" in df_seasons.columns:
+            for blid, blid_grp in df_seasons[df_seasons["base_lot_id"].notna()].groupby("base_lot_id"):
+                sorted_s = blid_grp.sort_values("ngay_bat_dau").drop_duplicates("vu")
+                vu_list = sorted_s[["vu", "ngay_bat_dau"]].values.tolist()
+                for i, (vu_val, start_dt) in enumerate(vu_list):
+                    if i + 1 < len(vu_list):
+                        next_vu = vu_list[i + 1][0]
+                        if (int(blid), next_vu) in _map_next_producing:
+                            _map_next_season[(int(blid), vu_val)] = pd.to_datetime(vu_list[i + 1][1])
+                        else:
+                            _map_next_season[(int(blid), vu_val)] = None
+                    else:
+                        _map_next_season[(int(blid), vu_val)] = None
 
         if not df_seasons.empty and not df_lots_trong_moi.empty:
             for lo_name in df_lots_trong_moi["lo"].dropna().unique():
@@ -1717,7 +1777,7 @@ def render_global_data_tab(c_farm):
                     ngay_bd_raw = s_row.get("ngay_bat_dau")
                     ngay_bd = str(ngay_bd_raw)[:10] if ngay_bd_raw is not None else ""
                     blid = s_row.get("base_lot_id")
-                    # Parse season_start cho Harvest Growth Buffer
+                    # Parse season_start
                     season_start = None
                     if ngay_bd_raw is not None:
                         try:
@@ -1730,7 +1790,18 @@ def render_global_data_tab(c_farm):
                         so_cay = int(batch_lot["so_luong"].sum()) if not batch_lot.empty else 0
                     else:
                         so_cay = 0
-                    gd, chich, cat, thu = _get_batch_stage(lo_name, blid, vu=vu, season_start=season_start) if blid else ("Đang sinh trưởng", 0, 0, 0)
+                    # Dùng shared compute_batch_stats
+                    if blid:
+                        next_s = _map_next_season.get((int(blid), vu))
+                        next_prod = (int(blid), vu) in _map_next_producing if next_s else False
+                        # Chuyển next_s sang date nếu có
+                        next_s_date = next_s.date() if next_s is not None else None
+                        gd, chich, cat, thu = compute_batch_stats(
+                            lo_name, blid, vu=vu, season_start=season_start,
+                            next_season_start=next_s_date, next_vu_producing=next_prod
+                        )
+                    else:
+                        gd, chich, cat, thu = "Đang sinh trưởng", 0, 0, 0
                     batches.append({"vu": vu, "ngay_bd": ngay_bd, "so_cay": so_cay, "gd": gd, "chich": chich, "cat": cat, "thu": thu})
 
                 # Dominant batch = nhiều cây nhất → quyết định màu polygon
@@ -2260,69 +2331,36 @@ def render_global_data_tab(c_farm):
                            (not df_har_all.empty and "base_lot_id" in df_har_all.columns)
             
             if pd.notna(season_blid) and has_blid_col:
-                # ✅ NEW: Filter chính xác theo đợt trồng
                 sub_lots = df_lots_all[df_lots_all["id"] == season_blid] if "id" in df_lots_all.columns else pd.DataFrame()
-                sub_stg = df_stg_all[df_stg_all["base_lot_id"] == season_blid] if not df_stg_all.empty else pd.DataFrame()
-                sub_har = df_har_all[df_har_all["base_lot_id"] == season_blid] if not df_har_all.empty else pd.DataFrame()
                 sub_des = df_des_all[df_des_all["base_lot_id"] == season_blid] if not df_des_all.empty else pd.DataFrame()
             else:
-                # ⚠️ FALLBACK: Lô chưa có base_lot_id → dùng lot_id
                 sub_lots = df_lots_all[df_lots_all["lot_id"] == lot_id] if not df_lots_all.empty else pd.DataFrame()
-                sub_stg = df_stg_all[df_stg_all["lot_id"] == lot_id] if not df_stg_all.empty else pd.DataFrame()
-                sub_har = df_har_all[df_har_all["lot_id"] == lot_id] if not df_har_all.empty else pd.DataFrame()
                 sub_des = df_des_all[df_des_all["lot_id"] == lot_id] if not df_des_all.empty else pd.DataFrame()
 
-            # ─── Filter date range cho stage/harvest/destruction ───
-            # (Cả khi đã filter base_lot_id, vì cùng đợt trồng có nhiều vụ F0/F1/F2...)
-            # ⚠️ KHÔNG filter sub_lots: "Cây đã trồng" là thuộc tính đợt trồng,
-            # không thay đổi theo vụ (F0=F1=F2=... = số cây gốc).
+            # Filter destruction theo date range
             if pd.notna(start):
-                if not sub_stg.empty and "ngay_thuc_hien" in sub_stg.columns:
-                    sub_stg = sub_stg[pd.to_datetime(sub_stg["ngay_thuc_hien"]).dt.date >= start.date()]
-                if not sub_har.empty and "ngay_thu_hoach" in sub_har.columns:
-                    sub_har = sub_har[pd.to_datetime(sub_har["ngay_thu_hoach"]).dt.date >= start.date()]
                 if not sub_des.empty and "ngay_xuat_huy" in sub_des.columns:
                     sub_des = sub_des[pd.to_datetime(sub_des["ngay_xuat_huy"]).dt.date >= start.date()]
             if pd.notna(end):
-                if not sub_stg.empty and "ngay_thuc_hien" in sub_stg.columns:
-                    sub_stg = sub_stg[pd.to_datetime(sub_stg["ngay_thuc_hien"]).dt.date <= end.date()]
                 if not sub_des.empty and "ngay_xuat_huy" in sub_des.columns:
                     sub_des = sub_des[pd.to_datetime(sub_des["ngay_xuat_huy"]).dt.date <= end.date()]
-            
-            # ─── Harvest upper bound: dùng start vụ KẾ TIẾP (nếu vụ kế đã sản xuất) ───
-            # Thu hoạch có thể kéo dài sau end date hành chính,
-            # nhưng chỉ giới hạn khi vụ kế tiếp ĐÃ có chích bắp (đang sản xuất).
-            # Nếu vụ kế chưa sản xuất → harvest vẫn thuộc vụ hiện tại.
-            if pd.notna(season_blid):
-                next_start = _next_season_map.get((int(season_blid), f_vu))
-                if next_start is not None and not sub_har.empty and "ngay_thu_hoach" in sub_har.columns:
-                    # F0: upper bound = next_season_start + growth buffer
-                    # (Thu hoạch F0 có thể kéo dài sau ngày bắt đầu hành chính F1)
-                    harvest_upper = next_start + pd.Timedelta(weeks=18)
-                    sub_har = sub_har[pd.to_datetime(sub_har["ngay_thu_hoach"]).dt.date < harvest_upper.date()]
-            elif pd.notna(end):
-                # Fallback: dùng season end date cho harvest nếu không có next_season_map
-                if not sub_har.empty and "ngay_thu_hoach" in sub_har.columns:
-                    sub_har = sub_har[pd.to_datetime(sub_har["ngay_thu_hoach"]).dt.date <= end.date()]
 
             so_luong_trong = int(sub_lots["so_luong"].sum()) if not sub_lots.empty else 0
-            so_chich_bap = int(sub_stg[sub_stg["giai_doan"] == "Chích bắp"]["so_luong"].sum()) if not sub_stg.empty else 0
-            so_cat_bap = int(sub_stg[sub_stg["giai_doan"] == "Cắt bắp"]["so_luong"].sum()) if not sub_stg.empty else 0
-            so_thu_hoach = int(sub_har["so_luong"].sum()) if not sub_har.empty else 0
-            
-            # ─── Safety: thu hoạch chưa thể xảy ra nếu chưa đủ thời gian sinh trưởng ───
-            # Vụ Fn (n>=1): cây cần ít nhất ~18 tuần từ khi bắt đầu vụ mới đến khi thu hoạch.
-            # Nếu harvest_date < season_start + 18 tuần → đó là harvest F(n-1) bị overlap, loại bỏ.
-            HARVEST_MIN_GROWTH_WEEKS = 18
-            if f_vu != "F0" and pd.notna(start):
-                harvest_earliest = start + pd.Timedelta(weeks=HARVEST_MIN_GROWTH_WEEKS)
-                if not sub_har.empty and "ngay_thu_hoach" in sub_har.columns:
-                    sub_har = sub_har[pd.to_datetime(sub_har["ngay_thu_hoach"]).dt.date >= harvest_earliest.date()]
-                so_thu_hoach = int(sub_har["so_luong"].sum()) if not sub_har.empty else 0
-            
-            # Fallback: nếu F1+ mà chưa có chích bắp → chắc chắn chưa thu hoạch
-            if f_vu != "F0" and so_chich_bap == 0:
-                so_thu_hoach = 0
+
+            # ─── Dùng shared compute_batch_stats (đồng bộ logic với Map) ───
+            if pd.notna(season_blid) and lo_name:
+                next_start = _next_season_map.get((int(season_blid), f_vu))
+                next_prod_key = (int(season_blid), f_vu)
+                # Nếu vụ kế chưa sản xuất nhưng có next_start → vẫn không giới hạn
+                next_producing = next_prod_key in _next_vu_producing if next_start is not None else False
+                next_s_date = next_start.date() if next_start is not None else None
+                season_start_date = start.date() if pd.notna(start) else None
+                _, so_chich_bap, so_cat_bap, so_thu_hoach = compute_batch_stats(
+                    lo_name, season_blid, vu=f_vu, season_start=season_start_date,
+                    next_season_start=next_s_date, next_vu_producing=next_producing
+                )
+            else:
+                so_chich_bap, so_cat_bap, so_thu_hoach = 0, 0, 0
 
             # Tên lô: gắn "(đợt X)" nếu lô có nhiều đợt trồng
             display_lo = batch_label_map.get(season_blid, lo_name) if pd.notna(season_blid) else lo_name
