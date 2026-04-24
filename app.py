@@ -1689,7 +1689,6 @@ def render_global_data_tab(c_farm):
                 har = df_har_all[(df_har_all["lo"] == lo_name) & (df_har_all["base_lot_id"] == base_lot_id)]
                 # Harvest Growth Buffer: F1+ chỉ tính harvest >= season_start + 18 tuần
                 if vu != "F0" and season_start is not None:
-                    from datetime import timedelta
                     harvest_min_date = season_start + timedelta(weeks=18)
                     if "ngay_thu_hoach" in har.columns:
                         har = har[har["ngay_thu_hoach"] >= harvest_min_date]
@@ -1720,7 +1719,6 @@ def render_global_data_tab(c_farm):
                     # Parse season_start cho Harvest Growth Buffer
                     season_start = None
                     if ngay_bd_raw is not None:
-                        import pandas as pd
                         try:
                             season_start = pd.Timestamp(ngay_bd_raw).date() if not isinstance(ngay_bd_raw, date) else ngay_bd_raw
                         except Exception:
