@@ -1,6 +1,17 @@
 # Changelog
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
+## [24/04/2026] - Interactive Farm 157 Map on Dashboard
+
+#### Feature: Bản đồ tương tác Farm 157 (`app.py`)
+- **[Mô tả]**: Section "🗺️ Bản đồ Farm 157" ở đầu dashboard, hiển thị 24 lô dưới dạng SVG polygon trên nền tối.
+- **[Data source]**: Tọa độ từ `farm_157_polygons.json` (traced bằng `polygon_tracer.html`). Thông tin lô real-time từ DB (seasons, base_lots, stage_logs, harvest_logs).
+- **[Tính năng]**: Hover hiển thị tooltip (Vụ, Ngày bắt đầu, Diện tích, Số cây, Giai đoạn, Chích/Cắt/Thu hoạch). Màu polygon theo giai đoạn: xanh lá (sinh trưởng), vàng (chích bắp), cam (cắt bắp), xanh dương (thu hoạch), xám (chưa có data).
+- **[Kỹ thuật]**: `streamlit.components.v1.html()` render SVG+CSS+JS inline. Chỉ hiển thị khi user là Farm 157, Admin, hoặc Phòng KD.
+
+#### Enhancement: Polygon Tracer hỗ trợ JPG (`polygon_tracer.html`)
+- **[Fix]**: Auto-try multiple image extensions (png, jpg, jpeg) thay vì hardcode `.png`.
+
 ## [23/04/2026] - Fix Harvest F0→F1 Bleeding + Interactive Farm Map Tool
 
 #### Bugfix: Thu hoạch F0 bị gán nhầm vào vụ F1 (`app.py`)

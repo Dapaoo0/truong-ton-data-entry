@@ -2,6 +2,13 @@
 
 Tài liệu này lưu lại tóm tắt các yêu cầu của người dùng để theo dõi tiến độ và nhiệm vụ.
 
+## Ngày 24/04/2026
+
+- User cung cấp JSON polygon data (24 lô Farm 157) từ Polygon Tracer tool.
+- Tích hợp interactive SVG map vào dashboard (`app.py`): 24 polygon, hover tooltip, màu theo giai đoạn, legend bar.
+- Polygon Tracer hỗ trợ thêm JPG/JPEG image format.
+- Cập nhật docs: `changelog.md`, `command.md`.
+
 ## Ngày 23/04/2026
 
 - Phát hiện và fix bug thu hoạch F0 bị gán nhầm vào F1 (lô 3B, base_lot_id=25, 772 cây). Thêm `HARVEST_MIN_GROWTH_WEEKS = 18` vào logic filter.
