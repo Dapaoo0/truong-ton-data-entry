@@ -400,3 +400,24 @@ Tài liệu này ghi lại chi tiết toàn bộ cấu trúc cơ sở dữ liệ
 | is_active | boolean | Không | Cờ đánh dấu record còn hiệu lực không (True=Có) |
 | created_at | timestamp with time zone | Không | Thời gian tạo record |
 
+---
+
+## Database Triggers
+
+### `auto_assign_base_lot_id()` — FIFO Auto-assign
+
+**Áp dụng trên:** `stage_logs`, `harvest_logs`, `destruction_logs` (BEFORE INSERT)
+
+**Mục đích:** Tự động gán `base_lot_id` khi record insert KHÔNG có `base_lot_id` (NULL). Sử dụng logic FIFO: đợt trồng cũ nhất (`ngay_trong` ascending) có remaining capacity > 0 được chọn.
+
+**Capacity per giai_doan:**
+| Giai đoạn | Bảng | Capacity |
+|---|---|---|
+| Chích bắp | `stage_logs` | `planted - SUM(chích bắp đã ghi cho batch)` |
+| Cắt bắp | `stage_logs` | `SUM(chích) - SUM(cắt) cho batch` |
+| Thu hoạch | `harvest_logs` | `SUM(cắt) - SUM(thu hoạch) cho batch` |
+
+**Trigger names:**
+- `trg_auto_base_lot_stage` → `stage_logs`
+- `trg_auto_base_lot_harvest` → `harvest_logs`
+- `trg_auto_base_lot_destruction` → `destruction_logs`
