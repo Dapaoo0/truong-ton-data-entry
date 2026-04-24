@@ -19,7 +19,6 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 import json
-import streamlit.components.v1 as components
 
 if hasattr(st, "dialog"):
     dialog_decorator = st.dialog
@@ -1772,12 +1771,6 @@ def render_global_data_tab(c_farm):
 
         html_content = f'''
         <style>
-            html, body {{
-                background: transparent !important;
-                margin: 0;
-                padding: 0;
-                overflow: hidden;
-            }}
             .farm-map-container {{
                 position: relative;
                 width: 100%;
@@ -1948,7 +1941,7 @@ def render_global_data_tab(c_farm):
         </script>
         '''
 
-        components.html(html_content, height=1100, scrolling=False)
+        st.html(html_content, unsafe_allow_javascript=True)
 
     st.divider()
 
