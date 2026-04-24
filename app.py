@@ -1542,27 +1542,30 @@ def render_global_data_tab(c_farm):
     .btn-cat   { background-color: #ffebee; color: #c62828 !important; border: 1px solid #ef9a9a; }
     .btn-trong { background-color: #e8f5e9; color: #2e7d32 !important; border: 1px solid #a5d6a7; }
     /* Popover buttons cho Admin/KD — match original colors */
-    [data-testid="column"]:nth-child(2) [data-testid="stPopoverButton"] > button {
+    .st-key-pop_excel button {
         background-color: #e3f2fd !important; color: #1565c0 !important;
         border: 1px solid #90caf9 !important; font-weight: 600;
         min-height: 64px; border-radius: 0.5rem;
     }
-    [data-testid="column"]:nth-child(3) [data-testid="stPopoverButton"] > button {
+    .st-key-pop_chich button {
         background-color: #fff8e1 !important; color: #f57f17 !important;
         border: 1px solid #ffe082 !important; font-weight: 600;
         min-height: 64px; border-radius: 0.5rem;
     }
-    [data-testid="column"]:nth-child(4) [data-testid="stPopoverButton"] > button {
+    .st-key-pop_cat button {
         background-color: #ffebee !important; color: #c62828 !important;
         border: 1px solid #ef9a9a !important; font-weight: 600;
         min-height: 64px; border-radius: 0.5rem;
     }
-    [data-testid="column"]:nth-child(5) [data-testid="stPopoverButton"] > button {
+    .st-key-pop_trong button {
         background-color: #e8f5e9 !important; color: #2e7d32 !important;
         border: 1px solid #a5d6a7 !important; font-weight: 600;
         min-height: 64px; border-radius: 0.5rem;
     }
-    [data-testid="stPopoverButton"] > button:hover {
+    .st-key-pop_excel button:hover,
+    .st-key-pop_chich button:hover,
+    .st-key-pop_cat button:hover,
+    .st-key-pop_trong button:hover {
         opacity: 0.85 !important; filter: brightness(0.95) !important;
     }
     </style>
@@ -1588,7 +1591,7 @@ def render_global_data_tab(c_farm):
     if is_multi_farm and available_farms:
         # ── Admin/KD: mỗi nút download là popover chọn farm ──
         with col_t2:
-            with st.popover("Xuất Báo Cáo Excel", use_container_width=True):
+            with st.popover("Xuất Báo Cáo Excel", use_container_width=True, key="pop_excel"):
                 sel = st.radio("Chọn Farm", available_farms, key="pop_farm_excel", horizontal=True)
                 fl = _filter_by_farm(df_lots_all, sel)
                 fs = _filter_by_farm(df_stg_all, sel)
@@ -1606,7 +1609,7 @@ def render_global_data_tab(c_farm):
                 st.download_button("⬇️ Tải về", data=output.getvalue(), file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
         with col_t3:
-            with st.popover("Báo cáo Chích bắp", use_container_width=True):
+            with st.popover("Báo cáo Chích bắp", use_container_width=True, key="pop_chich"):
                 sel = st.radio("Chọn Farm", available_farms, key="pop_farm_chich", horizontal=True)
                 fl = _filter_by_farm(df_lots_all, sel)
                 fs = _filter_by_farm(df_stg_all, sel)
@@ -1615,7 +1618,7 @@ def render_global_data_tab(c_farm):
                 st.download_button("⬇️ Tải về", data=chich_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
         with col_t4:
-            with st.popover("Báo cáo Cắt bắp", use_container_width=True):
+            with st.popover("Báo cáo Cắt bắp", use_container_width=True, key="pop_cat"):
                 sel = st.radio("Chọn Farm", available_farms, key="pop_farm_cat", horizontal=True)
                 fl = _filter_by_farm(df_lots_all, sel)
                 fs = _filter_by_farm(df_stg_all, sel)
@@ -1625,7 +1628,7 @@ def render_global_data_tab(c_farm):
                 st.download_button("⬇️ Tải về", data=cut_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
         with col_t5:
-            with st.popover("Báo cáo Trồng mới", use_container_width=True):
+            with st.popover("Báo cáo Trồng mới", use_container_width=True, key="pop_trong"):
                 sel = st.radio("Chọn Farm", available_farms, key="pop_farm_trong", horizontal=True)
                 fl = _filter_by_farm(df_lots_all, sel)
                 f_seasons = _filter_by_farm(df_seasons, sel)
