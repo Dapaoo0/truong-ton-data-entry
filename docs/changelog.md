@@ -1,6 +1,14 @@
 # Changelog
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
+## [24/04/2026] - FIFO Batch Allocation cho Stage/Harvest/Destruction Logs
+
+#### Feature: FIFO phân bổ tự động theo đợt trồng (`app.py`)
+- **[Mô tả]**: `allocate_fifo_quantity()` giờ phân bổ số lượng chích bắp/cắt bắp/thu hoạch vào đúng `base_lot_id` theo thứ tự FIFO (đợt trồng cũ nhất trước).
+- **[Trước đó]**: Toàn bộ số lượng gán vào 1 record duy nhất, `base_lot_id = NULL` (hoặc nhờ `resolve_base_lot_id` closest-match). Khi 1 lô có nhiều đợt trồng cùng chích bắp → không phân biệt được.
+- **[Sau]**: Capacity tính per-batch: Chích = planted − used, Cắt = chích − cắt, Thu = cắt − thu. Tràn đợt cũ → overflow sang đợt mới. Insert kèm `base_lot_id`.
+- **[Impact]**: Data integrity: mỗi stage_log/harvest_log/destruction_log có `base_lot_id` chính xác. Dashboard, Map, Table đều hiển thị đúng theo đợt trồng.
+
 ## [24/04/2026] - Đồng bộ logic Map & Table via compute_batch_stats()
 
 #### Refactor: Shared `compute_batch_stats()` function (`app.py`)
