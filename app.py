@@ -1690,8 +1690,9 @@ def render_global_data_tab(c_farm):
                 # Harvest Growth Buffer: F1+ chỉ tính harvest >= season_start + 18 tuần
                 if vu != "F0" and season_start is not None:
                     harvest_min_date = season_start + timedelta(weeks=18)
-                    if "ngay_thu_hoach" in har.columns:
-                        har = har[har["ngay_thu_hoach"] >= harvest_min_date]
+                    if "ngay_thu_hoach" in har.columns and not har.empty:
+                        har_dates = pd.to_datetime(har["ngay_thu_hoach"], errors="coerce")
+                        har = har[har_dates >= pd.Timestamp(harvest_min_date)]
                 so_thu = int(har["so_luong"].sum()) if not har.empty else 0
             gd = "Đang sinh trưởng"
             if so_thu > 0: gd = "Thu hoạch"
