@@ -148,62 +148,65 @@ _DESTRUCTION_STAGE_MAP = {
 
 def resolve_base_lot_id(dim_lo_id, action_date, giai_doan):
     """
-    Tự động suy luận base_lot_id dựa trên ngày hành động và giai đoạn.
-    Tính expected dates cho TẤT CẢ vụ (F0→F5) của mỗi đợt trồng trong lô.
-    Chọn đợt có khoảng cách nhỏ nhất (closest match).
-    Luôn trả về kết quả — không bao giờ None (trừ khi lô chưa có đợt trồng).
+    Tự động suy luận base_lot_id dựa trên FIFO capacity.
+    Đợt trồng cũ nhất (ngay_trong ascending) có remaining capacity > 0 được ưu tiên.
+    Fallback: closest-match nếu tất cả đợt đều full hoặc không xác định được capacity.
     """
     res = supabase.table("base_lots") \
-        .select("id, ngay_trong") \
+        .select("id, so_luong, so_luong_con_lai, ngay_trong") \
         .eq("dim_lo_id", dim_lo_id) \
         .eq("is_deleted", False) \
-        .execute()
+        .eq("loai_trong", "Trồng mới") \
+        .order("ngay_trong", desc=False).execute()
     
     if not res.data:
         return None  # Lô chưa có đợt trồng nào
 
-    action_dt = pd.to_datetime(action_date)
-    best_match_id = None
-    best_distance = float('inf')
-
-    # Nếu là giai đoạn xuất hủy → map sang stage tương ứng để dùng timeline
     effective_giai_doan = _DESTRUCTION_STAGE_MAP.get(giai_doan, giai_doan)
 
+    # ── FIFO: đợt cũ nhất có remaining capacity > 0 ──
+    for batch in res.data:
+        bid = batch["id"]
+        planted = int(batch.get("so_luong_con_lai") or batch.get("so_luong", 0))
+
+        if effective_giai_doan == "Chích bắp":
+            used_res = supabase.table("stage_logs").select("so_luong") \
+                .eq("base_lot_id", bid).eq("giai_doan", "Chích bắp").eq("is_deleted", False).execute()
+            used = sum(int(r["so_luong"]) for r in used_res.data) if used_res.data else 0
+            cap = planted - used
+        elif effective_giai_doan == "Cắt bắp":
+            chich_res = supabase.table("stage_logs").select("so_luong") \
+                .eq("base_lot_id", bid).eq("giai_doan", "Chích bắp").eq("is_deleted", False).execute()
+            cat_res = supabase.table("stage_logs").select("so_luong") \
+                .eq("base_lot_id", bid).eq("giai_doan", "Cắt bắp").eq("is_deleted", False).execute()
+            cap = (sum(int(r["so_luong"]) for r in chich_res.data) if chich_res.data else 0) \
+                - (sum(int(r["so_luong"]) for r in cat_res.data) if cat_res.data else 0)
+        elif effective_giai_doan == "Thu hoạch":
+            cat_res = supabase.table("stage_logs").select("so_luong") \
+                .eq("base_lot_id", bid).eq("giai_doan", "Cắt bắp").eq("is_deleted", False).execute()
+            har_res = supabase.table("harvest_logs").select("so_luong") \
+                .eq("base_lot_id", bid).eq("is_deleted", False).execute()
+            cap = (sum(int(r["so_luong"]) for r in cat_res.data) if cat_res.data else 0) \
+                - (sum(int(r["so_luong"]) for r in har_res.data) if har_res.data else 0)
+        else:
+            # Giai đoạn không xác định (destruction, etc.) → dùng planted
+            cap = planted
+
+        if cap > 0:
+            return bid
+
+    # Fallback: tất cả đợt đều full → chọn đợt trồng gần nhất trước ngày hành động
+    action_dt = pd.to_datetime(action_date)
+    fallback_id = None
+    best_dist = float('inf')
     for batch in res.data:
         trong_dt = pd.to_datetime(batch["ngay_trong"])
-
-        if effective_giai_doan in _STAGE_OFFSETS:
-            offsets = _STAGE_OFFSETS[effective_giai_doan]
-
-            # --- F0 ---
-            f0_expected = trong_dt + timedelta(days=offsets["f0"])
-            dist = abs((action_dt - f0_expected).days)
-            if dist < best_distance:
-                best_distance = dist
-                best_match_id = batch["id"]
-
-            # --- F1 → F5 ---
-            f0_harvest_dt = trong_dt + timedelta(days=F0_DAYS_TO_THU)
-            for n in range(1, MAX_GENERATION + 1):
-                prev_harvest = f0_harvest_dt + timedelta(days=FN_CYCLE_DAYS * (n - 1))
-                fn_expected = prev_harvest + timedelta(days=offsets["fn"])
-                dist = abs((action_dt - fn_expected).days)
-                if dist < best_distance:
-                    best_distance = dist
-                    best_match_id = batch["id"]
-        else:
-            # Giai đoạn không xác định → đợt trồng gần nhất trước ngày hành động
-            if trong_dt <= action_dt:
-                dist = (action_dt - trong_dt).days
-                if dist < best_distance:
-                    best_distance = dist
-                    best_match_id = batch["id"]
-
-    # Fallback: nếu tất cả đợt trồng đều SAU ngày hành động → chọn đợt sớm nhất
-    if best_match_id is None:
-        best_match_id = sorted(res.data, key=lambda b: b["ngay_trong"])[0]["id"]
-
-    return best_match_id
+        if trong_dt <= action_dt:
+            dist = (action_dt - trong_dt).days
+            if dist < best_dist:
+                best_dist = dist
+                fallback_id = batch["id"]
+    return fallback_id or res.data[0]["id"]
 
 
 # =====================================================
