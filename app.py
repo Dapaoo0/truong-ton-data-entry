@@ -446,6 +446,11 @@ def get_available_capacity_for_lot(farm_name, lot_id_str, log_type, giai_doan=No
 
 
 def allocate_fifo_quantity(farm_name, lo_name, new_sl, log_type, target_date, action_type, giai_doan=None):
+    """
+    Phân bổ số lượng theo FIFO (First-In-First-Out) theo ngày trồng.
+    Đợt trồng cũ nhất được ưu tiên phân bổ trước, tràn thì chuyển sang đợt tiếp.
+    Mỗi allocation kèm base_lot_id để ghi chính xác vào DB.
+    """
     dim_id = get_dim_lo_id(farm_name, lo_name)
     if not dim_id:
         return False, f"❌ Lỗi: Không tìm thấy lô {lo_name} hoặc đã bị xóa.", []
@@ -453,14 +458,73 @@ def allocate_fifo_quantity(farm_name, lo_name, new_sl, log_type, target_date, ac
     is_time_valid, msg_time = validate_timeline_logic(farm_name, lo_name, target_date, action_type)
     if not is_time_valid:
         return False, msg_time, []
-            
-    max_allowed, total_used = get_available_capacity_for_lot(farm_name, lo_name, log_type, giai_doan)
-    remain = max_allowed - total_used
+
+    # Lấy tất cả base_lots active của lô, sort FIFO theo ngày trồng (cũ nhất trước)
+    res_bl = supabase.table("base_lots").select("id, so_luong, so_luong_con_lai, ngay_trong") \
+        .eq("dim_lo_id", dim_id).eq("is_deleted", False) \
+        .eq("loai_trong", "Trồng mới") \
+        .order("ngay_trong", desc=False).execute()
     
-    if remain >= int(new_sl):
-        return True, "", [{"dim_lo_id": dim_id, "so_luong": int(new_sl), "lot_id": lo_name}]
-    else:
-        return False, f"❌ Yêu cầu {new_sl} nhưng tổng số lượng cho phép của nhánh '{lo_name}' chỉ còn {remain}.", []
+    if not res_bl.data:
+        return False, f"❌ Lô {lo_name} chưa có đợt trồng nào.", []
+
+    quantity_left = int(new_sl)
+    allocations = []
+
+    for batch in res_bl.data:
+        if quantity_left <= 0:
+            break
+        bid = batch["id"]
+        planted = int(batch.get("so_luong_con_lai") or batch.get("so_luong", 0))
+
+        if log_type == "stage" and giai_doan == "Chích bắp":
+            # Capacity = số cây trồng - chích bắp đã ghi cho đợt này
+            used_res = supabase.table("stage_logs").select("so_luong") \
+                .eq("base_lot_id", bid).eq("giai_doan", "Chích bắp").eq("is_deleted", False).execute()
+            used = sum(int(r["so_luong"]) for r in used_res.data) if used_res.data else 0
+            cap = planted - used
+
+        elif log_type == "stage" and giai_doan == "Cắt bắp":
+            # Capacity = chích bắp đợt này - cắt bắp đã ghi cho đợt này
+            chich_res = supabase.table("stage_logs").select("so_luong") \
+                .eq("base_lot_id", bid).eq("giai_doan", "Chích bắp").eq("is_deleted", False).execute()
+            cat_res = supabase.table("stage_logs").select("so_luong") \
+                .eq("base_lot_id", bid).eq("giai_doan", "Cắt bắp").eq("is_deleted", False).execute()
+            total_chich = sum(int(r["so_luong"]) for r in chich_res.data) if chich_res.data else 0
+            total_cat = sum(int(r["so_luong"]) for r in cat_res.data) if cat_res.data else 0
+            cap = total_chich - total_cat
+
+        elif log_type == "harvest":
+            # Capacity = cắt bắp đợt này - thu hoạch đã ghi
+            cat_res = supabase.table("stage_logs").select("so_luong") \
+                .eq("base_lot_id", bid).eq("giai_doan", "Cắt bắp").eq("is_deleted", False).execute()
+            har_res = supabase.table("harvest_logs").select("so_luong") \
+                .eq("base_lot_id", bid).eq("is_deleted", False).execute()
+            total_cat = sum(int(r["so_luong"]) for r in cat_res.data) if cat_res.data else 0
+            total_har = sum(int(r["so_luong"]) for r in har_res.data) if har_res.data else 0
+            cap = total_cat - total_har
+
+        else:
+            # Fallback: dùng tổng planted
+            cap = planted
+
+        if cap <= 0:
+            continue
+
+        alloc_qty = min(quantity_left, cap)
+        allocations.append({
+            "dim_lo_id": dim_id,
+            "base_lot_id": bid,
+            "so_luong": alloc_qty,
+            "lot_id": lo_name
+        })
+        quantity_left -= alloc_qty
+
+    if quantity_left > 0:
+        total_cap = sum(a["so_luong"] for a in allocations)
+        return False, f"❌ Yêu cầu {new_sl} nhưng tổng capacity của lô '{lo_name}' chỉ còn {total_cap}.", []
+
+    return True, "", allocations
 
 
 def check_quantity_limit(farm_name, lot_id_str, new_sl, log_type, giai_doan=None, exclude_id=None):
@@ -4263,7 +4327,7 @@ def render_main_app():
                         is_valid, msg, allocations = allocate_fifo_quantity(c_farm, item["Lô"], item["Số lượng"], "stage", item["Ngày"], item["Giai đoạn"], item["Giai đoạn"])
                         if is_valid:
                             for alloc in allocations:
-                                data = {"farm": c_farm, "team": c_team, "giai_doan": item["Giai đoạn"], "ngay_thuc_hien": item["Ngày"], "mau_day": item["Màu dây"], "tuan": item["Tuần"], "lot_id": alloc["lot_id"], "so_luong": alloc["so_luong"]}
+                                data = {"farm": c_farm, "team": c_team, "giai_doan": item["Giai đoạn"], "ngay_thuc_hien": item["Ngày"], "mau_day": item["Màu dây"], "tuan": item["Tuần"], "lot_id": alloc["lot_id"], "so_luong": alloc["so_luong"], "base_lot_id": alloc.get("base_lot_id")}
                                 if not insert_to_db("stage_logs", data):
                                     st.error(f"❌ Lỗi ghi phân rã {alloc['lot_id']}")
                                     return
@@ -4360,7 +4424,7 @@ def render_main_app():
                         is_valid, msg, allocations = allocate_fifo_quantity(c_farm, item["Lô"], item["Số lượng"], "destruction", item["Ngày"], "Xuất hủy")
                         if is_valid:
                             for alloc in allocations:
-                                data = {"farm": c_farm, "team": c_team, "ngay_xuat_huy": item["Ngày"], "giai_doan": item["Giai đoạn"], "mau_day": item.get("Màu dây", "") or None, "ly_do": item["Lý do"], "tuan": item["Tuần"], "lot_id": alloc["lot_id"], "so_luong": alloc["so_luong"]}
+                                data = {"farm": c_farm, "team": c_team, "ngay_xuat_huy": item["Ngày"], "giai_doan": item["Giai đoạn"], "mau_day": item.get("Màu dây", "") or None, "ly_do": item["Lý do"], "tuan": item["Tuần"], "lot_id": alloc["lot_id"], "so_luong": alloc["so_luong"], "base_lot_id": alloc.get("base_lot_id")}
                                 if not insert_to_db("destruction_logs", data):
                                     st.error(f"❌ Lỗi ghi phân rã {alloc['lot_id']}")
                                     return
@@ -4542,7 +4606,8 @@ def render_main_app():
                             for alloc in allocations:
                                 data = {
                                     "farm": c_farm, "team": c_team, "ngay_thu_hoach": item["Ngày"], "mau_day": item["Màu dây"],
-                                    "hinh_thuc_thu_hoach": item["Hình thức"], "tuan": item["Tuần"], "lot_id": alloc["lot_id"], "so_luong": alloc["so_luong"]
+                                    "hinh_thuc_thu_hoach": item["Hình thức"], "tuan": item["Tuần"], "lot_id": alloc["lot_id"], "so_luong": alloc["so_luong"],
+                                    "base_lot_id": alloc.get("base_lot_id")
                                 }
                                 if not insert_to_db("harvest_logs", data):
                                     st.error(f"❌ Lỗi ghi phân rã {alloc['lot_id']}")
