@@ -1544,41 +1544,101 @@ def render_global_data_tab(c_farm):
     </style>
     """, unsafe_allow_html=True)
     
+    # ── Farm selector cho Admin/KD (dùng chung cho download buttons) ──
+    is_multi_farm = c_farm in ["Admin", "Phòng Kinh doanh"]
+    available_farms = sorted(df_lots_all["farm"].dropna().unique().tolist()) if is_multi_farm and not df_lots_all.empty else []
+
+    def _filter_by_farm(df, farm_name):
+        """Filter DataFrame theo farm. Nếu không phải multi-farm thì trả nguyên."""
+        if not is_multi_farm or df.empty or "farm" not in df.columns:
+            return df
+        return df[df["farm"] == farm_name]
+
+    def _gen_dl_link(data_bytes, filename, css_class, label):
+        """Generate HTML download link."""
+        b64 = base64.b64encode(data_bytes if isinstance(data_bytes, bytes) else data_bytes).decode()
+        return f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{filename}" class="custom-dl-btn {css_class}">{label}</a>'
+
     col_t1, col_t2, col_t3, col_t4, col_t5 = st.columns([2, 1, 1, 1, 1])
-    
-    with col_t2:
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df_lots_all.to_excel(writer, sheet_name='Base Lots (Lô trồng)', index=False)
-            df_stg_all.to_excel(writer, sheet_name='Stage Logs (Tiến độ)', index=False)
-            df_des_all.to_excel(writer, sheet_name='Destruction Logs', index=False)
-            df_har_all.to_excel(writer, sheet_name='Harvest Logs (Thu Hoạch)', index=False)
-            df_bsr_all.to_excel(writer, sheet_name='BSR Logs (Tỷ lệ)', index=False)
-        b64 = base64.b64encode(output.getvalue()).decode()
-        fn = f"Bao_cao_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx"
-        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{fn}" class="custom-dl-btn btn-excel">Xuất Báo Cáo Excel</a>'
-        st.markdown(href, unsafe_allow_html=True)
 
-    with col_t3:
-        chich_excel = generate_chich_bap_excel(df_lots_all, df_stg_all)
-        b64 = base64.b64encode(chich_excel).decode()
-        fn = f"Bao_cao_chich_bap_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx"
-        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{fn}" class="custom-dl-btn btn-chich">Báo cáo Chích bắp</a>'
-        st.markdown(href, unsafe_allow_html=True)
+    if is_multi_farm and available_farms:
+        # ── Admin/KD: mỗi nút download là popover chọn farm ──
+        with col_t2:
+            with st.popover("📊 Xuất Báo Cáo Excel", use_container_width=True):
+                sel = st.radio("Chọn Farm", available_farms, key="pop_farm_excel", horizontal=True)
+                fl = _filter_by_farm(df_lots_all, sel)
+                fs = _filter_by_farm(df_stg_all, sel)
+                fd = _filter_by_farm(df_des_all, sel)
+                fh = _filter_by_farm(df_har_all, sel)
+                fb = _filter_by_farm(df_bsr_all, sel)
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    fl.to_excel(writer, sheet_name='Base Lots (Lô trồng)', index=False)
+                    fs.to_excel(writer, sheet_name='Stage Logs (Tiến độ)', index=False)
+                    fd.to_excel(writer, sheet_name='Destruction Logs', index=False)
+                    fh.to_excel(writer, sheet_name='Harvest Logs (Thu Hoạch)', index=False)
+                    fb.to_excel(writer, sheet_name='BSR Logs (Tỷ lệ)', index=False)
+                fn = f"Bao_cao_{sel}_{date.today().strftime('%Y%m%d')}.xlsx"
+                st.download_button("⬇️ Tải về", data=output.getvalue(), file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
-    with col_t4:
-        cut_excel = generate_cut_bap_excel(df_lots_all, df_stg_all, df_des_all)
-        b64 = base64.b64encode(cut_excel).decode()
-        fn = f"Bao_cao_cat_bap_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx"
-        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{fn}" class="custom-dl-btn btn-cat">Báo cáo Cắt bắp</a>'
-        st.markdown(href, unsafe_allow_html=True)
+        with col_t3:
+            with st.popover("📄 Chích bắp", use_container_width=True):
+                sel = st.radio("Chọn Farm", available_farms, key="pop_farm_chich", horizontal=True)
+                fl = _filter_by_farm(df_lots_all, sel)
+                fs = _filter_by_farm(df_stg_all, sel)
+                chich_excel = generate_chich_bap_excel(fl, fs)
+                fn = f"Bao_cao_chich_bap_{sel}_{date.today().strftime('%Y%m%d')}.xlsx"
+                st.download_button("⬇️ Tải về", data=chich_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
-    with col_t5:
-        plant_excel = generate_planting_excel(df_lots_all, df_seasons)
-        b64 = base64.b64encode(plant_excel).decode()
-        fn = f"Bao_cao_trong_moi_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx"
-        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{fn}" class="custom-dl-btn btn-trong">Báo cáo Trồng mới</a>'
-        st.markdown(href, unsafe_allow_html=True)
+        with col_t4:
+            with st.popover("✂️ Cắt bắp", use_container_width=True):
+                sel = st.radio("Chọn Farm", available_farms, key="pop_farm_cat", horizontal=True)
+                fl = _filter_by_farm(df_lots_all, sel)
+                fs = _filter_by_farm(df_stg_all, sel)
+                fd = _filter_by_farm(df_des_all, sel)
+                cut_excel = generate_cut_bap_excel(fl, fs, fd)
+                fn = f"Bao_cao_cat_bap_{sel}_{date.today().strftime('%Y%m%d')}.xlsx"
+                st.download_button("⬇️ Tải về", data=cut_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+
+        with col_t5:
+            with st.popover("🌱 Trồng mới", use_container_width=True):
+                sel = st.radio("Chọn Farm", available_farms, key="pop_farm_trong", horizontal=True)
+                fl = _filter_by_farm(df_lots_all, sel)
+                f_seasons = _filter_by_farm(df_seasons, sel)
+                plant_excel = generate_planting_excel(fl, f_seasons)
+                fn = f"Bao_cao_trong_moi_{sel}_{date.today().strftime('%Y%m%d')}.xlsx"
+                st.download_button("⬇️ Tải về", data=plant_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+    else:
+        # ── User thường: download trực tiếp (giữ nguyên) ──
+        with col_t2:
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_lots_all.to_excel(writer, sheet_name='Base Lots (Lô trồng)', index=False)
+                df_stg_all.to_excel(writer, sheet_name='Stage Logs (Tiến độ)', index=False)
+                df_des_all.to_excel(writer, sheet_name='Destruction Logs', index=False)
+                df_har_all.to_excel(writer, sheet_name='Harvest Logs (Thu Hoạch)', index=False)
+                df_bsr_all.to_excel(writer, sheet_name='BSR Logs (Tỷ lệ)', index=False)
+            fn = f"Bao_cao_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx"
+            href = _gen_dl_link(output.getvalue(), fn, "btn-excel", "Xuất Báo Cáo Excel")
+            st.markdown(href, unsafe_allow_html=True)
+
+        with col_t3:
+            chich_excel = generate_chich_bap_excel(df_lots_all, df_stg_all)
+            fn = f"Bao_cao_chich_bap_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx"
+            href = _gen_dl_link(chich_excel, fn, "btn-chich", "Báo cáo Chích bắp")
+            st.markdown(href, unsafe_allow_html=True)
+
+        with col_t4:
+            cut_excel = generate_cut_bap_excel(df_lots_all, df_stg_all, df_des_all)
+            fn = f"Bao_cao_cat_bap_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx"
+            href = _gen_dl_link(cut_excel, fn, "btn-cat", "Báo cáo Cắt bắp")
+            st.markdown(href, unsafe_allow_html=True)
+
+        with col_t5:
+            plant_excel = generate_planting_excel(df_lots_all, df_seasons)
+            fn = f"Bao_cao_trong_moi_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx"
+            href = _gen_dl_link(plant_excel, fn, "btn-trong", "Báo cáo Trồng mới")
+            st.markdown(href, unsafe_allow_html=True)
 
     st.divider()
 
