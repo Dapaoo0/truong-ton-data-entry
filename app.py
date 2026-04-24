@@ -1736,6 +1736,67 @@ def render_global_data_tab(c_farm):
         stage_colors_json = json.dumps(stage_colors, ensure_ascii=False)
         default_color = "#636e72"
 
+        # ── Pole of Inaccessibility — tìm điểm xa biên nhất trong polygon ──
+        def _point_in_polygon(px, py, pts):
+            """Ray casting algorithm."""
+            n = len(pts)
+            inside = False
+            j = n - 1
+            for i in range(n):
+                xi, yi = pts[i]
+                xj, yj = pts[j]
+                if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi) + xi):
+                    inside = not inside
+                j = i
+            return inside
+
+        def _dist_to_edge(px, py, pts):
+            """Min distance from point to polygon edges."""
+            min_d = float('inf')
+            n = len(pts)
+            for i in range(n):
+                x1, y1 = pts[i]
+                x2, y2 = pts[(i + 1) % n]
+                dx, dy = x2 - x1, y2 - y1
+                if dx == 0 and dy == 0:
+                    d = ((px - x1)**2 + (py - y1)**2) ** 0.5
+                else:
+                    t = max(0, min(1, ((px - x1) * dx + (py - y1) * dy) / (dx*dx + dy*dy)))
+                    d = ((px - (x1 + t*dx))**2 + (py - (y1 + t*dy))**2) ** 0.5
+                min_d = min(min_d, d)
+            return min_d
+
+        def _pole_of_inaccessibility(pts, precision=10):
+            """Find the point inside polygon furthest from any edge (iterative grid search)."""
+            xs = [p[0] for p in pts]
+            ys = [p[1] for p in pts]
+            min_x, max_x = min(xs), max(xs)
+            min_y, max_y = min(ys), max(ys)
+            best_x = (min_x + max_x) / 2
+            best_y = (min_y + max_y) / 2
+            best_d = -1
+            step_x = (max_x - min_x) / 8
+            step_y = (max_y - min_y) / 8
+            for _iteration in range(4):  # 4 rounds of refinement
+                for ix in range(9):
+                    for iy in range(9):
+                        cx = min_x + ix * step_x
+                        cy = min_y + iy * step_y
+                        if _point_in_polygon(cx, cy, pts):
+                            d = _dist_to_edge(cx, cy, pts)
+                            if d > best_d:
+                                best_d = d
+                                best_x = cx
+                                best_y = cy
+                # Zoom into best region
+                min_x = best_x - step_x
+                max_x = best_x + step_x
+                min_y = best_y - step_y
+                max_y = best_y + step_y
+                step_x /= 4
+                step_y /= 4
+            return best_x, best_y
+
         # ── Build SVG polygons ──
         img_w = polygon_data.get("image_width", 4000)
         img_h = polygon_data.get("image_height", 2250)
@@ -1753,14 +1814,15 @@ def render_global_data_tab(c_farm):
             # Encode batches as JSON string for JS tooltip
             batches_json = json.dumps(info.get("batches", []), ensure_ascii=False).replace('"', '&quot;')
 
-            cx = sum(p["x"] for p in lot["points"]) / len(lot["points"])
-            cy = sum(p["y"] for p in lot["points"]) / len(lot["points"])
+            # Pole of inaccessibility for optimal label placement
+            poly_pts = [(p["x"], p["y"]) for p in lot["points"]]
+            cx, cy = _pole_of_inaccessibility(poly_pts)
 
             svg_polygons += f'''
             <polygon class="lot-poly" points="{points_str}" fill="{fill}"
                 data-name="{name}" data-dt="{dt_str}" data-total="{total_cay}"
                 data-gd="{giai_doan}" data-batches="{batches_json}" />
-            <text x="{cx}" y="{cy}" class="lot-label">{name}</text>
+            <text x="{cx:.0f}" y="{cy:.0f}" class="lot-label">{name}</text>
             '''
 
         # ── Legend items ──
@@ -1805,7 +1867,7 @@ def render_global_data_tab(c_farm):
             }}
             .lot-label {{
                 font-family: 'Segoe UI', system-ui, sans-serif;
-                font-size: 36px;
+                font-size: 47px;
                 font-weight: 700;
                 fill: #fff;
                 text-anchor: middle;
