@@ -1694,7 +1694,12 @@ def render_global_data_tab(c_farm):
                 stg = df_stg_all[(df_stg_all["lo"] == lo_name) & (df_stg_all["base_lot_id"] == base_lot_id)]
                 # Filter theo season start date
                 if season_start_ts is not None and not stg.empty and "ngay_thuc_hien" in stg.columns:
-                    stg = stg[pd.to_datetime(stg["ngay_thuc_hien"], errors="coerce") >= season_start_ts]
+                    stg_dates = pd.to_datetime(stg["ngay_thuc_hien"], errors="coerce")
+                    stg = stg[stg_dates >= season_start_ts]
+                # Upper bound: nếu vụ kế đang sản xuất → stage_logs chỉ tính < next_season_start
+                if next_season_start is not None and next_vu_producing and not stg.empty and "ngay_thuc_hien" in stg.columns:
+                    stg_dates = pd.to_datetime(stg["ngay_thuc_hien"], errors="coerce")
+                    stg = stg[stg_dates < pd.Timestamp(next_season_start)]
                 if not stg.empty:
                     c = stg[stg["giai_doan"] == "Chích bắp"]
                     k = stg[stg["giai_doan"] == "Cắt bắp"]
