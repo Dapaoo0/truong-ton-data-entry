@@ -1772,76 +1772,19 @@ def render_global_data_tab(c_farm):
         html_content = f'''
         <style>
             * {{ margin:0; padding:0; box-sizing:border-box; }}
-            body {{ background: transparent; overflow: hidden; }}
-            .farm-wrapper {{
-                display: flex;
+            body {{ background: transparent; }}
+            .farm-map-container {{
+                position: relative;
                 width: 100%;
-                height: 580px;
                 background: #1a1a2e;
                 border-radius: 12px;
-                border: 1px solid #2d3460;
                 overflow: hidden;
+                border: 1px solid #2d3460;
             }}
-            .map-area {{
-                flex: 1;
-                min-width: 0;
-                position: relative;
-            }}
-            .map-area svg {{
+            .farm-map-container svg {{
                 display: block;
                 width: 100%;
-                height: 100%;
-            }}
-            .info-panel {{
-                width: 280px;
-                flex-shrink: 0;
-                background: rgba(15, 23, 42, 0.98);
-                border-left: 1px solid #2d3460;
-                overflow-y: auto;
-                padding: 16px;
-                font-family: 'Segoe UI', system-ui, sans-serif;
-                font-size: 13px;
-                color: #e2e8f0;
-                line-height: 1.65;
-            }}
-            .info-panel::-webkit-scrollbar {{ width: 4px; }}
-            .info-panel::-webkit-scrollbar-thumb {{ background: #4a5568; border-radius: 4px; }}
-            .info-panel .ip-placeholder {{
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                height: 100%;
-                color: #64748b;
-                font-size: 14px;
-                text-align: center;
-            }}
-            .info-panel .ip-title {{
-                font-size: 18px;
-                font-weight: 700;
-                color: #fff;
-                margin-bottom: 10px;
-                padding-bottom: 8px;
-                border-bottom: 1px solid rgba(255,255,255,0.15);
-            }}
-            .info-panel .ip-row {{
-                display: flex;
-                justify-content: space-between;
-                gap: 12px;
-            }}
-            .info-panel .ip-label {{ color: #94a3b8; }}
-            .info-panel .ip-value {{ font-weight: 600; color: #fff; text-align: right; }}
-            .info-panel .ip-stage {{
-                display: inline-block;
-                padding: 2px 10px;
-                border-radius: 20px;
-                font-size: 11px;
-                font-weight: 600;
-            }}
-            .info-panel .ip-batch {{
-                padding: 8px 10px;
-                background: rgba(255,255,255,0.04);
-                border-radius: 6px;
-                margin-bottom: 8px;
+                height: auto;
             }}
             .lot-poly {{
                 fill-opacity: 0.45;
@@ -1855,6 +1798,11 @@ def render_global_data_tab(c_farm):
                 stroke: #fff;
                 stroke-width: 5;
             }}
+            .lot-poly.pinned {{
+                fill-opacity: 0.85;
+                stroke: #6366f1;
+                stroke-width: 6;
+            }}
             .lot-label {{
                 font-family: 'Segoe UI', system-ui, sans-serif;
                 font-size: 36px;
@@ -1865,93 +1813,223 @@ def render_global_data_tab(c_farm):
                 pointer-events: none;
                 text-shadow: 0 2px 6px rgba(0,0,0,0.7);
             }}
-            .legend-bar {{
+            .map-tooltip {{
                 position: absolute;
-                bottom: 0; left: 0; right: 0;
+                display: none;
+                background: rgba(15, 23, 42, 0.96);
+                color: #e2e8f0;
+                border: 1px solid rgba(99,102,241,0.4);
+                border-radius: 10px;
+                padding: 14px 18px;
+                font-family: 'Segoe UI', system-ui, sans-serif;
+                font-size: 13px;
+                line-height: 1.65;
+                pointer-events: none;
+                z-index: 1000;
+                min-width: 240px;
+                max-width: 320px;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+                backdrop-filter: blur(8px);
+            }}
+            .map-tooltip.pinned {{
+                pointer-events: auto;
+                max-height: 480px;
+                overflow-y: auto;
+                border-color: rgba(99,102,241,0.8);
+                box-shadow: 0 8px 32px rgba(99,102,241,0.25), 0 8px 32px rgba(0,0,0,0.45);
+            }}
+            .map-tooltip.pinned::-webkit-scrollbar {{ width: 4px; }}
+            .map-tooltip.pinned::-webkit-scrollbar-thumb {{ background: #4a5568; border-radius: 4px; }}
+            .map-tooltip .tt-title {{
+                font-size: 16px;
+                font-weight: 700;
+                color: #fff;
+                margin-bottom: 8px;
+                padding-bottom: 6px;
+                border-bottom: 1px solid rgba(255,255,255,0.15);
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }}
+            .map-tooltip .tt-pin {{
+                font-size: 12px;
+                opacity: 0.6;
+            }}
+            .map-tooltip .tt-row {{
+                display: flex;
+                justify-content: space-between;
+                gap: 16px;
+            }}
+            .map-tooltip .tt-label {{ color: #94a3b8; }}
+            .map-tooltip .tt-value {{ font-weight: 600; color: #fff; }}
+            .map-tooltip .tt-stage {{
+                display: inline-block;
+                padding: 2px 10px;
+                border-radius: 20px;
+                font-size: 12px;
+                font-weight: 600;
+            }}
+            .map-tooltip .tt-hint {{
+                font-size: 11px;
+                color: #64748b;
+                margin-top: 8px;
+                text-align: center;
+                border-top: 1px solid rgba(255,255,255,0.08);
+                padding-top: 6px;
+            }}
+            .legend-bar {{
                 display: flex;
                 justify-content: center;
                 flex-wrap: wrap;
-                gap: 14px;
-                padding: 8px 12px;
-                background: rgba(22, 33, 62, 0.9);
-                backdrop-filter: blur(4px);
+                gap: 16px;
+                padding: 10px 16px;
+                background: #16213e;
+                border-top: 1px solid #2d3460;
             }}
             .legend-item {{
                 display: flex;
                 align-items: center;
-                gap: 5px;
+                gap: 6px;
                 font-family: 'Segoe UI', system-ui, sans-serif;
-                font-size: 11px;
+                font-size: 12px;
                 color: #94a3b8;
             }}
             .legend-dot {{
-                width: 10px; height: 10px;
+                width: 12px; height: 12px;
                 border-radius: 3px;
                 flex-shrink: 0;
             }}
         </style>
 
-        <div class="farm-wrapper">
-            <div class="map-area">
-                <svg viewBox="0 0 {img_w} {img_h}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
-                    <rect width="{img_w}" height="{img_h}" fill="#1a1a2e"/>
-                    {svg_polygons}
-                </svg>
-                <div class="legend-bar">{legend_html}</div>
-            </div>
-            <div class="info-panel" id="infoPanel">
-                <div class="ip-placeholder">🖱️ Di chuột vào lô<br>để xem thông tin</div>
-            </div>
+        <div class="farm-map-container" id="farmMapContainer">
+            <svg viewBox="0 0 {img_w} {img_h}" xmlns="http://www.w3.org/2000/svg">
+                <rect width="{img_w}" height="{img_h}" fill="#1a1a2e"/>
+                {svg_polygons}
+            </svg>
+            <div class="map-tooltip" id="mapTooltip"></div>
+            <div class="legend-bar">{legend_html}</div>
         </div>
 
         <script>
         (function() {{
-            const panel = document.getElementById('infoPanel');
-            const polys = document.querySelectorAll('.lot-poly');
+            const container = document.getElementById('farmMapContainer');
+            const tooltip = document.getElementById('mapTooltip');
+            const polys = container.querySelectorAll('.lot-poly');
             const stageColors = {stage_colors_json};
             stageColors["Chưa có dữ liệu"] = "#636e72";
-            const defaultHTML = '<div class="ip-placeholder">🖱️ Di chuột vào lô<br>để xem thông tin</div>';
+
+            let pinned = false;
+            let pinnedPoly = null;
+
+            function buildHTML(d, showPin) {{
+                let batches = [];
+                try {{ batches = JSON.parse(d.batches || '[]'); }} catch(e) {{}}
+
+                let pinIcon = showPin ? '<span class="tt-pin">📌 Đã ghim</span>' : '<span class="tt-pin"></span>';
+                let html = '<div class="tt-title"><span>Lô ' + d.name + '</span>' + pinIcon + '</div>';
+                html += '<div class="tt-row"><span class="tt-label">Diện tích</span><span class="tt-value">' + d.dt + '</span></div>';
+                html += '<div class="tt-row"><span class="tt-label">Tổng số cây</span><span class="tt-value">' + parseInt(d.total||0).toLocaleString() + '</span></div>';
+
+                if (batches.length > 0) {{
+                    html += '<div style="border-top:1px solid rgba(255,255,255,0.1);margin:8px 0"></div>';
+                    for (var i = 0; i < batches.length; i++) {{
+                        var b = batches[i];
+                        var sc = stageColors[b.gd] || "#636e72";
+                        html += '<div style="margin-bottom:' + (i < batches.length-1 ? '8' : '0') + 'px;padding:6px 8px;background:rgba(255,255,255,0.04);border-radius:6px;border-left:3px solid ' + sc + '">';
+                        html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px"><span style="font-weight:700;color:#fff">' + b.vu + '</span><span class="tt-stage" style="background:' + sc + ';color:#fff">' + b.gd + '</span></div>';
+                        html += '<div class="tt-row"><span class="tt-label">Bắt đầu</span><span class="tt-value">' + b.ngay_bd + '</span></div>';
+                        html += '<div class="tt-row"><span class="tt-label">Số cây</span><span class="tt-value">' + b.so_cay.toLocaleString() + '</span></div>';
+                        html += '<div class="tt-row"><span class="tt-label">Chích bắp</span><span class="tt-value">' + b.chich.toLocaleString() + '</span></div>';
+                        html += '<div class="tt-row"><span class="tt-label">Cắt bắp</span><span class="tt-value">' + b.cat.toLocaleString() + '</span></div>';
+                        html += '<div class="tt-row"><span class="tt-label">Thu hoạch</span><span class="tt-value">' + b.thu.toLocaleString() + '</span></div>';
+                        html += '</div>';
+                    }}
+                }} else {{
+                    html += '<div style="color:#94a3b8;margin-top:6px">Chưa có dữ liệu</div>';
+                }}
+
+                if (!showPin) {{
+                    html += '<div class="tt-hint">💡 Click để ghim tooltip</div>';
+                }} else {{
+                    html += '<div class="tt-hint">Click lô khác hoặc vùng trống để bỏ ghim</div>';
+                }}
+                return html;
+            }}
+
+            function unpin() {{
+                pinned = false;
+                if (pinnedPoly) {{
+                    pinnedPoly.classList.remove('pinned');
+                    pinnedPoly = null;
+                }}
+                tooltip.classList.remove('pinned');
+                tooltip.style.display = 'none';
+            }}
 
             polys.forEach(poly => {{
-                poly.addEventListener('mouseenter', function() {{
-                    const d = this.dataset;
-                    let batches = [];
-                    try {{ batches = JSON.parse(d.batches || '[]'); }} catch(e) {{}}
+                poly.addEventListener('mouseenter', function(e) {{
+                    if (pinned) return;
+                    tooltip.innerHTML = buildHTML(this.dataset, false);
+                    tooltip.style.display = 'block';
+                }});
 
-                    let html = '<div class="ip-title">Lô ' + d.name + '</div>';
-                    html += '<div class="ip-row"><span class="ip-label">Diện tích</span><span class="ip-value">' + d.dt + '</span></div>';
-                    html += '<div class="ip-row"><span class="ip-label">Tổng số cây</span><span class="ip-value">' + parseInt(d.total||0).toLocaleString() + '</span></div>';
-
-                    if (batches.length > 0) {{
-                        html += '<div style="border-top:1px solid rgba(255,255,255,0.1);margin:10px 0"></div>';
-                        batches.forEach(function(b) {{
-                            var sc = stageColors[b.gd] || "#636e72";
-                            html += '<div class="ip-batch" style="border-left:3px solid ' + sc + '">';
-                            html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><span style="font-weight:700;color:#fff">' + b.vu + '</span><span class="ip-stage" style="background:' + sc + ';color:#fff">' + b.gd + '</span></div>';
-                            html += '<div class="ip-row"><span class="ip-label">Bắt đầu</span><span class="ip-value">' + b.ngay_bd + '</span></div>';
-                            html += '<div class="ip-row"><span class="ip-label">Số cây</span><span class="ip-value">' + b.so_cay.toLocaleString() + '</span></div>';
-                            html += '<div class="ip-row"><span class="ip-label">Chích bắp</span><span class="ip-value">' + b.chich.toLocaleString() + '</span></div>';
-                            html += '<div class="ip-row"><span class="ip-label">Cắt bắp</span><span class="ip-value">' + b.cat.toLocaleString() + '</span></div>';
-                            html += '<div class="ip-row"><span class="ip-label">Thu hoạch</span><span class="ip-value">' + b.thu.toLocaleString() + '</span></div>';
-                            html += '</div>';
-                        }});
-                    }} else {{
-                        html += '<div style="color:#94a3b8;margin-top:10px">Chưa có dữ liệu</div>';
-                    }}
-                    panel.innerHTML = html;
-                    panel.scrollTop = 0;
+                poly.addEventListener('mousemove', function(e) {{
+                    if (pinned) return;
+                    const rect = container.getBoundingClientRect();
+                    let x = e.clientX - rect.left + 16;
+                    let y = e.clientY - rect.top + 16;
+                    if (x + 300 > rect.width) x = e.clientX - rect.left - 310;
+                    if (y + 200 > rect.height) y = Math.max(10, e.clientY - rect.top - 200);
+                    tooltip.style.left = x + 'px';
+                    tooltip.style.top = y + 'px';
                 }});
 
                 poly.addEventListener('mouseleave', function() {{
-                    panel.innerHTML = defaultHTML;
+                    if (pinned) return;
+                    tooltip.style.display = 'none';
                 }});
+
+                poly.addEventListener('click', function(e) {{
+                    e.stopPropagation();
+                    if (pinned && pinnedPoly === this) {{
+                        unpin();
+                        return;
+                    }}
+                    if (pinnedPoly) pinnedPoly.classList.remove('pinned');
+
+                    pinned = true;
+                    pinnedPoly = this;
+                    this.classList.add('pinned');
+                    tooltip.innerHTML = buildHTML(this.dataset, true);
+                    tooltip.classList.add('pinned');
+                    tooltip.style.display = 'block';
+                    tooltip.scrollTop = 0;
+
+                    const rect = container.getBoundingClientRect();
+                    let x = e.clientX - rect.left + 16;
+                    let y = e.clientY - rect.top + 16;
+                    if (x + 300 > rect.width) x = e.clientX - rect.left - 310;
+                    var maxY = rect.height - 490;
+                    if (y > maxY) y = Math.max(10, maxY);
+                    tooltip.style.left = x + 'px';
+                    tooltip.style.top = y + 'px';
+                }});
+            }});
+
+            container.addEventListener('click', function(e) {{
+                if (e.target.closest('.lot-poly') || e.target.closest('.map-tooltip')) return;
+                if (pinned) unpin();
+            }});
+
+            tooltip.addEventListener('click', function(e) {{
+                e.stopPropagation();
             }});
         }})();
         </script>
         '''
 
         import streamlit.components.v1 as components
-        components.html(html_content, height=580, scrolling=False)
+        components.html(html_content, height=700, scrolling=False)
 
     st.divider()
 
