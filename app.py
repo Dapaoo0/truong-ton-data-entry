@@ -1673,8 +1673,10 @@ def render_global_data_tab(c_farm):
         # ── Build lot info từ DB data (per-batch tracking) ──
         lot_info_map = {}  # lo_name → {info dict with batches}
 
-        def _get_batch_stage(lo_name, base_lot_id):
-            """Xác định giai đoạn của 1 đợt trồng cụ thể dựa trên logs."""
+        def _get_batch_stage(lo_name, base_lot_id, vu="F0", season_start=None):
+            """Xác định giai đoạn của 1 đợt trồng cụ thể dựa trên logs.
+            Áp dụng Harvest Growth Buffer (§1.2.1): F1+ chỉ tính harvest nếu >= season_start + 18 tuần.
+            """
             so_chich, so_cat, so_thu = 0, 0, 0
             if not df_stg_all.empty and "lo" in df_stg_all.columns and "base_lot_id" in df_stg_all.columns:
                 stg = df_stg_all[(df_stg_all["lo"] == lo_name) & (df_stg_all["base_lot_id"] == base_lot_id)]
@@ -1685,6 +1687,12 @@ def render_global_data_tab(c_farm):
                     so_cat = int(k["so_luong"].sum()) if not k.empty else 0
             if not df_har_all.empty and "lo" in df_har_all.columns and "base_lot_id" in df_har_all.columns:
                 har = df_har_all[(df_har_all["lo"] == lo_name) & (df_har_all["base_lot_id"] == base_lot_id)]
+                # Harvest Growth Buffer: F1+ chỉ tính harvest >= season_start + 18 tuần
+                if vu != "F0" and season_start is not None:
+                    from datetime import timedelta
+                    harvest_min_date = season_start + timedelta(weeks=18)
+                    if "ngay_thu_hoach" in har.columns:
+                        har = har[har["ngay_thu_hoach"] >= harvest_min_date]
                 so_thu = int(har["so_luong"].sum()) if not har.empty else 0
             gd = "Đang sinh trưởng"
             if so_thu > 0: gd = "Thu hoạch"
@@ -1706,15 +1714,24 @@ def render_global_data_tab(c_farm):
                 batches = []
                 for _, s_row in lo_seasons.iterrows():
                     vu = s_row.get("vu", "?")
-                    ngay_bd = str(s_row.get("ngay_bat_dau", ""))[:10]
+                    ngay_bd_raw = s_row.get("ngay_bat_dau")
+                    ngay_bd = str(ngay_bd_raw)[:10] if ngay_bd_raw is not None else ""
                     blid = s_row.get("base_lot_id")
+                    # Parse season_start cho Harvest Growth Buffer
+                    season_start = None
+                    if ngay_bd_raw is not None:
+                        import pandas as pd
+                        try:
+                            season_start = pd.Timestamp(ngay_bd_raw).date() if not isinstance(ngay_bd_raw, date) else ngay_bd_raw
+                        except Exception:
+                            pass
                     # Số cây của đợt trồng này
                     if blid and not df_lots_trong_moi.empty and "id" in df_lots_trong_moi.columns:
                         batch_lot = df_lots_trong_moi[df_lots_trong_moi["id"] == blid]
                         so_cay = int(batch_lot["so_luong"].sum()) if not batch_lot.empty else 0
                     else:
                         so_cay = 0
-                    gd, chich, cat, thu = _get_batch_stage(lo_name, blid) if blid else ("Đang sinh trưởng", 0, 0, 0)
+                    gd, chich, cat, thu = _get_batch_stage(lo_name, blid, vu=vu, season_start=season_start) if blid else ("Đang sinh trưởng", 0, 0, 0)
                     batches.append({"vu": vu, "ngay_bd": ngay_bd, "so_cay": so_cay, "gd": gd, "chich": chich, "cat": cat, "thu": thu})
 
                 # Dominant batch = nhiều cây nhất → quyết định màu polygon
