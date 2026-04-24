@@ -1,6 +1,14 @@
 # Changelog
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
+## [24/04/2026] - Đồng bộ logic Map & Table via compute_batch_stats()
+
+#### Refactor: Shared `compute_batch_stats()` function (`app.py`)
+- **[Mô tả]**: Extract hàm `compute_batch_stats()` dùng chung cho cả "🗺️ Bản đồ Farm 157" và "📋 Bảng chi tiết thông tin các lô (Theo Vụ)".
+- **[Trước đó]**: Map dùng `_get_batch_stage()` (thiếu 2 business rules: season date range filter, F1+ no-chích safety check). Table tính inline với ~35 dòng logic riêng.
+- **[Sau]**: Cả 2 sections gọi `compute_batch_stats()` — áp dụng đầy đủ 4 rules: (1) Filter stage/harvest theo season start date, (2) Harvest Growth Buffer 18w cho F1+, (3) Harvest upper bound = next_season_start + 18w, (4) F1+ chưa chích bắp → thu hoạch = 0.
+- **[Impact]**: Map giờ hiển thị giai đoạn chính xác như Table (ví dụ: 3B F1 không còn hiện "Thu hoạch" sai). Giảm ~35 dòng code trùng lặp.
+
 ## [24/04/2026] - Interactive Farm 157 Map on Dashboard
 
 #### Feature: Bản đồ tương tác Farm 157 (`app.py`)

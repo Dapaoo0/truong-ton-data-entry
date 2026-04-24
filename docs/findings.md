@@ -2,6 +2,9 @@
 
 Những khám phá, cấu hình cứng và lưu ý kinh nghiệm tìm được trong quá trình code và phân tích.
 
+- **[24/04] Map vs Table logic divergence**: Map section dùng `_get_batch_stage()` (giản lược) thiếu 2 rules: (1) không filter stage/harvest theo season date range → chích bắp F0 bị tính cho F1, (2) không check "F1+ chưa chích → không thu hoạch". Fix: extract `compute_batch_stats()` shared function áp dụng đầy đủ 4 rules cho cả 2.
+- **[24/04] Nested import shadowing**: `from datetime import timedelta` ở L2483 (bên trong `render_global_data_tab`) shadow top-level import → `NameError` tại `_get_batch_stage`. Python compile-time đánh dấu `timedelta` là local cho toàn function scope → closure/nested function bị ảnh hưởng.
+
 - Cấu hình sản lượng dự toán: `KG_PER_TREE_F0 = 15` (F0: 15 kg/buồng), `KG_PER_TREE_FN = 18` (Fn: 18 kg/buồng). Helper: `get_kg_per_tree(vu)`. Hằng số đóng gói: `KG_PER_BOX = 13`, `BOXES_PER_CONTAINER = 1320`.
 - **Quy tắc DRY cho constants**: Không hardcode cùng một giá trị ở nhiều nơi. Gom thành 1 định nghĩa duy nhất ở đầu file + helper function.
 - **Tỉ lệ hao hụt theo giai đoạn** (so với số cây trồng gốc):
