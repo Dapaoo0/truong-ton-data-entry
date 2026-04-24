@@ -18,6 +18,8 @@ import uuid
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+import json
+import streamlit.components.v1 as components
 
 if hasattr(st, "dialog"):
     dialog_decorator = st.dialog
@@ -1655,6 +1657,294 @@ def render_global_data_tab(c_farm):
         """Show season info và apply bộ lọc chuẩn. Trả về dict filtered DataFrames."""
         show_season_info(vu, lot)
         return apply_filters_local(farm, vu, team, lot, date_range, data_dict)
+
+    st.divider()
+
+    # ═══════════════════════════════════════════════════════════════════
+    # 🗺️ BẢN ĐỒ TƯƠNG TÁC FARM 157
+    # ═══════════════════════════════════════════════════════════════════
+    POLYGON_JSON_PATH = os.path.join(os.path.dirname(__file__), "farm_157_polygons.json")
+    if os.path.exists(POLYGON_JSON_PATH) and c_farm in ["Farm 157", "Admin", "Phòng Kinh doanh"]:
+        st.markdown("#### 🗺️ Bản đồ Farm 157")
+        st.caption("Di chuột vào từng lô để xem thông tin chi tiết. Màu sắc thể hiện giai đoạn hiện tại.")
+
+        with open(POLYGON_JSON_PATH, "r", encoding="utf-8") as f:
+            polygon_data = json.load(f)
+
+        # ── Build lot info từ DB data ──
+        lot_info_map = {}  # lo_name → {info dict}
+        if not df_seasons.empty and not df_lots_trong_moi.empty:
+            # Lấy season mới nhất (active) cho mỗi lô
+            for lo_name in df_lots_trong_moi["lo"].dropna().unique():
+                lo_seasons = df_seasons[
+                    (df_seasons["lo"] == lo_name) &
+                    (df_seasons["loai_trong"] != "Trồng dặm")
+                ].sort_values("ngay_bat_dau", ascending=False)
+
+                if lo_seasons.empty:
+                    continue
+
+                latest = lo_seasons.iloc[0]
+                vu = latest.get("vu", "?")
+                ngay_bd = latest.get("ngay_bat_dau", "")
+
+                # Số cây trồng mới
+                lo_lots = df_lots_trong_moi[df_lots_trong_moi["lo"] == lo_name]
+                so_cay = lo_lots["so_luong"].sum() if "so_luong" in lo_lots.columns else 0
+                dien_tich = lo_lots["dien_tich"].iloc[0] if "dien_tich" in lo_lots.columns and not lo_lots["dien_tich"].isna().all() else None
+
+                # Tính giai đoạn hiện tại dựa trên logs
+                giai_doan = "Đang sinh trưởng"
+                so_chich = 0
+                so_cat = 0
+                so_thu_hoach = 0
+
+                if not df_stg_all.empty and "lo" in df_stg_all.columns:
+                    lo_stg = df_stg_all[df_stg_all["lo"] == lo_name]
+                    if not lo_stg.empty:
+                        chich = lo_stg[lo_stg["giai_doan"] == "Chích bắp"]
+                        cat = lo_stg[lo_stg["giai_doan"] == "Cắt bắp"]
+                        so_chich = chich["so_luong"].sum() if not chich.empty else 0
+                        so_cat = cat["so_luong"].sum() if not cat.empty else 0
+
+                if not df_har_all.empty and "lo" in df_har_all.columns:
+                    lo_har = df_har_all[df_har_all["lo"] == lo_name]
+                    so_thu_hoach = lo_har["so_luong"].sum() if not lo_har.empty else 0
+
+                if so_thu_hoach > 0:
+                    giai_doan = "Thu hoạch"
+                elif so_cat > 0:
+                    giai_doan = "Cắt bắp"
+                elif so_chich > 0:
+                    giai_doan = "Chích bắp"
+
+                lot_info_map[lo_name] = {
+                    "vu": vu,
+                    "ngay_bd": str(ngay_bd)[:10] if ngay_bd else "—",
+                    "so_cay": int(so_cay),
+                    "dien_tich": float(dien_tich) if dien_tich else None,
+                    "giai_doan": giai_doan,
+                    "so_chich": int(so_chich),
+                    "so_cat": int(so_cat),
+                    "so_thu_hoach": int(so_thu_hoach),
+                }
+
+        # ── Màu theo giai đoạn ──
+        stage_colors = {
+            "Đang sinh trưởng": "#00b894",
+            "Chích bắp": "#fdcb6e",
+            "Cắt bắp": "#e17055",
+            "Thu hoạch": "#0984e3",
+        }
+        default_color = "#636e72"
+
+        # ── Build SVG polygons ──
+        img_w = polygon_data.get("image_width", 4000)
+        img_h = polygon_data.get("image_height", 2250)
+
+        svg_polygons = ""
+        for lot in polygon_data.get("lots", []):
+            name = lot["name"]
+            points_str = " ".join(f'{p["x"]},{p["y"]}' for p in lot["points"])
+            info = lot_info_map.get(name, {})
+            giai_doan = info.get("giai_doan", "Chưa có dữ liệu")
+            fill = stage_colors.get(giai_doan, default_color)
+
+            # Tooltip data attributes
+            vu = info.get("vu", "—")
+            ngay_bd = info.get("ngay_bd", "—")
+            so_cay = info.get("so_cay", 0)
+            dt = info.get("dien_tich")
+            dt_str = f'{dt:.2f} ha' if dt else "—"
+            so_chich = info.get("so_chich", 0)
+            so_cat = info.get("so_cat", 0)
+            so_thu = info.get("so_thu_hoach", 0)
+
+            # Label position (centroid)
+            cx = sum(p["x"] for p in lot["points"]) / len(lot["points"])
+            cy = sum(p["y"] for p in lot["points"]) / len(lot["points"])
+
+            svg_polygons += f'''
+            <polygon class="lot-poly" points="{points_str}" fill="{fill}"
+                data-name="{name}" data-vu="{vu}" data-ngaybd="{ngay_bd}"
+                data-socay="{so_cay}" data-dt="{dt_str}" data-gd="{giai_doan}"
+                data-chich="{so_chich}" data-cat="{so_cat}" data-thu="{so_thu}" />
+            <text x="{cx}" y="{cy}" class="lot-label">{name}</text>
+            '''
+
+        # ── Legend items ──
+        legend_html = ""
+        for stage, color in stage_colors.items():
+            legend_html += f'<span class="legend-item"><span class="legend-dot" style="background:{color}"></span>{stage}</span>'
+        legend_html += f'<span class="legend-item"><span class="legend-dot" style="background:{default_color}"></span>Chưa có dữ liệu</span>'
+
+        html_content = f'''
+        <style>
+            .farm-map-container {{
+                position: relative;
+                width: 100%;
+                background: #1a1a2e;
+                border-radius: 12px;
+                overflow: hidden;
+                border: 1px solid #2d3460;
+            }}
+            .farm-map-container svg {{
+                display: block;
+                width: 100%;
+                height: auto;
+            }}
+            .lot-poly {{
+                fill-opacity: 0.45;
+                stroke: rgba(255,255,255,0.5);
+                stroke-width: 3;
+                cursor: pointer;
+                transition: fill-opacity 0.2s, stroke-width 0.2s;
+            }}
+            .lot-poly:hover {{
+                fill-opacity: 0.75;
+                stroke: #fff;
+                stroke-width: 5;
+            }}
+            .lot-label {{
+                font-family: 'Segoe UI', system-ui, sans-serif;
+                font-size: 36px;
+                font-weight: 700;
+                fill: #fff;
+                text-anchor: middle;
+                dominant-baseline: central;
+                pointer-events: none;
+                text-shadow: 0 2px 6px rgba(0,0,0,0.7);
+            }}
+            .map-tooltip {{
+                position: absolute;
+                display: none;
+                background: rgba(15, 23, 42, 0.96);
+                color: #e2e8f0;
+                border: 1px solid rgba(99,102,241,0.4);
+                border-radius: 10px;
+                padding: 14px 18px;
+                font-family: 'Segoe UI', system-ui, sans-serif;
+                font-size: 13px;
+                line-height: 1.65;
+                pointer-events: none;
+                z-index: 1000;
+                min-width: 220px;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+                backdrop-filter: blur(8px);
+            }}
+            .map-tooltip .tt-title {{
+                font-size: 16px;
+                font-weight: 700;
+                color: #fff;
+                margin-bottom: 8px;
+                padding-bottom: 6px;
+                border-bottom: 1px solid rgba(255,255,255,0.15);
+            }}
+            .map-tooltip .tt-row {{
+                display: flex;
+                justify-content: space-between;
+                gap: 16px;
+            }}
+            .map-tooltip .tt-label {{
+                color: #94a3b8;
+            }}
+            .map-tooltip .tt-value {{
+                font-weight: 600;
+                color: #fff;
+            }}
+            .map-tooltip .tt-stage {{
+                display: inline-block;
+                padding: 2px 10px;
+                border-radius: 20px;
+                font-size: 12px;
+                font-weight: 600;
+            }}
+            .legend-bar {{
+                display: flex;
+                justify-content: center;
+                flex-wrap: wrap;
+                gap: 16px;
+                padding: 10px 16px;
+                background: #16213e;
+                border-top: 1px solid #2d3460;
+            }}
+            .legend-item {{
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                font-family: 'Segoe UI', system-ui, sans-serif;
+                font-size: 12px;
+                color: #94a3b8;
+            }}
+            .legend-dot {{
+                width: 12px;
+                height: 12px;
+                border-radius: 3px;
+                flex-shrink: 0;
+            }}
+        </style>
+
+        <div class="farm-map-container" id="farmMapContainer">
+            <svg viewBox="0 0 {img_w} {img_h}" xmlns="http://www.w3.org/2000/svg">
+                <rect width="{img_w}" height="{img_h}" fill="#1a1a2e"/>
+                {svg_polygons}
+            </svg>
+            <div class="map-tooltip" id="mapTooltip"></div>
+            <div class="legend-bar">{legend_html}</div>
+        </div>
+
+        <script>
+        (function() {{
+            const container = document.getElementById('farmMapContainer');
+            const tooltip = document.getElementById('mapTooltip');
+            const polys = container.querySelectorAll('.lot-poly');
+
+            const stageColors = {{
+                "Đang sinh trưởng": "#00b894",
+                "Chích bắp": "#fdcb6e",
+                "Cắt bắp": "#e17055",
+                "Thu hoạch": "#0984e3",
+                "Chưa có dữ liệu": "#636e72"
+            }};
+
+            polys.forEach(poly => {{
+                poly.addEventListener('mouseenter', function(e) {{
+                    const d = this.dataset;
+                    const stageColor = stageColors[d.gd] || "#636e72";
+                    tooltip.innerHTML = `
+                        <div class="tt-title">Lô ${{d.name}}</div>
+                        <div class="tt-row"><span class="tt-label">Vụ</span><span class="tt-value">${{d.vu}}</span></div>
+                        <div class="tt-row"><span class="tt-label">Ngày bắt đầu</span><span class="tt-value">${{d.ngaybd}}</span></div>
+                        <div class="tt-row"><span class="tt-label">Diện tích</span><span class="tt-value">${{d.dt}}</span></div>
+                        <div class="tt-row"><span class="tt-label">Số cây trồng</span><span class="tt-value">${{parseInt(d.socay).toLocaleString()}}</span></div>
+                        <div class="tt-row"><span class="tt-label">Giai đoạn</span><span class="tt-value"><span class="tt-stage" style="background:${{stageColor}};color:#fff">${{d.gd}}</span></span></div>
+                        <div class="tt-row"><span class="tt-label">Chích bắp</span><span class="tt-value">${{parseInt(d.chich).toLocaleString()}} cây</span></div>
+                        <div class="tt-row"><span class="tt-label">Cắt bắp</span><span class="tt-value">${{parseInt(d.cat).toLocaleString()}} cây</span></div>
+                        <div class="tt-row"><span class="tt-label">Thu hoạch</span><span class="tt-value">${{parseInt(d.thu).toLocaleString()}} cây</span></div>
+                    `;
+                    tooltip.style.display = 'block';
+                }});
+
+                poly.addEventListener('mousemove', function(e) {{
+                    const rect = container.getBoundingClientRect();
+                    let x = e.clientX - rect.left + 16;
+                    let y = e.clientY - rect.top + 16;
+                    // Prevent overflow right
+                    if (x + 240 > rect.width) x = e.clientX - rect.left - 250;
+                    if (y + 200 > rect.height) y = e.clientY - rect.top - 210;
+                    tooltip.style.left = x + 'px';
+                    tooltip.style.top = y + 'px';
+                }});
+
+                poly.addEventListener('mouseleave', function() {{
+                    tooltip.style.display = 'none';
+                }});
+            }});
+        }})();
+        </script>
+        '''
+
+        components.html(html_content, height=620, scrolling=False)
 
     st.divider()
 
