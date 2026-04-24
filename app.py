@@ -1818,9 +1818,11 @@ def render_global_data_tab(c_farm):
                 font-family: 'Segoe UI', system-ui, sans-serif;
                 font-size: 13px;
                 line-height: 1.65;
-                pointer-events: none;
+                pointer-events: auto;
                 z-index: 1000;
                 min-width: 220px;
+                max-height: 420px;
+                overflow-y: auto;
                 box-shadow: 0 8px 32px rgba(0,0,0,0.45);
                 backdrop-filter: blur(8px);
             }}
@@ -1892,9 +1894,17 @@ def render_global_data_tab(c_farm):
             const polys = container.querySelectorAll('.lot-poly');
             const stageColors = {stage_colors_json};
             stageColors["Chưa có dữ liệu"] = "#636e72";
+            let hideTimeout = null;
+
+            function showTooltip() {{ clearTimeout(hideTimeout); tooltip.style.display = 'block'; }}
+            function scheduleHide() {{ hideTimeout = setTimeout(() => {{ tooltip.style.display = 'none'; }}, 300); }}
+
+            tooltip.addEventListener('mouseenter', showTooltip);
+            tooltip.addEventListener('mouseleave', () => {{ tooltip.style.display = 'none'; }});
 
             polys.forEach(poly => {{
                 poly.addEventListener('mouseenter', function(e) {{
+                    clearTimeout(hideTimeout);
                     const d = this.dataset;
                     let batches = [];
                     try {{ batches = JSON.parse(d.batches || '[]'); }} catch(e) {{}}
@@ -1920,7 +1930,8 @@ def render_global_data_tab(c_farm):
                         html += `<div style="color:#94a3b8;margin-top:6px">Chua co du lieu</div>`;
                     }}
                     tooltip.innerHTML = html;
-                    tooltip.style.display = 'block';
+                    tooltip.scrollTop = 0;
+                    showTooltip();
                 }});
 
                 poly.addEventListener('mousemove', function(e) {{
@@ -1933,15 +1944,13 @@ def render_global_data_tab(c_farm):
                     tooltip.style.top = y + 'px';
                 }});
 
-                poly.addEventListener('mouseleave', function() {{
-                    tooltip.style.display = 'none';
-                }});
+                poly.addEventListener('mouseleave', scheduleHide);
             }});
         }})();
         </script>
         '''
 
-        components.html(html_content, height=620, scrolling=False)
+        components.html(html_content, height=700, scrolling=False)
 
     st.divider()
 
