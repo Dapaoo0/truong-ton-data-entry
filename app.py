@@ -1671,62 +1671,60 @@ def render_global_data_tab(c_farm):
         with open(POLYGON_JSON_PATH, "r", encoding="utf-8") as f:
             polygon_data = json.load(f)
 
-        # ── Build lot info từ DB data ──
-        lot_info_map = {}  # lo_name → {info dict}
-        if not df_seasons.empty and not df_lots_trong_moi.empty:
-            # Lấy season mới nhất (active) cho mỗi lô
-            for lo_name in df_lots_trong_moi["lo"].dropna().unique():
-                lo_seasons = df_seasons[
-                    (df_seasons["lo"] == lo_name) &
-                    (df_seasons["loai_trong"] != "Trồng dặm")
-                ].sort_values("ngay_bat_dau", ascending=False)
+        # ── Build lot info từ DB data (per-batch tracking) ──
+        lot_info_map = {}  # lo_name → {info dict with batches}
 
+        def _get_batch_stage(lo_name, base_lot_id):
+            """Xác định giai đoạn của 1 đợt trồng cụ thể dựa trên logs."""
+            so_chich, so_cat, so_thu = 0, 0, 0
+            if not df_stg_all.empty and "lo" in df_stg_all.columns and "base_lot_id" in df_stg_all.columns:
+                stg = df_stg_all[(df_stg_all["lo"] == lo_name) & (df_stg_all["base_lot_id"] == base_lot_id)]
+                if not stg.empty:
+                    c = stg[stg["giai_doan"] == "Chích bắp"]
+                    k = stg[stg["giai_doan"] == "Cắt bắp"]
+                    so_chich = int(c["so_luong"].sum()) if not c.empty else 0
+                    so_cat = int(k["so_luong"].sum()) if not k.empty else 0
+            if not df_har_all.empty and "lo" in df_har_all.columns and "base_lot_id" in df_har_all.columns:
+                har = df_har_all[(df_har_all["lo"] == lo_name) & (df_har_all["base_lot_id"] == base_lot_id)]
+                so_thu = int(har["so_luong"].sum()) if not har.empty else 0
+            gd = "Đang sinh trưởng"
+            if so_thu > 0: gd = "Thu hoạch"
+            elif so_cat > 0: gd = "Cắt bắp"
+            elif so_chich > 0: gd = "Chích bắp"
+            return gd, so_chich, so_cat, so_thu
+
+        if not df_seasons.empty and not df_lots_trong_moi.empty:
+            for lo_name in df_lots_trong_moi["lo"].dropna().unique():
+                lo_lots = df_lots_trong_moi[df_lots_trong_moi["lo"] == lo_name]
+                dien_tich = lo_lots["dien_tich"].iloc[0] if "dien_tich" in lo_lots.columns and not lo_lots["dien_tich"].isna().all() else None
+                lo_seasons = df_seasons[
+                    (df_seasons["lo"] == lo_name) & (df_seasons["loai_trong"] != "Trồng dặm")
+                ].sort_values("ngay_bat_dau", ascending=False)
                 if lo_seasons.empty:
                     continue
 
-                latest = lo_seasons.iloc[0]
-                vu = latest.get("vu", "?")
-                ngay_bd = latest.get("ngay_bat_dau", "")
+                # Build per-batch info
+                batches = []
+                for _, s_row in lo_seasons.iterrows():
+                    vu = s_row.get("vu", "?")
+                    ngay_bd = str(s_row.get("ngay_bat_dau", ""))[:10]
+                    blid = s_row.get("base_lot_id")
+                    # Số cây của đợt trồng này
+                    if blid and not df_lots_trong_moi.empty and "id" in df_lots_trong_moi.columns:
+                        batch_lot = df_lots_trong_moi[df_lots_trong_moi["id"] == blid]
+                        so_cay = int(batch_lot["so_luong"].sum()) if not batch_lot.empty else 0
+                    else:
+                        so_cay = 0
+                    gd, chich, cat, thu = _get_batch_stage(lo_name, blid) if blid else ("Đang sinh trưởng", 0, 0, 0)
+                    batches.append({"vu": vu, "ngay_bd": ngay_bd, "so_cay": so_cay, "gd": gd, "chich": chich, "cat": cat, "thu": thu})
 
-                # Số cây trồng mới
-                lo_lots = df_lots_trong_moi[df_lots_trong_moi["lo"] == lo_name]
-                so_cay = lo_lots["so_luong"].sum() if "so_luong" in lo_lots.columns else 0
-                dien_tich = lo_lots["dien_tich"].iloc[0] if "dien_tich" in lo_lots.columns and not lo_lots["dien_tich"].isna().all() else None
-
-                # Tính giai đoạn hiện tại dựa trên logs
-                giai_doan = "Đang sinh trưởng"
-                so_chich = 0
-                so_cat = 0
-                so_thu_hoach = 0
-
-                if not df_stg_all.empty and "lo" in df_stg_all.columns:
-                    lo_stg = df_stg_all[df_stg_all["lo"] == lo_name]
-                    if not lo_stg.empty:
-                        chich = lo_stg[lo_stg["giai_doan"] == "Chích bắp"]
-                        cat = lo_stg[lo_stg["giai_doan"] == "Cắt bắp"]
-                        so_chich = chich["so_luong"].sum() if not chich.empty else 0
-                        so_cat = cat["so_luong"].sum() if not cat.empty else 0
-
-                if not df_har_all.empty and "lo" in df_har_all.columns:
-                    lo_har = df_har_all[df_har_all["lo"] == lo_name]
-                    so_thu_hoach = lo_har["so_luong"].sum() if not lo_har.empty else 0
-
-                if so_thu_hoach > 0:
-                    giai_doan = "Thu hoạch"
-                elif so_cat > 0:
-                    giai_doan = "Cắt bắp"
-                elif so_chich > 0:
-                    giai_doan = "Chích bắp"
-
+                # Dominant batch = nhiều cây nhất → quyết định màu polygon
+                dominant = max(batches, key=lambda b: b["so_cay"]) if batches else batches[0]
                 lot_info_map[lo_name] = {
-                    "vu": vu,
-                    "ngay_bd": str(ngay_bd)[:10] if ngay_bd else "—",
-                    "so_cay": int(so_cay),
+                    "dominant_gd": dominant["gd"],
                     "dien_tich": float(dien_tich) if dien_tich else None,
-                    "giai_doan": giai_doan,
-                    "so_chich": int(so_chich),
-                    "so_cat": int(so_cat),
-                    "so_thu_hoach": int(so_thu_hoach),
+                    "total_cay": sum(b["so_cay"] for b in batches),
+                    "batches": batches,
                 }
 
         # ── Màu theo giai đoạn ──
@@ -1736,6 +1734,7 @@ def render_global_data_tab(c_farm):
             "Cắt bắp": "#e17055",
             "Thu hoạch": "#0984e3",
         }
+        stage_colors_json = json.dumps(stage_colors, ensure_ascii=False)
         default_color = "#636e72"
 
         # ── Build SVG polygons ──
@@ -1747,28 +1746,21 @@ def render_global_data_tab(c_farm):
             name = lot["name"]
             points_str = " ".join(f'{p["x"]},{p["y"]}' for p in lot["points"])
             info = lot_info_map.get(name, {})
-            giai_doan = info.get("giai_doan", "Chưa có dữ liệu")
+            giai_doan = info.get("dominant_gd", "Chưa có dữ liệu")
             fill = stage_colors.get(giai_doan, default_color)
-
-            # Tooltip data attributes
-            vu = info.get("vu", "—")
-            ngay_bd = info.get("ngay_bd", "—")
-            so_cay = info.get("so_cay", 0)
             dt = info.get("dien_tich")
             dt_str = f'{dt:.2f} ha' if dt else "—"
-            so_chich = info.get("so_chich", 0)
-            so_cat = info.get("so_cat", 0)
-            so_thu = info.get("so_thu_hoach", 0)
+            total_cay = info.get("total_cay", 0)
+            # Encode batches as JSON string for JS tooltip
+            batches_json = json.dumps(info.get("batches", []), ensure_ascii=False).replace('"', '&quot;')
 
-            # Label position (centroid)
             cx = sum(p["x"] for p in lot["points"]) / len(lot["points"])
             cy = sum(p["y"] for p in lot["points"]) / len(lot["points"])
 
             svg_polygons += f'''
             <polygon class="lot-poly" points="{points_str}" fill="{fill}"
-                data-name="{name}" data-vu="{vu}" data-ngaybd="{ngay_bd}"
-                data-socay="{so_cay}" data-dt="{dt_str}" data-gd="{giai_doan}"
-                data-chich="{so_chich}" data-cat="{so_cat}" data-thu="{so_thu}" />
+                data-name="{name}" data-dt="{dt_str}" data-total="{total_cay}"
+                data-gd="{giai_doan}" data-batches="{batches_json}" />
             <text x="{cx}" y="{cy}" class="lot-label">{name}</text>
             '''
 
@@ -1898,30 +1890,36 @@ def render_global_data_tab(c_farm):
             const container = document.getElementById('farmMapContainer');
             const tooltip = document.getElementById('mapTooltip');
             const polys = container.querySelectorAll('.lot-poly');
-
-            const stageColors = {{
-                "Đang sinh trưởng": "#00b894",
-                "Chích bắp": "#fdcb6e",
-                "Cắt bắp": "#e17055",
-                "Thu hoạch": "#0984e3",
-                "Chưa có dữ liệu": "#636e72"
-            }};
+            const stageColors = {stage_colors_json};
+            stageColors["Chưa có dữ liệu"] = "#636e72";
 
             polys.forEach(poly => {{
                 poly.addEventListener('mouseenter', function(e) {{
                     const d = this.dataset;
-                    const stageColor = stageColors[d.gd] || "#636e72";
-                    tooltip.innerHTML = `
-                        <div class="tt-title">Lô ${{d.name}}</div>
-                        <div class="tt-row"><span class="tt-label">Vụ</span><span class="tt-value">${{d.vu}}</span></div>
-                        <div class="tt-row"><span class="tt-label">Ngày bắt đầu</span><span class="tt-value">${{d.ngaybd}}</span></div>
-                        <div class="tt-row"><span class="tt-label">Diện tích</span><span class="tt-value">${{d.dt}}</span></div>
-                        <div class="tt-row"><span class="tt-label">Số cây trồng</span><span class="tt-value">${{parseInt(d.socay).toLocaleString()}}</span></div>
-                        <div class="tt-row"><span class="tt-label">Giai đoạn</span><span class="tt-value"><span class="tt-stage" style="background:${{stageColor}};color:#fff">${{d.gd}}</span></span></div>
-                        <div class="tt-row"><span class="tt-label">Chích bắp</span><span class="tt-value">${{parseInt(d.chich).toLocaleString()}} cây</span></div>
-                        <div class="tt-row"><span class="tt-label">Cắt bắp</span><span class="tt-value">${{parseInt(d.cat).toLocaleString()}} cây</span></div>
-                        <div class="tt-row"><span class="tt-label">Thu hoạch</span><span class="tt-value">${{parseInt(d.thu).toLocaleString()}} cây</span></div>
-                    `;
+                    let batches = [];
+                    try {{ batches = JSON.parse(d.batches || '[]'); }} catch(e) {{}}
+
+                    let html = `<div class="tt-title">Lô ${{d.name}}</div>`;
+                    html += `<div class="tt-row"><span class="tt-label">Dien tich</span><span class="tt-value">${{d.dt}}</span></div>`;
+                    html += `<div class="tt-row"><span class="tt-label">Tong so cay</span><span class="tt-value">${{parseInt(d.total||0).toLocaleString()}}</span></div>`;
+
+                    if (batches.length > 0) {{
+                        html += `<div style="border-top:1px solid rgba(255,255,255,0.1);margin:8px 0"></div>`;
+                        batches.forEach((b, i) => {{
+                            const sc = stageColors[b.gd] || "#636e72";
+                            html += `<div style="margin-bottom:${{i < batches.length-1 ? '8' : '0'}}px;padding:6px 8px;background:rgba(255,255,255,0.04);border-radius:6px;border-left:3px solid ${{sc}}">`;
+                            html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px"><span style="font-weight:700;color:#fff">${{b.vu}}</span><span class="tt-stage" style="background:${{sc}};color:#fff">${{b.gd}}</span></div>`;
+                            html += `<div class="tt-row"><span class="tt-label">Bat dau</span><span class="tt-value">${{b.ngay_bd}}</span></div>`;
+                            html += `<div class="tt-row"><span class="tt-label">So cay</span><span class="tt-value">${{b.so_cay.toLocaleString()}}</span></div>`;
+                            html += `<div class="tt-row"><span class="tt-label">Chich bap</span><span class="tt-value">${{b.chich.toLocaleString()}}</span></div>`;
+                            html += `<div class="tt-row"><span class="tt-label">Cat bap</span><span class="tt-value">${{b.cat.toLocaleString()}}</span></div>`;
+                            html += `<div class="tt-row"><span class="tt-label">Thu hoach</span><span class="tt-value">${{b.thu.toLocaleString()}}</span></div>`;
+                            html += `</div>`;
+                        }});
+                    }} else {{
+                        html += `<div style="color:#94a3b8;margin-top:6px">Chua co du lieu</div>`;
+                    }}
+                    tooltip.innerHTML = html;
                     tooltip.style.display = 'block';
                 }});
 
@@ -1929,9 +1927,8 @@ def render_global_data_tab(c_farm):
                     const rect = container.getBoundingClientRect();
                     let x = e.clientX - rect.left + 16;
                     let y = e.clientY - rect.top + 16;
-                    // Prevent overflow right
-                    if (x + 240 > rect.width) x = e.clientX - rect.left - 250;
-                    if (y + 200 > rect.height) y = e.clientY - rect.top - 210;
+                    if (x + 260 > rect.width) x = e.clientX - rect.left - 270;
+                    if (y + 300 > rect.height) y = e.clientY - rect.top - 310;
                     tooltip.style.left = x + 'px';
                     tooltip.style.top = y + 'px';
                 }});
