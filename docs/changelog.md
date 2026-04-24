@@ -1,6 +1,14 @@
 # Changelog
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
+## [24/04/2026] - Farm Selector Popover cho Admin/KD Download Buttons
+
+#### Feature: Popover chọn Farm khi tải Excel (`app.py`)
+- **[Mô tả]**: Admin và Phòng Kinh doanh giờ thấy popover khi click nút download — phải chọn farm trước rồi mới tải file Excel tương ứng. User thường (1 farm) giữ nguyên download trực tiếp.
+- **[Trước đó]**: File download chứa data tất cả farm gộp chung, tên file là `Bao_cao_Admin_...xlsx` — không phân biệt được farm nào.
+- **[Sau]**: Mỗi nút dùng `st.popover` + `st.radio` chọn farm → filter data → `st.download_button` tải file filtered. Tên file: `Bao_cao_{farm_name}_...xlsx`.
+- **[Helper]**: `_filter_by_farm()` DRY filter function, `_gen_dl_link()` cho HTML download links (user thường).
+
 ## [24/04/2026] - Reset & Re-insert Chích Bắp từ Excel nguồn gốc
 
 #### Data: Xóa toàn bộ chích bắp cũ, insert mới từ "mặt bằng chích bắp tuần 16" (`stage_logs`)
