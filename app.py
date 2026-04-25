@@ -2131,6 +2131,8 @@ def render_global_data_tab(c_farm):
             .farm-map-container {{
                 position: relative;
                 width: 100%;
+                max-width: 1200px;
+                margin: 0 auto;
                 background: #1a1a2e;
                 border-radius: 12px;
                 overflow: hidden;
@@ -2382,10 +2384,28 @@ def render_global_data_tab(c_farm):
             }});
         }})();
         </script>
+        <script>
+        // Auto-resize iframe to fit map content
+        (function() {{
+            function sendHeight() {{
+                var container = document.getElementById('farmMapContainer');
+                if (container) {{
+                    var h = container.offsetHeight + 20;
+                    window.parent.postMessage({{type: 'streamlit:setFrameHeight', height: h}}, '*');
+                }}
+            }}
+            window.addEventListener('load', sendHeight);
+            window.addEventListener('resize', sendHeight);
+            // Also observe mutations
+            if (window.ResizeObserver) {{
+                new ResizeObserver(sendHeight).observe(document.getElementById('farmMapContainer'));
+            }}
+        }})();
+        </script>
         '''
 
         import streamlit.components.v1 as components
-        components.html(html_content, height=700, scrolling=False)
+        components.html(html_content, height=650, scrolling=False)
 
     st.divider()
 
