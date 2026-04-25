@@ -2382,36 +2382,13 @@ def render_global_data_tab(c_farm):
             }});
         }})();
         </script>
-        <script>
-        // Auto-resize iframe to match map content height
-        (function() {{
-            // Signal Streamlit that the component is ready
-            window.parent.postMessage({{isStreamlitMessage: true, type: 'streamlit:componentReady'}}, '*');
-
-            function sendHeight() {{
-                var container = document.getElementById('farmMapContainer');
-                if (container) {{
-                    var h = container.offsetHeight + 10;
-                    window.parent.postMessage(
-                        {{isStreamlitMessage: true, type: 'streamlit:setFrameHeight', height: h}},
-                        '*'
-                    );
-                }}
-            }}
-            // Send height after load, resize, and on DOM changes
-            window.addEventListener('load', sendHeight);
-            window.addEventListener('resize', sendHeight);
-            setTimeout(sendHeight, 100);
-            setTimeout(sendHeight, 500);
-            if (window.ResizeObserver) {{
-                new ResizeObserver(sendHeight).observe(document.getElementById('farmMapContainer'));
-            }}
-        }})();
-        </script>
         '''
 
         import streamlit.components.v1 as components
-        components.html(html_content, height=0, scrolling=False)
+        # Height tính theo aspect ratio SVG: img_w x img_h
+        # Streamlit container ~700px wide -> height ≈ 700 * (img_h/img_w) + legend bar
+        map_height = int(700 * (img_h / img_w)) + 50
+        components.html(html_content, height=map_height, scrolling=False)
 
     st.divider()
 
