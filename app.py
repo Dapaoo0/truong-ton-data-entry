@@ -2385,10 +2385,7 @@ def render_global_data_tab(c_farm):
         '''
 
         import streamlit.components.v1 as components
-        # Height tính theo aspect ratio SVG: img_w x img_h
-        # Streamlit container ~700px wide -> height ≈ 700 * (img_h/img_w) + legend bar
-        map_height = int(700 * (img_h / img_w)) + 50
-        components.html(html_content, height=map_height, scrolling=False)
+        components.html(html_content, height=700, scrolling=False)
 
     st.divider()
 
