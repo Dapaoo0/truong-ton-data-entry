@@ -2131,8 +2131,6 @@ def render_global_data_tab(c_farm):
             .farm-map-container {{
                 position: relative;
                 width: 100%;
-                max-width: 1200px;
-                margin: 0 auto;
                 background: #1a1a2e;
                 border-radius: 12px;
                 overflow: hidden;
@@ -2385,18 +2383,26 @@ def render_global_data_tab(c_farm):
         }})();
         </script>
         <script>
-        // Auto-resize iframe to fit map content
+        // Auto-resize iframe to match map content height
         (function() {{
+            // Signal Streamlit that the component is ready
+            window.parent.postMessage({{isStreamlitMessage: true, type: 'streamlit:componentReady'}}, '*');
+
             function sendHeight() {{
                 var container = document.getElementById('farmMapContainer');
                 if (container) {{
-                    var h = container.offsetHeight + 20;
-                    window.parent.postMessage({{type: 'streamlit:setFrameHeight', height: h}}, '*');
+                    var h = container.offsetHeight + 10;
+                    window.parent.postMessage(
+                        {{isStreamlitMessage: true, type: 'streamlit:setFrameHeight', height: h}},
+                        '*'
+                    );
                 }}
             }}
+            // Send height after load, resize, and on DOM changes
             window.addEventListener('load', sendHeight);
             window.addEventListener('resize', sendHeight);
-            // Also observe mutations
+            setTimeout(sendHeight, 100);
+            setTimeout(sendHeight, 500);
             if (window.ResizeObserver) {{
                 new ResizeObserver(sendHeight).observe(document.getElementById('farmMapContainer'));
             }}
@@ -2405,7 +2411,7 @@ def render_global_data_tab(c_farm):
         '''
 
         import streamlit.components.v1 as components
-        components.html(html_content, height=650, scrolling=False)
+        components.html(html_content, height=0, scrolling=False)
 
     st.divider()
 
