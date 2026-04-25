@@ -2254,6 +2254,42 @@ def render_global_data_tab(c_farm):
                 border-radius: 3px;
                 flex-shrink: 0;
             }}
+            /* Responsive tooltip for small screens */
+            @media (max-width: 600px) {{
+                .map-tooltip {{
+                    min-width: 150px;
+                    max-width: 200px;
+                    padding: 8px 10px;
+                    font-size: 11px;
+                    line-height: 1.45;
+                    border-radius: 8px;
+                }}
+                .map-tooltip .tt-title {{
+                    font-size: 13px;
+                    margin-bottom: 4px;
+                    padding-bottom: 4px;
+                }}
+                .map-tooltip .tt-pin {{ font-size: 10px; }}
+                .map-tooltip .tt-row {{ gap: 8px; }}
+                .map-tooltip .tt-stage {{
+                    padding: 1px 6px;
+                    font-size: 10px;
+                }}
+                .map-tooltip .tt-hint {{
+                    font-size: 9px;
+                    margin-top: 4px;
+                    padding-top: 4px;
+                }}
+                .map-tooltip.pinned {{
+                    max-height: 280px;
+                }}
+                .legend-bar {{
+                    gap: 8px;
+                    padding: 6px 8px;
+                }}
+                .legend-item {{ font-size: 10px; gap: 4px; }}
+                .legend-dot {{ width: 9px; height: 9px; }}
+            }}
         </style>
 
         <div class="farm-map-container" id="farmMapContainer">
@@ -2332,10 +2368,12 @@ def render_global_data_tab(c_farm):
                 poly.addEventListener('mousemove', function(e) {{
                     if (pinned) return;
                     const rect = container.getBoundingClientRect();
-                    let x = e.clientX - rect.left + 16;
-                    let y = e.clientY - rect.top + 16;
-                    if (x + 300 > rect.width) x = e.clientX - rect.left - 310;
-                    if (y + 200 > rect.height) y = Math.max(10, e.clientY - rect.top - 200);
+                    const tw = tooltip.offsetWidth;
+                    const th = tooltip.offsetHeight;
+                    let x = e.clientX - rect.left + 12;
+                    let y = e.clientY - rect.top + 12;
+                    if (x + tw > rect.width) x = Math.max(4, e.clientX - rect.left - tw - 8);
+                    if (y + th > rect.height) y = Math.max(4, rect.height - th - 4);
                     tooltip.style.left = x + 'px';
                     tooltip.style.top = y + 'px';
                 }});
@@ -2362,13 +2400,15 @@ def render_global_data_tab(c_farm):
                     tooltip.scrollTop = 0;
 
                     const rect = container.getBoundingClientRect();
-                    let x = e.clientX - rect.left + 16;
-                    let y = e.clientY - rect.top + 16;
-                    if (x + 300 > rect.width) x = e.clientX - rect.left - 310;
-                    var maxY = rect.height - 490;
-                    if (y > maxY) y = Math.max(10, maxY);
+                    const tw = tooltip.offsetWidth;
+                    const th = Math.min(tooltip.offsetHeight, rect.height - 8);
+                    let x = e.clientX - rect.left + 12;
+                    let y = e.clientY - rect.top + 12;
+                    if (x + tw > rect.width) x = Math.max(4, rect.width - tw - 4);
+                    if (y + th > rect.height) y = Math.max(4, rect.height - th - 4);
                     tooltip.style.left = x + 'px';
                     tooltip.style.top = y + 'px';
+                    tooltip.style.maxHeight = (rect.height - y - 4) + 'px';
                 }});
             }});
 
