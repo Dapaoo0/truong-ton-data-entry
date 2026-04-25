@@ -2,7 +2,15 @@
 
 Tài liệu này lưu lại tóm tắt các yêu cầu của người dùng để theo dõi tiến độ và nhiệm vụ.
 
-## Ngày 24/04/2026
+## Ngày 25/04/2026
+
+- Fix tooltip bản đồ Farm 157 bị tràn trên mobile: thêm `@media (max-width: 600px)` CSS, scale down font/padding/width. JS positioning dùng `offsetWidth/Height` thay vì hardcoded pixels.
+- Thử nghiệm `postMessage` auto-resize iframe cho map → thất bại (chỉ hoạt động với Streamlit Custom Components). Revert `height=700`.
+- Đọc docs `st.image` theo gợi ý user: `st.image` hỗ trợ SVG + `width="stretch"` responsive, nhưng mất interactive JS. User quyết định giữ nguyên `components.html`.
+- Verify chích bắp Farm 157 vs Excel nguồn: khớp 100% từng lô (3A, 3B, 3BF, 8A, 8B). Tổng DB = 4,598. Excel dòng TỔNG bị sai (5,384 thay vì 5,425).
+- Cập nhật docs theo rule.md.
+
+
 
 - User cung cấp JSON polygon data (24 lô Farm 157) từ Polygon Tracer tool.
 - Tích hợp interactive SVG map vào dashboard (`app.py`): 24 polygon, hover tooltip, màu theo giai đoạn, legend bar.

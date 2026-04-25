@@ -2,6 +2,10 @@
 
 Những khám phá, cấu hình cứng và lưu ý kinh nghiệm tìm được trong quá trình code và phân tích.
 
+- **[25/04] `components.html` không hỗ trợ iframe auto-resize**: `postMessage({type: 'streamlit:setFrameHeight'})` chỉ hoạt động với Streamlit Custom Components chính thức (package riêng). `components.html` dùng iframe cố định — phải set `height=N` thủ công. Giải pháp thay thế: `st.image(svg_string, width="stretch")` responsive hoàn hảo nhưng mất JS interactivity (hover, click, tooltip).
+- **[25/04] Tooltip CSS cần responsive riêng**: Tooltip trong `components.html` dùng absolute pixels (min-width 240px, font 13px) → trên mobile bị tràn. Giải pháp: `@media (max-width: 600px)` scale down kích thước. JS positioning phải dùng `tooltip.offsetWidth/Height` thực tế thay vì hardcoded (`300`, `310`, `490`), kết hợp `Math.max(4, ...)` clamp trong container bounds.
+- **[25/04] Excel SUM có thể sai**: File "mặt bằng chích bắp tuần 16" dòng TỔNG = 5,384 nhưng cộng 6 lô = 5,425 (chênh 41). Nguyên nhân: Excel SUM formula có thể exclude cells hoặc tham chiếu sai range. Khi verify data, **luôn so sánh từng lô** thay vì tin dòng tổng.
+
 - **[24/04] Map vs Table logic divergence**: Map section dùng `_get_batch_stage()` (giản lược) thiếu 2 rules: (1) không filter stage/harvest theo season date range → chích bắp F0 bị tính cho F1, (2) không check "F1+ chưa chích → không thu hoạch". Fix: extract `compute_batch_stats()` shared function áp dụng đầy đủ 4 rules cho cả 2.
 - **[24/04] Nested import shadowing**: `from datetime import timedelta` ở L2483 (bên trong `render_global_data_tab`) shadow top-level import → `NameError` tại `_get_batch_stage`. Python compile-time đánh dấu `timedelta` là local cho toàn function scope → closure/nested function bị ảnh hưởng.
 

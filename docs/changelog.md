@@ -1,6 +1,22 @@
 # Changelog
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
+
+## [25/04/2026] - Responsive Tooltip & Map Iframe Stabilization
+
+#### Fix: Tooltip responsive trên mobile (`app.py`)
+- **[Mô tả]**: Tooltip trên bản đồ Farm 157 bị tràn khi mở trên điện thoại (min-width 240px > viewport). Thêm CSS `@media (max-width: 600px)` để scale down toàn bộ tooltip + legend bar.
+- **[CSS]**: `min-width: 150px`, `max-width: 200px`, `font-size: 11px`, title `13px`, stage badge `10px`. Legend: gap `8px`, font `10px`, dot `9px`.
+- **[JS Positioning]**: Bỏ hardcoded pixel values (`300`, `310`, `490`). Dùng `tooltip.offsetWidth/Height` thực tế để tính vị trí. Clamp trong container bounds (`Math.max(4, ...)`). Pinned tooltip: `maxHeight` dynamic theo container height.
+
+#### Fix: Map iframe height (`app.py`)
+- **[Mô tả]**: Thử nghiệm `postMessage` auto-resize (`streamlit:setFrameHeight`) → không hoạt động với `components.html` (chỉ hỗ trợ Streamlit Custom Components chính thức). Revert về `height=700` cố định.
+- **[Kết luận]**: `components.html` = iframe cố định, không thể auto-resize. Giữ `height=700` làm giải pháp ổn định. `st.image` hỗ trợ SVG responsive nhưng mất interactive tooltips.
+
+#### Verification: Chích bắp Farm 157 vs Excel source
+- **[Kết quả]**: Khớp 100% từng lô: 3A=2636, 3B(đợt2)=1044, 3BF(đợt1)=85, 8A=308, 8B=525. Tổng DB=4,598. 7A (827) = vụ cũ, đúng ý bỏ qua.
+- **[Phát hiện]**: Dòng TỔNG trong Excel ghi 5,384 nhưng cộng 6 lô = 5,425 → Excel tính sai dòng tổng, data từng lô đúng.
+
 ## [24/04/2026] - Farm Selector Popover cho Admin/KD Download Buttons
 
 #### Feature: Popover chọn Farm khi tải Excel (`app.py`)
