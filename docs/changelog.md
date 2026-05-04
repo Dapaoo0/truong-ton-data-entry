@@ -2,7 +2,24 @@
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
 
-## [25/04/2026] - Responsive Tooltip & Map Iframe Stabilization
+## [04/05/2026] - Sort Controls, Season Status Filter, Bỏ Màu Dây Chích Bắp
+
+#### Feature: Filter trạng thái vụ cho Bảng chi tiết lô (`app.py`)
+- **[Mô tả]**: Thêm `st.radio` horizontal ("Chưa kết thúc vụ" / "Tất cả") phía trên bảng chi tiết. Mặc định chỉ hiện lô chưa chốt vụ (`ngay_ket_thuc_thuc_te IS NULL`). Chọn "Tất cả" hiện cả lô đã thu hoạch (highlight xanh lá pastel).
+- **[Key]**: `dt_season_status`. Hoạt động kết hợp với các filter Farm/Vụ/Đội/Lô hiện có.
+
+#### Feature: Sort controls cho Bảng chi tiết lô (`app.py`)
+- **[Mô tả]**: Thêm `st.selectbox` (12 cột) + `st.radio` (↑ Tăng / ↓ Giảm) để user sort bảng chi tiết theo bất kỳ trường nào.
+- **[Giữ format cũ]**: Vẫn dùng HTML table (MultiIndex header, dòng TỔNG bold, highlight pastel). Sort áp dụng trên data rows trước khi render, TỔNG luôn ở cuối.
+- **[Mặc định]**: "Tên lô (mặc định)" — natural sort (3B < 4A < 12A).
+- **[Lựa chọn sort]**: Thời gian vụ, DT trồng, Cây đã trồng, CB/CắtB/TH/KG (Dự toán & Thực tế).
+
+#### Feature: Bỏ yêu cầu nhập Màu dây cho Chích bắp (`app.py`, DB)
+- **[UI]**: Ẩn ô "🎨 Màu dây" khi Đội BVTV nhập Chích bắp (cả form thêm mới lẫn edit dialog). Chỉ hiện cho Cắt bắp.
+- **[App Logic]**: `mau_day = None` khi giai đoạn = Chích bắp. Validation chỉ bắt buộc màu dây cho Cắt bắp.
+- **[DB Migration]**: `enforce_no_mau_day_for_chich_bap` — UPDATE tất cả chích bắp cũ `mau_day = NULL` + thêm CHECK constraint `chk_chich_bap_no_mau_day` (giai_doan ≠ 'Chích bắp' OR mau_day IS NULL).
+
+
 
 #### Fix: Tooltip responsive trên mobile (`app.py`)
 - **[Mô tả]**: Tooltip trên bản đồ Farm 157 bị tràn khi mở trên điện thoại (min-width 240px > viewport). Thêm CSS `@media (max-width: 600px)` để scale down toàn bộ tooltip + legend bar.

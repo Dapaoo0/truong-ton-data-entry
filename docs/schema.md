@@ -246,7 +246,7 @@ Tài liệu này ghi lại chi tiết toàn bộ cấu trúc cơ sở dữ liệ
 | giai_doan | text | Có | - |
 | ngay_thuc_hien | date | Có | - |
 | so_luong | integer | Có | - |
-| mau_day | text | Không | - |
+| mau_day | text | Không | Màu dây định danh lứa. **CHECK constraint `chk_chich_bap_no_mau_day`**: phải NULL khi `giai_doan = 'Chích bắp'`. Chỉ dùng cho Cắt bắp. |
 | created_at | timestamp with time zone | Không | Thời gian tạo record |
 | tuan | integer | Không | - |
 | is_deleted | boolean | Không | Cờ đánh dấu soft delete (True=Đã xóa) |

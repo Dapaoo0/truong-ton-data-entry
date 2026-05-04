@@ -2,7 +2,13 @@
 
 Tài liệu này lưu lại tóm tắt các yêu cầu của người dùng để theo dõi tiến độ và nhiệm vụ.
 
-## Ngày 25/04/2026
+## Ngày 04/05/2026
+
+- Thêm filter "Chưa kết thúc vụ / Tất cả" cho bảng chi tiết lô (toggle hiển thị lô đã chốt vụ).
+- Thêm sort controls (selectbox + radio tăng/giảm) cho bảng chi tiết lô — giữ format HTML cũ (MultiIndex, TỔNG, highlight).
+- Bỏ yêu cầu nhập màu dây cho Đội BVTV khi cập nhật chích bắp (ẩn UI, bỏ validation, gửi NULL).
+- Tạo DB CHECK constraint `chk_chich_bap_no_mau_day` trên `stage_logs` — enforce `mau_day IS NULL` khi `giai_doan = 'Chích bắp'`.
+- Cập nhật docs theo rule.md.
 
 - Fix tooltip bản đồ Farm 157 bị tràn trên mobile: thêm `@media (max-width: 600px)` CSS, scale down font/padding/width. JS positioning dùng `offsetWidth/Height` thay vì hardcoded pixels.
 - Thử nghiệm `postMessage` auto-resize iframe cho map → thất bại (chỉ hoạt động với Streamlit Custom Components). Revert `height=700`.
