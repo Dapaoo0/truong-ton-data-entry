@@ -2638,6 +2638,8 @@ def render_global_data_tab(c_farm):
             dt_cat_est   = int(round(so_luong_trong * get_estimated_rate("cat_bap")))
             dt_thu_est   = int(round(so_luong_trong * get_estimated_rate("thu_hoach")))
 
+            # Vụ đã chốt = có ngay_ket_thuc_thuc_te
+            _season_completed = pd.notna(end_actual)
             detail_rows_by_vu[f_vu].append({
                 ("Thông tin", "Thời gian vụ"): thoi_gian_vu,
                 ("Thông tin", "Tên lô"): display_lo,
@@ -2650,7 +2652,8 @@ def render_global_data_tab(c_farm):
                 ("Thu hoạch", "Dự toán"): dt_thu_est,
                 ("Thu hoạch", "Thực tế"): so_thu_hoach,
                 ("Tổng khối lượng (kg)", "Dự toán"): dt_thu_est * get_kg_per_tree(f_vu),
-                ("Tổng khối lượng (kg)", "Thực tế"): so_thu_hoach * get_kg_per_tree(f_vu)
+                ("Tổng khối lượng (kg)", "Thực tế"): so_thu_hoach * get_kg_per_tree(f_vu),
+                "_completed": _season_completed
             })
             
         # ─── Sort bảng theo tên lô tự nhiên (3B < 4A < 12A) rồi đợt trồng ───
@@ -2719,8 +2722,26 @@ def render_global_data_tab(c_farm):
                     # Thêm dòng tổng vào DataFrame
                     df_detail = pd.concat([df_detail, pd.DataFrame([total_row])], ignore_index=True)
                     
+                    # ── Highlight hàng đã thu hoạch xong (vụ đã chốt) ──
+                    # Dựa vào cờ _completed (ngay_ket_thuc_thuc_te IS NOT NULL)
+                    _completed_rows = set()
+                    for _ri in range(len(df_detail) - 1):  # -1 để bỏ dòng TỔNG
+                        if df_detail.iloc[_ri].get("_completed", False):
+                            _completed_rows.add(_ri)
+
+                    # Xóa cột ẩn _completed trước khi render
+                    if "_completed" in df_detail.columns:
+                        df_detail = df_detail.drop(columns=["_completed"])
+
+                    def _highlight_completed_rows(row):
+                        """Highlight xanh lá pastel nhạt cho vụ đã thu hoạch xong."""
+                        if row.name in _completed_rows:
+                            return ["background-color: rgba(0, 184, 148, 0.12)"] * len(row)
+                        return [""] * len(row)
+
                     # Căn giữa MultiIndex Header và các ô
                     styled_df = df_detail.style.set_properties(**{'text-align': 'center'})
+                    styled_df = styled_df.apply(_highlight_completed_rows, axis=1)
                     styled_df = styled_df.set_table_styles([
                         {"selector": "th", "props": [("text-align", "center")]},
                         {"selector": "th.col_heading", "props": [("text-align", "center")]},
