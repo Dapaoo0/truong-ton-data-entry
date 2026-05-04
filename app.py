@@ -4540,7 +4540,11 @@ def render_main_app():
                         else:
                             giai_doan_opts = ["Cắt bắp"]
                         giai_doan = st.radio("📌 Giai đoạn", options=giai_doan_opts, horizontal=True, key="add_stg_gd")
-                        mau_day = st.text_input("🎨 Màu dây", placeholder="VD: Đỏ, Xanh lá...", key="add_stg_mau")
+                        # Đội BVTV chỉ nhập Chích bắp → không cần màu dây
+                        if giai_doan == "Cắt bắp":
+                            mau_day = st.text_input("🎨 Màu dây", placeholder="VD: Đỏ, Xanh lá...", key="add_stg_mau")
+                        else:
+                            mau_day = ""
                     with col_b:
                         col_b1, col_b2 = st.columns([2, 1])
                         with col_b1:
@@ -4551,9 +4555,9 @@ def render_main_app():
 
                     if st.button("➕ Thêm vào Danh sách", key="btn_add_stg", use_container_width=True, type="secondary"):
                         if sl <= 0: st.error("❌ Nhập số lượng > 0.")
-                        elif not mau_day.strip(): st.error("❌ Phải nhập màu dây định danh lứa.")
+                        elif giai_doan == "Cắt bắp" and not mau_day.strip(): st.error("❌ Phải nhập màu dây định danh lứa.")
                         else:
-                            mau_day_clean = mau_day.strip().capitalize()
+                            mau_day_clean = mau_day.strip().capitalize() if mau_day.strip() else None
                             is_time_valid, msg_time = validate_timeline_logic(c_farm, lot_id, ngay_th, giai_doan)
                             if not is_time_valid:
                                 st.error(msg_time)
