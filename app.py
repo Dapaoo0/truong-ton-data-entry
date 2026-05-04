@@ -2493,12 +2493,22 @@ def render_global_data_tab(c_farm):
     st.caption(f"📉 Hao hụt: Trồng → Chích bắp **{LOSS_RATE_TO_CHICH*100:.0f}%** · Chích bắp → Thu hoạch **{LOSS_RATE_TO_CHICH*100:.0f}%** · Tổng **{LOSS_RATE_TO_THU*100:.0f}%** · Sản lượng: **F0 = {KG_PER_TREE_F0} kg/buồng**, **Fn = {KG_PER_TREE_FN} kg/buồng**")
 
     dt_farm, dt_vu, dt_team, dt_lot, _ = render_chart_filters("dt")
+    dt_season_status = st.radio(
+        "Trạng thái vụ",
+        ["Chưa kết thúc vụ", "Tất cả"],
+        index=0,
+        horizontal=True,
+        key="dt_season_status"
+    )
 
     df_dt_seasons = df_seasons.copy()
     if not df_dt_seasons.empty:
         # Loại trồng dặm khỏi bảng chi tiết (trồng dặm hiện ở bảng riêng bên dưới)
         if 'loai_trong' in df_dt_seasons.columns:
             df_dt_seasons = df_dt_seasons[df_dt_seasons['loai_trong'] != 'Trồng dặm']
+        # Filter vụ đã kết thúc nếu chọn "Chưa kết thúc vụ"
+        if dt_season_status == "Chưa kết thúc vụ" and "ngay_ket_thuc_thuc_te" in df_dt_seasons.columns:
+            df_dt_seasons = df_dt_seasons[df_dt_seasons["ngay_ket_thuc_thuc_te"].isna()]
         if dt_farm != "Tất cả" and "farm" in df_dt_seasons.columns:
             df_dt_seasons = df_dt_seasons[df_dt_seasons["farm"] == dt_farm]
         if dt_vu != "Tất cả" and "vu" in df_dt_seasons.columns:
