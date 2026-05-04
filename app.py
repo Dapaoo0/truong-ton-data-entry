@@ -676,10 +676,20 @@ def render_queue_ui(queue_key, display_cols, process_func):
     
     to_delete_idxs = edited_df.index[edited_df["Xóa"] == True].tolist()
     
+    # Guard flag chống double-submit
+    processing_flag = f"_processing_{queue_key}"
+    is_processing = st.session_state.get(processing_flag, False)
+    
     col_q1, col_q2 = st.columns(2)
     with col_q1:
-        if st.button("🚀 Lưu toàn bộ lên Hệ thống", type="primary", use_container_width=True, key=f"btn_sb_{queue_key}"):
-            process_func()
+        if st.button("🚀 Lưu toàn bộ lên Hệ thống", type="primary", use_container_width=True,
+                      key=f"btn_sb_{queue_key}", disabled=is_processing):
+            if not st.session_state.get(processing_flag, False):
+                st.session_state[processing_flag] = True
+                try:
+                    process_func()
+                finally:
+                    st.session_state[processing_flag] = False
     with col_q2:
         if to_delete_idxs:
             if st.button("🗑️ Xóa dòng đã chọn", use_container_width=True, key=f"btn_del_sel_{queue_key}"):
