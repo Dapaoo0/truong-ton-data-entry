@@ -2692,6 +2692,8 @@ def render_global_data_tab(c_farm):
                 for vu_val, rows in detail_rows_by_vu.items():
                     st.markdown(f"##### 🌿 Vụ {vu_val}")
                     df_detail = pd.DataFrame(rows)
+                    # Trích cờ _completed trước khi chuyển MultiIndex (tránh lỗi from_tuples)
+                    _completed_series = df_detail.pop("_completed") if "_completed" in df_detail.columns else pd.Series([False] * len(df_detail))
                     if not isinstance(df_detail.columns, pd.MultiIndex):
                         df_detail.columns = pd.MultiIndex.from_tuples(df_detail.columns)
                     
@@ -2723,15 +2725,11 @@ def render_global_data_tab(c_farm):
                     df_detail = pd.concat([df_detail, pd.DataFrame([total_row])], ignore_index=True)
                     
                     # ── Highlight hàng đã thu hoạch xong (vụ đã chốt) ──
-                    # Dựa vào cờ _completed (ngay_ket_thuc_thuc_te IS NOT NULL)
+                    # Dùng _completed_series đã trích trước khi chuyển MultiIndex
                     _completed_rows = set()
-                    for _ri in range(len(df_detail) - 1):  # -1 để bỏ dòng TỔNG
-                        if df_detail.iloc[_ri].get("_completed", False):
+                    for _ri in range(min(len(_completed_series), len(df_detail) - 1)):
+                        if _completed_series.iloc[_ri]:
                             _completed_rows.add(_ri)
-
-                    # Xóa cột ẩn _completed trước khi render
-                    if "_completed" in df_detail.columns:
-                        df_detail = df_detail.drop(columns=["_completed"])
 
                     def _highlight_completed_rows(row):
                         """Highlight xanh lá pastel nhạt cho vụ đã thu hoạch xong."""
