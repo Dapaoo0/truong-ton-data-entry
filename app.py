@@ -2290,6 +2290,41 @@ def render_global_data_tab(c_farm):
                 .legend-item {{ font-size: 10px; gap: 4px; }}
                 .legend-dot {{ width: 9px; height: 9px; }}
             }}
+            /* Responsive for large screens (1200px+) */
+            @media (min-width: 1200px) {{
+                .map-tooltip {{
+                    min-width: 280px;
+                    max-width: 380px;
+                    padding: 16px 20px;
+                    font-size: 14px;
+                }}
+                .map-tooltip .tt-title {{ font-size: 18px; }}
+                .map-tooltip .tt-stage {{ font-size: 13px; padding: 3px 12px; }}
+                .map-tooltip .tt-hint {{ font-size: 12px; }}
+                .legend-bar {{ gap: 20px; padding: 12px 20px; }}
+                .legend-item {{ font-size: 14px; }}
+                .legend-dot {{ width: 14px; height: 14px; }}
+            }}
+            /* Responsive for extra-large screens (1800px+) */
+            @media (min-width: 1800px) {{
+                .map-tooltip {{
+                    min-width: 340px;
+                    max-width: 460px;
+                    padding: 20px 26px;
+                    font-size: 15px;
+                    line-height: 1.7;
+                }}
+                .map-tooltip .tt-title {{
+                    font-size: 20px;
+                    margin-bottom: 10px;
+                }}
+                .map-tooltip .tt-stage {{ font-size: 14px; padding: 4px 14px; }}
+                .map-tooltip .tt-hint {{ font-size: 13px; }}
+                .map-tooltip.pinned {{ max-height: 600px; }}
+                .legend-bar {{ gap: 24px; padding: 14px 24px; }}
+                .legend-item {{ font-size: 15px; gap: 8px; }}
+                .legend-dot {{ width: 16px; height: 16px; border-radius: 4px; }}
+            }}
         </style>
 
         <div class="farm-map-container" id="farmMapContainer">
@@ -2420,12 +2455,34 @@ def render_global_data_tab(c_farm):
             tooltip.addEventListener('click', function(e) {{
                 e.stopPropagation();
             }});
+
+            // ── Auto-resize iframe to match SVG rendered height ──
+            (function resizeFrame() {{
+                function adjust() {{
+                    var c = document.querySelector('.farm-map-container');
+                    if (c) {{
+                        var h = c.offsetHeight;
+                        if (h > 0) {{
+                            try {{ window.frameElement.style.height = (h + 2) + 'px'; }} catch(e) {{}}
+                        }}
+                    }}
+                }}
+                if ('ResizeObserver' in window) {{
+                    new ResizeObserver(adjust).observe(document.querySelector('.farm-map-container'));
+                }}
+                window.addEventListener('load', adjust);
+                window.addEventListener('resize', adjust);
+                setTimeout(adjust, 300);
+                setTimeout(adjust, 1000);
+            }})();
         }})();
         </script>
         '''
 
         import streamlit.components.v1 as components
-        components.html(html_content, height=700, scrolling=False)
+        # Dynamic height: generous fallback for large screens, JS ResizeObserver will fine-tune
+        _map_fallback_h = int(img_h / img_w * 1400) + 60  # ~848 for 4000x2250
+        components.html(html_content, height=max(700, _map_fallback_h), scrolling=False)
 
     st.divider()
 
