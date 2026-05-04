@@ -2682,46 +2682,93 @@ def render_global_data_tab(c_farm):
                 return (int(m_num.group(1)), m_num.group(2), batch_num)
             return (9999, base_name, batch_num)
 
+        # ─── Sort controls ───
+        _sort_options = {
+            "Tên lô (mặc định)": None,
+            "Thời gian vụ": ("Thông tin", "Thời gian vụ"),
+            "DT trồng (ha)": ("Thông tin", "DT trồng (ha)"),
+            "Cây đã trồng": ("Thông tin", "Cây đã trồng"),
+            "Chích bắp - Dự toán": ("Chích bắp", "Dự toán"),
+            "Chích bắp - Thực tế": ("Chích bắp", "Thực tế"),
+            "Cắt bắp - Dự toán": ("Cắt bắp", "Dự toán"),
+            "Cắt bắp - Thực tế": ("Cắt bắp", "Thực tế"),
+            "Thu hoạch - Dự toán": ("Thu hoạch", "Dự toán"),
+            "Thu hoạch - Thực tế": ("Thu hoạch", "Thực tế"),
+            "Tổng KG - Dự toán": ("Tổng khối lượng (kg)", "Dự toán"),
+            "Tổng KG - Thực tế": ("Tổng khối lượng (kg)", "Thực tế"),
+        }
+        _sc1, _sc2 = st.columns([3, 1])
+        with _sc1:
+            _sort_col_label = st.selectbox("Sắp xếp theo", list(_sort_options.keys()), index=0, key="dt_sort_col")
+        with _sc2:
+            _sort_dir = st.radio("Thứ tự", ["↑ Tăng", "↓ Giảm"], index=0, horizontal=True, key="dt_sort_dir")
+        _sort_col = _sort_options[_sort_col_label]
+        _sort_asc = _sort_dir == "↑ Tăng"
+
+        # ─── Apply sort ───
         for vu_key in detail_rows_by_vu:
-            detail_rows_by_vu[vu_key].sort(key=_lo_sort_key)
+            if _sort_col is None:
+                # Mặc định: sort theo tên lô tự nhiên
+                detail_rows_by_vu[vu_key].sort(key=_lo_sort_key)
+            else:
+                def _custom_sort_key(row_dict, col=_sort_col):
+                    val = row_dict.get(col, 0)
+                    try:
+                        return float(str(val).replace(",", ""))
+                    except (ValueError, TypeError):
+                        return str(val)
+                detail_rows_by_vu[vu_key].sort(key=_custom_sort_key, reverse=not _sort_asc)
 
         with st.expander("📋 Xem toàn bộ thông tin", expanded=True):
             if detail_rows_by_vu:
-                # Đẩy CSS override thẳng vào markdown để đảm bảo mọi table được xuất từ to_html() đều căn giữa tuyệt đối
-                # ── Column name mapping: MultiIndex tuple → flat label ──
-                _col_flat_map = {
-                    ("Thông tin", "Thời gian vụ"): "Thời gian vụ",
-                    ("Thông tin", "Tên lô"): "Tên lô",
-                    ("Thông tin", "DT trồng (ha)"): "DT trồng (ha)",
-                    ("Thông tin", "Cây đã trồng"): "Cây đã trồng",
-                    ("Chích bắp", "Dự toán"): "CB (DT)",
-                    ("Chích bắp", "Thực tế"): "CB (TT)",
-                    ("Cắt bắp", "Dự toán"): "CắtB (DT)",
-                    ("Cắt bắp", "Thực tế"): "CắtB (TT)",
-                    ("Thu hoạch", "Dự toán"): "TH (DT)",
-                    ("Thu hoạch", "Thực tế"): "TH (TT)",
-                    ("Tổng khối lượng (kg)", "Dự toán"): "KG (DT)",
-                    ("Tổng khối lượng (kg)", "Thực tế"): "KG (TT)",
-                }
+                st.markdown("""
+                    <style>
+                    .centered-table-wrapper table th, .centered-table-wrapper table td {
+                        text-align: center !important;
+                    }
+                    .centered-table-wrapper table {
+                        width: 100%;
+                    }
+                    </style>
+                """, unsafe_allow_html=True)
 
                 for vu_val, rows in detail_rows_by_vu.items():
                     st.markdown(f"##### 🌿 Vụ {vu_val}")
                     df_detail = pd.DataFrame(rows)
-                    # Trích cờ _completed trước khi flatten columns
+                    # Trích cờ _completed trước khi chuyển MultiIndex
                     _completed_series = df_detail.pop("_completed") if "_completed" in df_detail.columns else pd.Series([False] * len(df_detail))
-
-                    # Flatten column names cho st.dataframe (cho phép sort)
-                    df_detail.columns = [_col_flat_map.get(c, str(c)) for c in df_detail.columns]
+                    if not isinstance(df_detail.columns, pd.MultiIndex):
+                        df_detail.columns = pd.MultiIndex.from_tuples(df_detail.columns)
                     
-                    # Tính tổng trước (trên dữ liệu numeric)
-                    _t_area = df_detail["DT trồng (ha)"].astype(float).sum()
-                    _t_trees = int(df_detail["Cây đã trồng"].sum())
-                    _num_cols = ["Cây đã trồng", "CB (DT)", "CB (TT)", "CắtB (DT)", "CắtB (TT)", "TH (DT)", "TH (TT)", "KG (DT)", "KG (TT)"]
-                    _totals = {c: int(df_detail[c].sum()) for c in _num_cols if c in df_detail.columns}
-
+                    # Tính tổng các cột trước khi format chuỗi
+                    _area_col = df_detail[("Thông tin", "DT trồng (ha)")].astype(float)
+                    total_dien_tich = _area_col.sum()
+                    total_row = {
+                        ("Thông tin", "Thời gian vụ"): "",
+                        ("Thông tin", "Tên lô"): "<b>TỔNG</b>",
+                        ("Thông tin", "DT trồng (ha)"): f"<b>{total_dien_tich:.2f}</b>",
+                        ("Thông tin", "Cây đã trồng"): f"<b>{df_detail[('Thông tin', 'Cây đã trồng')].sum():,}</b>",
+                        ("Chích bắp", "Dự toán"): f"<b>{df_detail[('Chích bắp', 'Dự toán')].sum():,}</b>",
+                        ("Chích bắp", "Thực tế"): f"<b>{df_detail[('Chích bắp', 'Thực tế')].sum():,}</b>",
+                        ("Cắt bắp", "Dự toán"): f"<b>{df_detail[('Cắt bắp', 'Dự toán')].sum():,}</b>",
+                        ("Cắt bắp", "Thực tế"): f"<b>{df_detail[('Cắt bắp', 'Thực tế')].sum():,}</b>",
+                        ("Thu hoạch", "Dự toán"): f"<b>{df_detail[('Thu hoạch', 'Dự toán')].sum():,}</b>",
+                        ("Thu hoạch", "Thực tế"): f"<b>{df_detail[('Thu hoạch', 'Thực tế')].sum():,}</b>",
+                        ("Tổng khối lượng (kg)", "Dự toán"): f"<b>{df_detail[('Tổng khối lượng (kg)', 'Dự toán')].sum():,}</b>",
+                        ("Tổng khối lượng (kg)", "Thực tế"): f"<b>{df_detail[('Tổng khối lượng (kg)', 'Thực tế')].sum():,}</b>"
+                    }
+                    
+                    # Format số nguyên có dấu phẩy
+                    for c in df_detail.columns:
+                        if df_detail[c].dtype.kind in 'iuf' and c[1] != "Diện tích (ha)":
+                            df_detail[c] = df_detail[c].apply(lambda x: f"{int(x):,}")
+                            
+                    # Thêm dòng tổng
+                    df_detail = pd.concat([df_detail, pd.DataFrame([total_row])], ignore_index=True)
+                    
                     # ── Highlight hàng đã thu hoạch xong (vụ đã chốt) ──
                     _completed_rows = set()
-                    for _ri in range(min(len(_completed_series), len(df_detail))):
+                    for _ri in range(min(len(_completed_series), len(df_detail) - 1)):
                         if _completed_series.iloc[_ri]:
                             _completed_rows.add(_ri)
 
@@ -2730,27 +2777,18 @@ def render_global_data_tab(c_farm):
                             return ["background-color: rgba(0, 184, 148, 0.12)"] * len(row)
                         return [""] * len(row)
 
-                    # Styler: highlight + format số
-                    styled_df = df_detail.style.apply(_highlight_completed_rows, axis=1)
-                    styled_df = styled_df.format({
-                        "DT trồng (ha)": "{:.2f}",
-                        "Cây đã trồng": "{:,.0f}",
-                        "CB (DT)": "{:,.0f}", "CB (TT)": "{:,.0f}",
-                        "CắtB (DT)": "{:,.0f}", "CắtB (TT)": "{:,.0f}",
-                        "TH (DT)": "{:,.0f}", "TH (TT)": "{:,.0f}",
-                        "KG (DT)": "{:,.0f}", "KG (TT)": "{:,.0f}",
-                    })
-
-                    st.dataframe(styled_df, use_container_width=True, hide_index=True)
-
-                    # ── Dòng TỔNG hiển thị riêng ──
-                    _total_parts = [f"**{_t_area:.2f}** ha", f"**{_t_trees:,}** cây"]
-                    _label_map = {"CB (TT)": "CB", "CắtB (TT)": "CắtB", "TH (TT)": "TH", "KG (TT)": "KG"}
-                    for c, label in _label_map.items():
-                        if c in _totals:
-                            _total_parts.append(f"{label}: **{_totals[c]:,}**")
-                    st.caption(f"📊 TỔNG: {' · '.join(_total_parts)}")
-                    st.markdown("<div style='margin-bottom: 1.5rem'></div>", unsafe_allow_html=True)
+                    # Căn giữa MultiIndex Header và các ô
+                    styled_df = df_detail.style.set_properties(**{'text-align': 'center'})
+                    styled_df = styled_df.apply(_highlight_completed_rows, axis=1)
+                    styled_df = styled_df.set_table_styles([
+                        {"selector": "th", "props": [("text-align", "center")]},
+                        {"selector": "th.col_heading", "props": [("text-align", "center")]},
+                        {"selector": "td", "props": [("text-align", "center")]}
+                    ])
+                    styled_df = styled_df.hide(axis="index")
+                    
+                    table_html = styled_df.to_html(escape=False)
+                    st.markdown(f'<div class="centered-table-wrapper" style="overflow-x: auto; margin-bottom: 2rem;">{table_html}</div>', unsafe_allow_html=True)
             else:
                 st.info("Chưa có cấu hình Vụ/Lô nào để hiển thị bảng chi tiết.")
     else:
