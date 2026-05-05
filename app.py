@@ -3480,7 +3480,7 @@ def render_global_data_tab(c_farm):
                                     so_cont_card = so_thung_card / BOXES_PER_CONTAINER
                                     
                                     # Mốc ① — Từ Trồng
-                                    line1 = f"① Trồng: **{m['tong_cay']:,}** buồng ≈ {kg_est:,.0f} kg"
+                                    line1 = f"① Trồng: **{m['tong_cay']:,}** buồng ≈ {kg_est:,.0f} kg · ~{so_cont_card:,.1f} cont"
                                     
                                     # Mốc ② — Từ Chích bắp
                                     tong_chich = m.get("tong_chich")
@@ -3509,7 +3509,7 @@ def render_global_data_tab(c_farm):
                                     else:
                                         line4 = "④ TT: _Chưa có TT_"
                                     
-                                    btn_label = f"📅 Tháng {month_key}\n\n{line1}\n\n{line2}\n\n{line3}\n\n{line4}\n\n🚛 ① ~{so_cont_card:,.1f} cont · {m['so_lo']} lô"
+                                    btn_label = f"📅 Tháng {month_key}\n\n{line1}\n\n{line2}\n\n{line3}\n\n{line4}\n\n🚛 {m['so_lo']} lô"
                                     if st.button(btn_label, key=f"hv_card_{month_key}",
                                                use_container_width=True):
                                         _show_harvest_detail(month_key, df_hv)
