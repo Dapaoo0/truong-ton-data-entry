@@ -2147,7 +2147,7 @@ def render_global_data_tab(c_farm):
 
         # ── Tính diện tích theo giai đoạn (dùng dien_tich_trong per-batch) ──
         # 1. Tổng DT farm = sum(dim_lo.area_ha) cho tất cả lô có polygon
-        _all_lo_names = [entry.get("name") for entry in polygon_data if entry.get("name")]
+        _all_lo_names = [entry.get("name") for entry in polygon_data.get("lots", []) if entry.get("name")]
         _total_farm_area = 0.0
         if not df_lots_all.empty and "lo" in df_lots_all.columns and "dien_tich" in df_lots_all.columns:
             _unique_lo_dt = df_lots_all.drop_duplicates("lo").set_index("lo")["dien_tich"]
