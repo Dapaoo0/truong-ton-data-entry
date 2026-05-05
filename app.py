@@ -2468,31 +2468,14 @@ def render_global_data_tab(c_farm):
                 e.stopPropagation();
             }});
 
-            // ── Auto-resize iframe to match SVG rendered height ──
-            (function resizeFrame() {{
-                function adjust() {{
-                    var c = document.querySelector('.farm-map-container');
-                    if (c) {{
-                        var h = c.offsetHeight;
-                        if (h > 0) {{
-                            try {{ window.frameElement.style.height = (h + 2) + 'px'; }} catch(e) {{}}
-                        }}
-                    }}
-                }}
-                if ('ResizeObserver' in window) {{
-                    new ResizeObserver(adjust).observe(document.querySelector('.farm-map-container'));
-                }}
-                window.addEventListener('load', adjust);
-                window.addEventListener('resize', adjust);
-                setTimeout(adjust, 300);
-                setTimeout(adjust, 1000);
-            }})();
+            // ── Iframe height: handled by Python fallback, no JS resize needed ──
+            // (JS frameElement resize removed — caused overlap on large screens)
         }})();
         </script>
         '''
 
         import streamlit.components.v1 as components
-        # Dynamic height: generous fallback for large screens, JS ResizeObserver will fine-tune
+        # Fixed height from aspect ratio — no JS resize (causes overlap on large screens)
         _map_fallback_h = int(img_h / img_w * 1400) + 60  # ~848 for 4000x2250
         components.html(html_content, height=max(700, _map_fallback_h), scrolling=False)
 
