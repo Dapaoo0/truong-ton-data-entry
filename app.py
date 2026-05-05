@@ -2772,7 +2772,7 @@ def render_global_data_tab(c_farm):
                     
                     # Format số nguyên có dấu phẩy
                     for c in df_detail.columns:
-                        if df_detail[c].dtype.kind in 'iuf' and c[1] != "Diện tích (ha)":
+                        if df_detail[c].dtype.kind in 'iuf' and c[1] != "DT trồng (ha)":
                             df_detail[c] = df_detail[c].apply(lambda x: f"{int(x):,}")
                             
                     # Thêm dòng tổng
