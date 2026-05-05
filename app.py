@@ -588,50 +588,59 @@ def confirm_action_dialog(action, table_name, rec_id_or_none, data_dict, success
     if not data_dict and action == "DELETE":
         st.error("Xóa dữ liệu vĩnh viễn?")
     
+    # Guard flag chống double-submit
+    processing_flag = f"_processing_confirm_{action}_{table_name}"
+    is_processing = st.session_state.get(processing_flag, False)
+
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("✅ Tôi đã kiểm tra kỹ", use_container_width=True):
-            success = False
-            if action == "INSERT":
-                success = insert_to_db(table_name, data_dict)
-            elif action == "INSERT_FIFO":
-                db_data = data_dict["base_data"]
-                allocations = data_dict["allocations"]
-                success = True
-                for alloc in allocations:
-                    row_data = db_data.copy()
-                    row_data["lot_id"] = alloc["lot_id"]
-                    row_data["so_luong"] = alloc["so_luong"]
-                    try:
-                        supabase.table(table_name).insert(row_data).execute()
-                    except Exception as e:
-                        st.error(f"❌ Lỗi ghi hệ thống FIFO nhánh {alloc['lot_id']}: {e}")
-                        success = False
-            elif action == "INSERT_BASE":
-                db_data, season_data = data_dict
-                success = insert_to_db("base_lots", db_data)
-                if success:
-                    try:
-                        supabase.table("seasons").insert(season_data).execute()
-                    except Exception as e:
-                        st.error(f"❌ Lỗi ghi vụ: {e}")
-            elif action == "UPDATE":
+        if st.button("✅ Tôi đã kiểm tra kỹ", use_container_width=True, disabled=is_processing):
+            if not st.session_state.get(processing_flag, False):
+                st.session_state[processing_flag] = True
                 try:
-                    supabase.table(table_name).update(data_dict).eq("id", rec_id_or_none).execute()
-                    success = True
-                except Exception as e:
-                    st.error(f"❌ Lỗi cập nhật: {e}")
-            elif action == "DELETE":
-                try:
-                    supabase.table(table_name).update({"is_deleted": True}).eq("id", rec_id_or_none).execute()
-                    success = True
-                except Exception as e:
-                    st.error(f"❌ Lỗi xóa: {e}")
-            
-            if success:
-                st.cache_data.clear()
-                st.session_state["toast"] = success_msg
-                st.rerun()
+                    success = False
+                    if action == "INSERT":
+                        success = insert_to_db(table_name, data_dict)
+                    elif action == "INSERT_FIFO":
+                        db_data = data_dict["base_data"]
+                        allocations = data_dict["allocations"]
+                        success = True
+                        for alloc in allocations:
+                            row_data = db_data.copy()
+                            row_data["lot_id"] = alloc["lot_id"]
+                            row_data["so_luong"] = alloc["so_luong"]
+                            try:
+                                supabase.table(table_name).insert(row_data).execute()
+                            except Exception as e:
+                                st.error(f"❌ Lỗi ghi hệ thống FIFO nhánh {alloc['lot_id']}: {e}")
+                                success = False
+                    elif action == "INSERT_BASE":
+                        db_data, season_data = data_dict
+                        success = insert_to_db("base_lots", db_data)
+                        if success:
+                            try:
+                                supabase.table("seasons").insert(season_data).execute()
+                            except Exception as e:
+                                st.error(f"❌ Lỗi ghi vụ: {e}")
+                    elif action == "UPDATE":
+                        try:
+                            supabase.table(table_name).update(data_dict).eq("id", rec_id_or_none).execute()
+                            success = True
+                        except Exception as e:
+                            st.error(f"❌ Lỗi cập nhật: {e}")
+                    elif action == "DELETE":
+                        try:
+                            supabase.table(table_name).update({"is_deleted": True}).eq("id", rec_id_or_none).execute()
+                            success = True
+                        except Exception as e:
+                            st.error(f"❌ Lỗi xóa: {e}")
+                    
+                    if success:
+                        st.cache_data.clear()
+                        st.session_state["toast"] = success_msg
+                        st.rerun()
+                finally:
+                    st.session_state[processing_flag] = False
     with col2:
         if st.button("❌ Quay lại", use_container_width=True):
             st.rerun()
