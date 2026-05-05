@@ -2153,15 +2153,24 @@ def render_global_data_tab(c_farm):
         legend_html += f'<span class="legend-item"><span class="legend-dot" style="background:{default_color}"></span>Chưa có dữ liệu</span>'
 
         # ── Tính diện tích theo giai đoạn (dùng dien_tich_trong per-batch) ──
-        # 1. Tổng DT farm = sum(dim_lo.area_ha) cho tất cả lô có polygon
+        # 1. Tổng DT farm = sum(dim_lo.area_ha) cho TẤT CẢ lô active (không chỉ lô có polygon)
         _all_lo_names = [entry.get("name") for entry in polygon_data.get("lots", []) if entry.get("name")]
         _total_farm_area = 0.0
-        if not df_lots_all.empty and "lo" in df_lots_all.columns and "dien_tich" in df_lots_all.columns:
-            _unique_lo_dt = df_lots_all.drop_duplicates("lo").set_index("lo")["dien_tich"]
-            for _ln in _all_lo_names:
-                _v = _unique_lo_dt.get(_ln)
-                if pd.notna(_v):
-                    _total_farm_area += float(_v)
+        try:
+            _dim_lo_res = supabase.table("dim_lo").select("area_ha, dim_farm!inner(farm_name)").eq("is_active", True).eq("dim_farm.farm_name", "Farm 157").execute()
+            if _dim_lo_res.data:
+                for _dl_row in _dim_lo_res.data:
+                    _ah = _dl_row.get("area_ha")
+                    if _ah is not None:
+                        _total_farm_area += float(_ah)
+        except Exception:
+            # Fallback: dùng df_lots_all nếu query dim_lo thất bại
+            if not df_lots_all.empty and "lo" in df_lots_all.columns and "dien_tich" in df_lots_all.columns:
+                _unique_lo_dt = df_lots_all.drop_duplicates("lo").set_index("lo")["dien_tich"]
+                for _ln in _all_lo_names:
+                    _v = _unique_lo_dt.get(_ln)
+                    if pd.notna(_v):
+                        _total_farm_area += float(_v)
 
         # 2. Diện tích theo giai đoạn: dùng lot_info_map (đã tính gd per batch)
         #    + dien_tich_trong per batch từ df_lots_trong_moi
