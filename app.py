@@ -3353,7 +3353,19 @@ def render_global_data_tab(c_farm):
                         else:
                             st.metric("④ Thực tế", "Chưa có TT", "")
                     
-                    st.markdown(f"📦 **~{so_thung:,} thùng** (13 kg/thùng) · 🚛 **~{so_container:,.1f} container** (1320 thùng/cont)")
+                    # Container summary — all milestones
+                    cont_parts = [f"① ~{so_container:,.1f} cont"]
+                    if chich_total is not None:
+                        _cont_chich = int(chich_kg // KG_PER_BOX) / BOXES_PER_CONTAINER
+                        cont_parts.append(f"② ~{_cont_chich:,.1f}")
+                    if cat_total is not None:
+                        _cont_cat = int(cat_kg // KG_PER_BOX) / BOXES_PER_CONTAINER
+                        cont_parts.append(f"③ ~{_cont_cat:,.1f}")
+                    if tt_total is not None:
+                        _tt_kg = tt_df.apply(lambda r: r["so_thu_thuc_te"] * get_kg_per_tree(r["vu"]) if pd.notna(r.get("so_thu_thuc_te")) else 0, axis=1).sum()
+                        _cont_tt = int(_tt_kg // KG_PER_BOX) / BOXES_PER_CONTAINER
+                        cont_parts.append(f"④ ~{_cont_tt:,.1f}")
+                    st.markdown(f"🚛 **Container**: {' · '.join(cont_parts)}  _(13 kg/thùng · 1320 thùng/cont)_")
                     
                     # Tổng hợp theo loại thu
                     summary_by_type = df_month.groupby("loai_thu")["so_thu_hoach_dk"].sum()
@@ -3441,8 +3453,12 @@ def render_global_data_tab(c_farm):
                 
                 # Mốc ④: tổng thực tế theo tháng — dùng unique lot-level values
                 # so_thu_thuc_te là per-lot, cần distinct trước khi sum
-                actual_by_month = df_hv.drop_duplicates(subset=["base_lot_id", "vu", "thang_thu_hoach"]).groupby("thang_thu_hoach").agg(
-                    tong_thuc_te=("so_thu_thuc_te", lambda x: int(x.sum()) if x.notna().any() else None)
+                _df_tt_dedup = df_hv.drop_duplicates(subset=["base_lot_id", "vu", "thang_thu_hoach"])
+                _df_tt_dedup["_kg_tt"] = _df_tt_dedup.apply(
+                    lambda r: r["so_thu_thuc_te"] * get_kg_per_tree(r["vu"]) if pd.notna(r.get("so_thu_thuc_te")) else None, axis=1)
+                actual_by_month = _df_tt_dedup.groupby("thang_thu_hoach").agg(
+                    tong_thuc_te=("so_thu_thuc_te", lambda x: int(x.sum()) if x.notna().any() else None),
+                    kg_tt=("_kg_tt", lambda x: x.sum() if x.notna().any() else None)
                 ).reset_index()
                 monthly_summary = monthly_summary.merge(actual_by_month, on="thang_thu_hoach", how="left")
                 
@@ -3470,7 +3486,8 @@ def render_global_data_tab(c_farm):
                                     tong_chich = m.get("tong_chich")
                                     if pd.notna(tong_chich) and tong_chich is not None:
                                         kg_chich_val = m.get("kg_chich", 0) or 0
-                                        line2 = f"② Chích: **{int(tong_chich):,}** buồng ≈ {kg_chich_val:,.0f} kg"
+                                        cont_chich = int(kg_chich_val // KG_PER_BOX) / BOXES_PER_CONTAINER
+                                        line2 = f"② Chích: **{int(tong_chich):,}** buồng ≈ {kg_chich_val:,.0f} kg · ~{cont_chich:,.1f} cont"
                                     else:
                                         line2 = "② Chích: _Chưa có TT_"
                                     
@@ -3478,19 +3495,21 @@ def render_global_data_tab(c_farm):
                                     tong_cat = m.get("tong_cat")
                                     if pd.notna(tong_cat) and tong_cat is not None:
                                         kg_cat_val = m.get("kg_cat", 0) or 0
-                                        line3 = f"③ Cắt: **{int(tong_cat):,}** buồng ≈ {kg_cat_val:,.0f} kg"
+                                        cont_cat = int(kg_cat_val // KG_PER_BOX) / BOXES_PER_CONTAINER
+                                        line3 = f"③ Cắt: **{int(tong_cat):,}** buồng ≈ {kg_cat_val:,.0f} kg · ~{cont_cat:,.1f} cont"
                                     else:
                                         line3 = "③ Cắt: _Chưa có TT_"
                                     
                                     # Mốc ④ — Thực tế
                                     tong_tt = m.get("tong_thuc_te")
                                     if pd.notna(tong_tt) and tong_tt is not None:
-                                        kg_tt = int(tong_tt) * KG_PER_TREE_F0  # approx
-                                        line4 = f"④ TT: **{int(tong_tt):,}** buồng ≈ {kg_tt:,} kg"
+                                        kg_tt_val = m.get("kg_tt", 0) or 0
+                                        cont_tt = int(kg_tt_val // KG_PER_BOX) / BOXES_PER_CONTAINER
+                                        line4 = f"④ TT: **{int(tong_tt):,}** buồng ≈ {kg_tt_val:,.0f} kg · ~{cont_tt:,.1f} cont"
                                     else:
                                         line4 = "④ TT: _Chưa có TT_"
                                     
-                                    btn_label = f"📅 Tháng {month_key}\n\n{line1}\n\n{line2}\n\n{line3}\n\n{line4}\n\n🚛 ~{so_cont_card:,.1f} cont · {m['so_lo']} lô"
+                                    btn_label = f"📅 Tháng {month_key}\n\n{line1}\n\n{line2}\n\n{line3}\n\n{line4}\n\n🚛 ① ~{so_cont_card:,.1f} cont · {m['so_lo']} lô"
                                     if st.button(btn_label, key=f"hv_card_{month_key}",
                                                use_container_width=True):
                                         _show_harvest_detail(month_key, df_hv)
