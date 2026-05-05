@@ -2665,7 +2665,7 @@ def render_global_data_tab(c_farm):
             detail_rows_by_vu[f_vu].append({
                 ("Thông tin", "Thời gian vụ"): thoi_gian_vu,
                 ("Thông tin", "Tên lô"): display_lo,
-                ("Thông tin", "DT trồng (ha)"): round(dien_tich, 2),
+                ("Thông tin", "DT trồng (ha)"): dien_tich,
                 ("Thông tin", "Cây đã trồng"): so_luong_trong,
                 ("Chích bắp", "Dự toán"): dt_chich_est,
                 ("Chích bắp", "Thực tế"): so_chich_bap,
@@ -2758,7 +2758,7 @@ def render_global_data_tab(c_farm):
                     total_row = {
                         ("Thông tin", "Thời gian vụ"): "",
                         ("Thông tin", "Tên lô"): "<b>TỔNG</b>",
-                        ("Thông tin", "DT trồng (ha)"): f"<b>{total_dien_tich:.2f}</b>",
+                        ("Thông tin", "DT trồng (ha)"): f"<b>{total_dien_tich}</b>",
                         ("Thông tin", "Cây đã trồng"): f"<b>{df_detail[('Thông tin', 'Cây đã trồng')].sum():,}</b>",
                         ("Chích bắp", "Dự toán"): f"<b>{df_detail[('Chích bắp', 'Dự toán')].sum():,}</b>",
                         ("Chích bắp", "Thực tế"): f"<b>{df_detail[('Chích bắp', 'Thực tế')].sum():,}</b>",
