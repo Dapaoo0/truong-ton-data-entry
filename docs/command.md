@@ -2,7 +2,13 @@
 
 Tài liệu này lưu lại tóm tắt các yêu cầu của người dùng để theo dõi tiến độ và nhiệm vụ.
 
-## Ngày 04/05/2026
+## Ngày 05/05/2026
+
+- Chuyển Mốc ②③ (Chích bắp / Cắt bắp) từ Normal Distribution sang **Shift-based model**: dịch ngày chích +84d / cắt +70d, phase theo tích lũy %, bỏ hao hụt 5% ước tính.
+- Test edge cases qua Supabase MCP: nhiều đợt trồng, chích >90%, 1 record, boundary split.
+- Cập nhật docs theo rule.md.
+
+
 
 - Thêm filter "Chưa kết thúc vụ / Tất cả" cho bảng chi tiết lô (toggle hiển thị lô đã chốt vụ).
 - Thêm sort controls (selectbox + radio tăng/giảm) cho bảng chi tiết lô — giữ format HTML cũ (MultiIndex, TỔNG, highlight).

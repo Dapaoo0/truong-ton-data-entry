@@ -2,6 +2,10 @@
 
 Những khám phá, cấu hình cứng và lưu ý kinh nghiệm tìm được trong quá trình code và phân tích.
 
+- **[05/05] Shift-based vs Normal Distribution — trade-off**: Normal Distribution cho dự báo mượt nhưng không phản ánh tiến độ thực tế. Shift-based dùng data chích/cắt bắp thực tế theo ngày → chính xác hơn nhưng chỉ dự báo được phần đã có data. Kết hợp song song: Mốc ① (lý thuyết) để forecast toàn vụ, Mốc ②③ (thực tế) để hiệu chỉnh khi có data.
+- **[05/05] Cumulative phase classification vs time-based**: Dùng tích lũy % thay vì vị trí trên trục thời gian cho Mốc ②③ — tránh phụ thuộc vào hình dạng phân phối (skewed, bimodal...). Mẫu số = `base_lots.so_luong` (tổng cây trồng ban đầu, cố định) thay vì dynamic count.
+- **[05/05] Boundary split precision**: Khi 1 ngày chích vượt ngưỡng phase (ví dụ cum=104, threshold=150, qty=346), cần `while` loop tách chính xác: 46 Bói + 300 Rộ. SQL simulation không tách được (gán toàn bộ vào phase cuối), chỉ Python code xử lý đúng.
+
 - **[04/05] `st.dataframe` vs HTML table trade-off**: `st.dataframe()` cho phép click header sort nhưng **không hỗ trợ MultiIndex column headers** và **không render HTML bold** trong cells (mất dòng TỔNG đẹp). Giải pháp: giữ HTML table + thêm `st.selectbox` sort controls phía trên. Sort data rows trước khi render, TỔNG luôn append cuối.
 - **[04/05] `st.markdown` không chạy `<script>`**: Streamlit sanitize script tags trong `unsafe_allow_html=True`. Không thể thêm JS click-to-sort trên HTML table qua `st.markdown`. Chỉ `components.html()` (iframe) mới chạy JS, nhưng tạo thêm complexity.
 - **[04/05] DB CHECK constraint cho business rule**: Dùng `ALTER TABLE ADD CONSTRAINT CHECK (condition)` để enforce rule "Chích bắp không có màu dây" ở DB level. Tránh phụ thuộc hoàn toàn vào app validation — nếu ai insert trực tiếp qua SQL/API cũng bị chặn.

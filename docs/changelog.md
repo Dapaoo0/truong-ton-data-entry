@@ -2,6 +2,20 @@
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
 
+## [05/05/2026] - Shift-based Forecast cho Mốc ②③ (Chích/Cắt bắp)
+
+#### Refactor: Chuyển Mốc ②③ từ Normal Distribution → Shift-based (`app.py`)
+- **[Trước đó]**: Mốc ② (Chích bắp) và ③ (Cắt bắp) dùng Normal Distribution PDF weights giống Mốc ①. Tổng chích/cắt bắp × (1 - 5% hao hụt) × weight → phân bổ theo đường cong lý thuyết.
+- **[Sau]**: Dùng dữ liệu chích/cắt bắp **thực tế theo ngày** từ `stage_logs`, shift ngày chích +84d (`DAYS_CHICH_TO_THU`) / cắt +70d (`DAYS_CAT_TO_THU`) → ra ngày thu hoạch dự kiến.
+- **[Phase Classification]**: Xác định Bói/Rộ/Vét bằng **tích lũy %** so với `base_lots.so_luong` (10/80/10 mặc định). Tách record khi vượt ranh giới phase (while loop).
+- **[Bỏ hao hụt ước tính]**: Loại bỏ `LOSS_RATE_TO_CHICH = 0.05` khỏi Mốc ②③. Dùng qty trực tiếp — xuất hủy thực tế đã tính riêng qua `destruction_logs`.
+- **[Constants]**: Thêm `DAYS_CHICH_TO_THU = 84`, `DAYS_CAT_TO_THU = 70`.
+- **[Mốc ① (Trồng)]**: Giữ nguyên Normal Distribution, không ảnh hưởng.
+- **[Aggregation]**: Shift data đã là integer → bỏ Largest Remainder rounding cho Mốc ②③.
+- **[Docs]**: Cập nhật `business_logic.md` §3.3.
+- **[Edge Cases Tested]**: Nhiều đợt trồng (3B Farm 157: 2 batches), chích >90% (có Thu vét), 1 record duy nhất, boundary split.
+
+
 ## [04/05/2026] - Sort Controls, Season Status Filter, Bỏ Màu Dây Chích Bắp
 
 #### Feature: Filter trạng thái vụ cho Bảng chi tiết lô (`app.py`)
