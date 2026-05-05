@@ -1611,14 +1611,19 @@ def render_global_data_tab(c_farm):
 
     if is_multi_farm and available_farms:
         # ── Admin/KD: mỗi nút download là popover chọn farm ──
+        # Dùng session_state để đảm bảo radio value không bị reset khi download rerun
+        for _k in ["pop_farm_excel", "pop_farm_chich", "pop_farm_cat", "pop_farm_trong"]:
+            if _k not in st.session_state:
+                st.session_state[_k] = available_farms[0]
+
         with col_t2:
             with st.popover("Xuất Báo Cáo Excel", use_container_width=True, key="pop_excel"):
-                sel = st.radio("Chọn Farm", available_farms, key="pop_farm_excel", horizontal=True)
-                fl = _filter_by_farm(df_lots_all, sel)
-                fs = _filter_by_farm(df_stg_all, sel)
-                fd = _filter_by_farm(df_des_all, sel)
-                fh = _filter_by_farm(df_har_all, sel)
-                fb = _filter_by_farm(df_bsr_all, sel)
+                sel_excel = st.radio("Chọn Farm", available_farms, key="pop_farm_excel", horizontal=True)
+                fl = _filter_by_farm(df_lots_all, sel_excel)
+                fs = _filter_by_farm(df_stg_all, sel_excel)
+                fd = _filter_by_farm(df_des_all, sel_excel)
+                fh = _filter_by_farm(df_har_all, sel_excel)
+                fb = _filter_by_farm(df_bsr_all, sel_excel)
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='openpyxl') as writer:
                     fl.to_excel(writer, sheet_name='Base Lots (Lô trồng)', index=False)
@@ -1626,35 +1631,35 @@ def render_global_data_tab(c_farm):
                     fd.to_excel(writer, sheet_name='Destruction Logs', index=False)
                     fh.to_excel(writer, sheet_name='Harvest Logs (Thu Hoạch)', index=False)
                     fb.to_excel(writer, sheet_name='BSR Logs (Tỷ lệ)', index=False)
-                fn = f"Bao_cao_{sel}_{date.today().strftime('%Y%m%d')}.xlsx"
+                fn = f"Bao_cao_{sel_excel}_{date.today().strftime('%Y%m%d')}.xlsx"
                 st.download_button("⬇️ Tải về", data=output.getvalue(), file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
         with col_t3:
             with st.popover("Báo cáo Chích bắp", use_container_width=True, key="pop_chich"):
-                sel = st.radio("Chọn Farm", available_farms, key="pop_farm_chich", horizontal=True)
-                fl = _filter_by_farm(df_lots_all, sel)
-                fs = _filter_by_farm(df_stg_all, sel)
+                sel_chich = st.radio("Chọn Farm", available_farms, key="pop_farm_chich", horizontal=True)
+                fl = _filter_by_farm(df_lots_all, sel_chich)
+                fs = _filter_by_farm(df_stg_all, sel_chich)
                 chich_excel = generate_chich_bap_excel(fl, fs)
-                fn = f"Bao_cao_chich_bap_{sel}_{date.today().strftime('%Y%m%d')}.xlsx"
+                fn = f"Bao_cao_chich_bap_{sel_chich}_{date.today().strftime('%Y%m%d')}.xlsx"
                 st.download_button("⬇️ Tải về", data=chich_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
         with col_t4:
             with st.popover("Báo cáo Cắt bắp", use_container_width=True, key="pop_cat"):
-                sel = st.radio("Chọn Farm", available_farms, key="pop_farm_cat", horizontal=True)
-                fl = _filter_by_farm(df_lots_all, sel)
-                fs = _filter_by_farm(df_stg_all, sel)
-                fd = _filter_by_farm(df_des_all, sel)
+                sel_cat = st.radio("Chọn Farm", available_farms, key="pop_farm_cat", horizontal=True)
+                fl = _filter_by_farm(df_lots_all, sel_cat)
+                fs = _filter_by_farm(df_stg_all, sel_cat)
+                fd = _filter_by_farm(df_des_all, sel_cat)
                 cut_excel = generate_cut_bap_excel(fl, fs, fd)
-                fn = f"Bao_cao_cat_bap_{sel}_{date.today().strftime('%Y%m%d')}.xlsx"
+                fn = f"Bao_cao_cat_bap_{sel_cat}_{date.today().strftime('%Y%m%d')}.xlsx"
                 st.download_button("⬇️ Tải về", data=cut_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
         with col_t5:
             with st.popover("Báo cáo Trồng mới", use_container_width=True, key="pop_trong"):
-                sel = st.radio("Chọn Farm", available_farms, key="pop_farm_trong", horizontal=True)
-                fl = _filter_by_farm(df_lots_all, sel)
-                f_seasons = _filter_by_farm(df_seasons, sel)
+                sel_trong = st.radio("Chọn Farm", available_farms, key="pop_farm_trong", horizontal=True)
+                fl = _filter_by_farm(df_lots_all, sel_trong)
+                f_seasons = _filter_by_farm(df_seasons, sel_trong)
                 plant_excel = generate_planting_excel(fl, f_seasons)
-                fn = f"Bao_cao_trong_moi_{sel}_{date.today().strftime('%Y%m%d')}.xlsx"
+                fn = f"Bao_cao_trong_moi_{sel_trong}_{date.today().strftime('%Y%m%d')}.xlsx"
                 st.download_button("⬇️ Tải về", data=plant_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
     else:
         # ── User thường: download trực tiếp (giữ nguyên) ──
