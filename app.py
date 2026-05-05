@@ -2148,7 +2148,7 @@ def render_global_data_tab(c_farm):
         html_content = f'''
         <style>
             * {{ margin:0; padding:0; box-sizing:border-box; }}
-            body {{ background: transparent; }}
+            html, body {{ background: transparent; overflow: hidden; height: auto; }}
             .farm-map-container {{
                 position: relative;
                 width: 100%;
@@ -2477,32 +2477,54 @@ def render_global_data_tab(c_farm):
                 e.stopPropagation();
             }});
 
-            // ── Auto-fit iframe height to content (bidirectional) ──
+            // ── Auto-fit iframe height to content (robust, bidirectional) ──
             (function() {{
+                var lastH = 0;
                 function fitHeight() {{
                     var c = document.querySelector('.farm-map-container');
                     if (!c) return;
-                    var h = c.offsetHeight + 2;
-                    if (h > 50) {{
-                        try {{ window.frameElement.style.height = h + 'px'; }} catch(e) {{}}
+                    var h = c.getBoundingClientRect().height;
+                    if (h < 50) return;
+                    h = Math.ceil(h) + 2;
+                    if (h === lastH) return;  // skip if no change
+                    lastH = h;
+                    try {{
+                        var frame = window.frameElement;
+                        frame.style.height = h + 'px';
+                        // Also resize Streamlit's wrapper div (parent of iframe)
+                        // This div can have its own fixed height that causes the gap
+                        var wrapper = frame.parentElement;
+                        if (wrapper) {{
+                            wrapper.style.height = h + 'px';
+                        }}
+                    }} catch(e) {{
+                        document.body.style.height = h + 'px';
                     }}
                 }}
+                // ResizeObserver: reacts to container size changes (e.g. SVG re-layout)
                 if ('ResizeObserver' in window) {{
                     new ResizeObserver(fitHeight).observe(document.querySelector('.farm-map-container'));
                 }}
+                // Window resize: reacts to viewport changes (wider/narrower screens)
+                window.addEventListener('resize', fitHeight);
                 window.addEventListener('load', fitHeight);
-                setTimeout(fitHeight, 300);
-                setTimeout(fitHeight, 1000);
+                // Aggressive polling for the first 3 seconds to catch late renders
+                var polls = [50, 150, 300, 500, 800, 1200, 2000, 3000];
+                polls.forEach(function(ms) {{ setTimeout(fitHeight, ms); }});
             }})();
         }})();
         </script>
         '''
 
         import streamlit.components.v1 as components
-        # Initial height: generous enough to avoid flash-of-empty on first render
-        # JS ResizeObserver will immediately adjust to exact content height
-        _map_fallback_h = int(img_h / img_w * 1200) + 60  # reasonable for typical screens
-        components.html(html_content, height=max(700, _map_fallback_h), scrolling=False)
+        # Use aspect ratio to estimate height, assume 1600px wide viewport.
+        # JS ResizeObserver will correct to exact pixel height on any screen.
+        # Overshooting causes visible whitespace gap; undershooting causes
+        # a brief flash before JS grows the iframe. We lean slightly under
+        # to guarantee zero overlap on wide monitors.
+        _aspect = img_h / img_w if img_w else 0.5625
+        _map_fallback_h = int(_aspect * 1600) + 30
+        components.html(html_content, height=max(500, _map_fallback_h), scrolling=False)
 
     st.divider()
 
