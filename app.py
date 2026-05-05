@@ -2205,12 +2205,12 @@ def render_global_data_tab(c_farm):
 
         # Build info panel HTML
         _info_rows = [
-            ("🏞️ Tổng DT lô", f"{_total_farm_area:.2f} ha", "#94a3b8"),
-            ("🌱 Đã trồng", f"{_area_planted:.2f} ha", "#a8e6cf"),
-            ("🌿 Sinh trưởng", f"{_area_growing:.2f} ha", "#00b894"),
-            ("💉 Chích bắp", f"{_area_chich:.2f} ha", "#fdcb6e"),
-            ("✂️ Cắt bắp", f"{_area_cat:.2f} ha", "#e17055"),
-            ("📦 Thu hoạch", f"{_area_harvest:.2f} ha", "#0984e3"),
+            ("Tổng DT lô", f"{_total_farm_area:.2f} ha", "#94a3b8"),
+            ("Đã trồng", f"{_area_planted:.2f} ha", "#a8e6cf"),
+            ("Sinh trưởng", f"{_area_growing:.2f} ha", "#00b894"),
+            ("Chích bắp", f"{_area_chich:.2f} ha", "#fdcb6e"),
+            ("Cắt bắp", f"{_area_cat:.2f} ha", "#e17055"),
+            ("Thu hoạch", f"{_area_harvest:.2f} ha", "#0984e3"),
         ]
         info_panel_html = ""
         for _label, _value, _color in _info_rows:
@@ -2490,7 +2490,7 @@ def render_global_data_tab(c_farm):
             </svg>
             <div class="map-tooltip" id="mapTooltip"></div>
             <div class="map-info-panel">
-                <div class="info-title">📊 Diện tích Farm</div>
+                <div class="info-title">Diện tích Farm</div>
                 {info_panel_html}
             </div>
             <div class="legend-bar">{legend_html}</div>
