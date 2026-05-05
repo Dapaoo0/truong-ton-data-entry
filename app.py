@@ -2468,32 +2468,31 @@ def render_global_data_tab(c_farm):
                 e.stopPropagation();
             }});
 
-            // ── Grow-only iframe resize: can only INCREASE, never shrink ──
+            // ── Auto-fit iframe height to content (bidirectional) ──
             (function() {{
-                var initialH = 0;
-                function grow() {{
+                function fitHeight() {{
                     var c = document.querySelector('.farm-map-container');
                     if (!c) return;
                     var h = c.offsetHeight + 2;
-                    if (h > initialH) {{
-                        initialH = h;
+                    if (h > 50) {{
                         try {{ window.frameElement.style.height = h + 'px'; }} catch(e) {{}}
                     }}
                 }}
                 if ('ResizeObserver' in window) {{
-                    new ResizeObserver(grow).observe(document.querySelector('.farm-map-container'));
+                    new ResizeObserver(fitHeight).observe(document.querySelector('.farm-map-container'));
                 }}
-                window.addEventListener('load', grow);
-                setTimeout(grow, 500);
+                window.addEventListener('load', fitHeight);
+                setTimeout(fitHeight, 300);
+                setTimeout(fitHeight, 1000);
             }})();
         }})();
         </script>
         '''
 
         import streamlit.components.v1 as components
-        # Generous initial height covering up to ~2400px wide screens (ultrawide)
-        # JS grow-only observer will expand further if needed, but never shrink
-        _map_fallback_h = int(img_h / img_w * 2400) + 60  # ~1410 for 4000x2250
+        # Initial height: generous enough to avoid flash-of-empty on first render
+        # JS ResizeObserver will immediately adjust to exact content height
+        _map_fallback_h = int(img_h / img_w * 1200) + 60  # reasonable for typical screens
         components.html(html_content, height=max(700, _map_fallback_h), scrolling=False)
 
     st.divider()
