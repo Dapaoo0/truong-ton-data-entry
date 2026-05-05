@@ -2145,6 +2145,77 @@ def render_global_data_tab(c_farm):
             legend_html += f'<span class="legend-item"><span class="legend-dot" style="background:{color}"></span>{stage}</span>'
         legend_html += f'<span class="legend-item"><span class="legend-dot" style="background:{default_color}"></span>Chưa có dữ liệu</span>'
 
+        # ── Tính diện tích theo giai đoạn (dùng dien_tich_trong per-batch) ──
+        # 1. Tổng DT farm = sum(dim_lo.area_ha) cho tất cả lô có polygon
+        _all_lo_names = [entry.get("name") for entry in polygon_data if entry.get("name")]
+        _total_farm_area = 0.0
+        if not df_lots_all.empty and "lo" in df_lots_all.columns and "dien_tich" in df_lots_all.columns:
+            _unique_lo_dt = df_lots_all.drop_duplicates("lo").set_index("lo")["dien_tich"]
+            for _ln in _all_lo_names:
+                _v = _unique_lo_dt.get(_ln)
+                if pd.notna(_v):
+                    _total_farm_area += float(_v)
+
+        # 2. Diện tích theo giai đoạn: dùng lot_info_map (đã tính gd per batch)
+        #    + dien_tich_trong per batch từ df_lots_trong_moi
+        _dt_trong_map = {}  # base_lot_id → dien_tich_trong
+        if not df_lots_trong_moi.empty and "id" in df_lots_trong_moi.columns:
+            for _, _r in df_lots_trong_moi.iterrows():
+                _blid = _r["id"]
+                _dt_val = _r.get("dien_tich_trong")
+                if pd.notna(_dt_val):
+                    _dt_trong_map[_blid] = float(_dt_val)
+                else:
+                    # Fallback: dien_tich (lot max) / số đợt cùng lô
+                    _lo = _r.get("lo")
+                    _lot_dt = _r.get("dien_tich")
+                    if pd.notna(_lot_dt):
+                        _dt_trong_map[_blid] = float(_lot_dt)
+
+        # Map base_lot_id → giai_doan from seasons/lot_info
+        _blid_gd_map = {}  # base_lot_id → giai_doan
+        if not df_seasons.empty and "base_lot_id" in df_seasons.columns:
+            for lo_name_s in lot_info_map:
+                info_s = lot_info_map[lo_name_s]
+                lo_lots_s = df_lots_trong_moi[df_lots_trong_moi["lo"] == lo_name_s] if not df_lots_trong_moi.empty else pd.DataFrame()
+                lo_seasons_s = df_seasons[
+                    (df_seasons["lo"] == lo_name_s) & (df_seasons["loai_trong"] != "Trồng dặm")
+                ].sort_values("ngay_bat_dau", ascending=False)
+                for batch_info, (_, s_row) in zip(info_s["batches"], lo_seasons_s.iterrows()):
+                    blid_s = s_row.get("base_lot_id")
+                    if blid_s and pd.notna(blid_s):
+                        _blid_gd_map[int(blid_s)] = batch_info["gd"]
+
+        _area_planted = 0.0      # Tổng DT đã trồng
+        _area_growing = 0.0      # Đang sinh trưởng
+        _area_chich = 0.0        # Chích bắp
+        _area_cat = 0.0          # Cắt bắp
+        _area_harvest = 0.0      # Thu hoạch
+        for _blid, _gd in _blid_gd_map.items():
+            _dt = _dt_trong_map.get(_blid, 0)
+            _area_planted += _dt
+            if _gd == "Đang sinh trưởng":
+                _area_growing += _dt
+            elif _gd == "Chích bắp":
+                _area_chich += _dt
+            elif _gd == "Cắt bắp":
+                _area_cat += _dt
+            elif _gd == "Thu hoạch":
+                _area_harvest += _dt
+
+        # Build info panel HTML
+        _info_rows = [
+            ("🏞️ Tổng DT lô", f"{_total_farm_area:.2f} ha", "#94a3b8"),
+            ("🌱 Đã trồng", f"{_area_planted:.2f} ha", "#a8e6cf"),
+            ("🌿 Sinh trưởng", f"{_area_growing:.2f} ha", "#00b894"),
+            ("💉 Chích bắp", f"{_area_chich:.2f} ha", "#fdcb6e"),
+            ("✂️ Cắt bắp", f"{_area_cat:.2f} ha", "#e17055"),
+            ("📦 Thu hoạch", f"{_area_harvest:.2f} ha", "#0984e3"),
+        ]
+        info_panel_html = ""
+        for _label, _value, _color in _info_rows:
+            info_panel_html += f'<div class="info-row"><span class="info-label">{_label}</span><span class="info-value" style="color:{_color}">{_value}</span></div>'
+
         html_content = f'''
         <style>
             * {{ margin:0; padding:0; box-sizing:border-box; }}
@@ -2275,6 +2346,46 @@ def render_global_data_tab(c_farm):
                 border-radius: 3px;
                 flex-shrink: 0;
             }}
+            .map-info-panel {{
+                position: absolute;
+                bottom: 44px; /* above legend bar */
+                left: 10px;
+                background: rgba(15, 23, 42, 0.88);
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(99,102,241,0.3);
+                border-radius: 10px;
+                padding: 10px 14px;
+                font-family: 'Segoe UI', system-ui, sans-serif;
+                font-size: 12px;
+                line-height: 1.6;
+                z-index: 500;
+                min-width: 170px;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            }}
+            .map-info-panel .info-title {{
+                font-size: 11px;
+                font-weight: 700;
+                color: #cbd5e1;
+                margin-bottom: 6px;
+                padding-bottom: 4px;
+                border-bottom: 1px solid rgba(255,255,255,0.1);
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }}
+            .map-info-panel .info-row {{
+                display: flex;
+                justify-content: space-between;
+                gap: 12px;
+                padding: 1px 0;
+            }}
+            .map-info-panel .info-label {{
+                color: #94a3b8;
+                white-space: nowrap;
+            }}
+            .map-info-panel .info-value {{
+                font-weight: 700;
+                white-space: nowrap;
+            }}
             /* Responsive tooltip for small screens */
             @media (max-width: 600px) {{
                 .map-tooltip {{
@@ -2310,6 +2421,15 @@ def render_global_data_tab(c_farm):
                 }}
                 .legend-item {{ font-size: 10px; gap: 4px; }}
                 .legend-dot {{ width: 9px; height: 9px; }}
+                .map-info-panel {{
+                    bottom: 34px;
+                    left: 6px;
+                    padding: 6px 8px;
+                    font-size: 10px;
+                    min-width: 130px;
+                    border-radius: 7px;
+                }}
+                .map-info-panel .info-title {{ font-size: 9px; margin-bottom: 3px; }}
             }}
             /* Responsive for large screens (1200px+) */
             @media (min-width: 1200px) {{
@@ -2325,6 +2445,13 @@ def render_global_data_tab(c_farm):
                 .legend-bar {{ gap: 20px; padding: 12px 20px; }}
                 .legend-item {{ font-size: 14px; }}
                 .legend-dot {{ width: 14px; height: 14px; }}
+                .map-info-panel {{
+                    bottom: 50px;
+                    padding: 12px 16px;
+                    font-size: 13px;
+                    min-width: 200px;
+                }}
+                .map-info-panel .info-title {{ font-size: 12px; }}
             }}
             /* Responsive for extra-large screens (1800px+) */
             @media (min-width: 1800px) {{
@@ -2345,6 +2472,14 @@ def render_global_data_tab(c_farm):
                 .legend-bar {{ gap: 24px; padding: 14px 24px; }}
                 .legend-item {{ font-size: 15px; gap: 8px; }}
                 .legend-dot {{ width: 16px; height: 16px; border-radius: 4px; }}
+                .map-info-panel {{
+                    bottom: 56px;
+                    padding: 14px 18px;
+                    font-size: 14px;
+                    min-width: 220px;
+                    border-radius: 12px;
+                }}
+                .map-info-panel .info-title {{ font-size: 13px; }}
             }}
         </style>
 
@@ -2354,6 +2489,10 @@ def render_global_data_tab(c_farm):
                 {svg_polygons}
             </svg>
             <div class="map-tooltip" id="mapTooltip"></div>
+            <div class="map-info-panel">
+                <div class="info-title">📊 Diện tích Farm</div>
+                {info_panel_html}
+            </div>
             <div class="legend-bar">{legend_html}</div>
         </div>
 
