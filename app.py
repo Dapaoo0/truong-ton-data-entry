@@ -2850,6 +2850,12 @@ def render_global_data_tab(c_farm):
 
     # --- LỊCH THU HOẠCH DỰ KIẾN (Normal Distribution Model) ---
     st.markdown("#### 📅 Lịch Thu hoạch Dự kiến")
+    st.caption(
+        "① **Từ Trồng**: dự báo từ ngày trồng (lý thuyết) · "
+        "② **Từ Chích bắp**: dự báo từ số cây đã chích bắp thực tế · "
+        "③ **Từ Cắt bắp**: dự báo từ số cây đã cắt bắp thực tế · "
+        "④ **Thực tế**: số buồng đã thu hoạch thực tế"
+    )
     st.caption(f"Hao hụt từ Trồng → Thu hoạch: **{LOSS_RATE_TO_THU*100:.0f}%/vụ** · Sản lượng: **F0 = {KG_PER_TREE_F0} kg/buồng**, **Fn = {KG_PER_TREE_FN} kg/buồng**")
 
     if not df_lots_trong_moi.empty and "ngay_trong" in df_lots_trong_moi.columns and "lo" in df_lots_trong_moi.columns:
