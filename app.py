@@ -3619,8 +3619,8 @@ def render_global_data_tab(c_farm):
     st.divider()
 
     # --- BIỂU ĐỒ PHỄU TIẾN ĐỘ THEO LÔ ---
-    st.markdown("#### 📊 Biểu đồ Phễu Tiến độ theo Lô (Pipeline Funnel)")
-    st.caption("So sánh tương quan Mức độ Hao hụt và Năng suất từ lúc Xuống giống đến khi Thu hoạch.")
+    st.markdown("#### 📊 Biểu đồ Phễu Tiến độ theo Đợt trồng (Pipeline Funnel)")
+    st.caption("So sánh tương quan Mức độ Hao hụt và Năng suất từ lúc Xuống giống đến khi Thu hoạch — phân chia theo từng đợt trồng.")
     
     # 1. Pipeline Chart Filters
     pf_farm, pf_vu, pf_team, pf_lot, pf_date = render_chart_filters("pf", include_date=True)
@@ -3633,70 +3633,81 @@ def render_global_data_tab(c_farm):
     pipe_har_df = filtered_pipe_dfs["har"]
     pipe_des_df = filtered_pipe_dfs["des"]
 
-    # Gom dữ liệu để vẽ grouped/stacked bar chart
+    # Gom dữ liệu theo từng đợt trồng (lot_id) để vẽ grouped/stacked bar chart
     if not pipe_lots_df.empty:
         pipe_lots_merged = pipe_lots_df
 
-        lots = pipe_lots_merged["lo"].unique()
+        batches = pipe_lots_merged["lot_id"].unique()
         pipeline_data = []
-        for l in lots:
-            valid_ids = pipe_lots_merged[pipe_lots_merged["lo"] == l]["lot_id"].tolist()
-            
-            # 1. Trồng mới và Trồng dặm
-            l_lots = pipe_lots_merged[pipe_lots_merged["lo"] == l]
-            sl_trong_moi = l_lots[l_lots["loai_trong"] == "Trồng mới"]["so_luong"].sum()
-            sl_trong_dam = l_lots[l_lots["loai_trong"] == "Trồng dặm"]["so_luong"].sum()
-            # Ưu tiên dien_tich_trong (per-batch), fallback dien_tich (per-lot max)
-            if "dien_tich_trong" in l_lots.columns and l_lots["dien_tich_trong"].notna().any():
-                dt = l_lots["dien_tich_trong"].sum()
+        for bid in batches:
+            batch_row = pipe_lots_merged[pipe_lots_merged["lot_id"] == bid]
+            lo_name = batch_row["lo"].iloc[0] if not batch_row.empty else bid
+            ngay_trong = batch_row["ngay_trong"].iloc[0] if "ngay_trong" in batch_row.columns and not batch_row.empty else ""
+            # Tạo label ngắn gọn: "3B (01/01/26)"
+            if ngay_trong:
+                try:
+                    dt_obj = pd.to_datetime(ngay_trong)
+                    label = f"{lo_name} ({dt_obj.strftime('%d/%m/%y')})"
+                except Exception:
+                    label = bid
             else:
-                dt = l_lots["dien_tich"].max()
+                label = bid
+            
+            # 1. Trồng mới và Trồng dặm — mỗi batch chỉ có 1 loại
+            sl_trong_moi = batch_row[batch_row["loai_trong"] == "Trồng mới"]["so_luong"].sum()
+            sl_trong_dam = batch_row[batch_row["loai_trong"] == "Trồng dặm"]["so_luong"].sum()
+            # Ưu tiên dien_tich_trong (per-batch), fallback dien_tich (per-lot max)
+            if "dien_tich_trong" in batch_row.columns and batch_row["dien_tich_trong"].notna().any():
+                dt = batch_row["dien_tich_trong"].sum()
+            else:
+                dt = batch_row["dien_tich"].max() if "dien_tich" in batch_row.columns else 0
                 if pd.isna(dt): dt = 0
             
-            pipeline_data.append({"Lô": l, "Giai đoạn": "1a. Trồng mới", "Số lượng": sl_trong_moi, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
-            pipeline_data.append({"Lô": l, "Giai đoạn": "1b. Trồng dặm", "Số lượng": sl_trong_dam, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
+            hover_base = f"<b>{label}</b><br>Diện tích: {dt:.2f} ha"
+            pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "1a. Trồng mới", "Số lượng": sl_trong_moi, "hover": hover_base})
+            pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "1b. Trồng dặm", "Số lượng": sl_trong_dam, "hover": hover_base})
             
             # 2. Chích bắp
             if not pipe_stg_df.empty:
-                sl_cb = pipe_stg_df[(pipe_stg_df["lot_id"].isin(valid_ids)) & (pipe_stg_df["giai_doan"] == "Chích bắp")]["so_luong"].sum()
-                pipeline_data.append({"Lô": l, "Giai đoạn": "2. Chích bắp", "Số lượng": sl_cb, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
-            else: pipeline_data.append({"Lô": l, "Giai đoạn": "2. Chích bắp", "Số lượng": 0, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
+                sl_cb = pipe_stg_df[(pipe_stg_df["lot_id"] == bid) & (pipe_stg_df["giai_doan"] == "Chích bắp")]["so_luong"].sum()
+                pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "2. Chích bắp", "Số lượng": sl_cb, "hover": hover_base})
+            else: pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "2. Chích bắp", "Số lượng": 0, "hover": hover_base})
             
             # 3. Cắt bắp
             if not pipe_stg_df.empty:
-                sl_cut = pipe_stg_df[(pipe_stg_df["lot_id"].isin(valid_ids)) & (pipe_stg_df["giai_doan"] == "Cắt bắp")]["so_luong"].sum()
-                pipeline_data.append({"Lô": l, "Giai đoạn": "3. Cắt bắp", "Số lượng": sl_cut, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
-            else: pipeline_data.append({"Lô": l, "Giai đoạn": "3. Cắt bắp", "Số lượng": 0, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
+                sl_cut = pipe_stg_df[(pipe_stg_df["lot_id"] == bid) & (pipe_stg_df["giai_doan"] == "Cắt bắp")]["so_luong"].sum()
+                pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "3. Cắt bắp", "Số lượng": sl_cut, "hover": hover_base})
+            else: pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "3. Cắt bắp", "Số lượng": 0, "hover": hover_base})
             
             # 4. Thu hoạch (Buồng ~ Cây)
             if not pipe_har_df.empty:
-                sl_har = pipe_har_df[pipe_har_df["lot_id"].isin(valid_ids)]["so_luong"].sum()
-                pipeline_data.append({"Lô": l, "Giai đoạn": "4. Thu hoạch", "Số lượng": sl_har, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
-            else: pipeline_data.append({"Lô": l, "Giai đoạn": "4. Thu hoạch", "Số lượng": 0, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
+                sl_har = pipe_har_df[pipe_har_df["lot_id"] == bid]["so_luong"].sum()
+                pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "4. Thu hoạch", "Số lượng": sl_har, "hover": hover_base})
+            else: pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "4. Thu hoạch", "Số lượng": 0, "hover": hover_base})
                 
             # 5. Xuất hủy
             if not pipe_des_df.empty:
-                sl_des = pipe_des_df[pipe_des_df["lot_id"].isin(valid_ids)]["so_luong"].sum()
-                pipeline_data.append({"Lô": l, "Giai đoạn": "5. Xuất hủy", "Số lượng": sl_des, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
-            else: pipeline_data.append({"Lô": l, "Giai đoạn": "5. Xuất hủy", "Số lượng": 0, "hover": f"<b>Lô {l}</b><br>Diện tích: {dt:.2f} ha"})
+                sl_des = pipe_des_df[pipe_des_df["lot_id"] == bid]["so_luong"].sum()
+                pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "5. Xuất hủy", "Số lượng": sl_des, "hover": hover_base})
+            else: pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "5. Xuất hủy", "Số lượng": 0, "hover": hover_base})
             
         df_pipeline = pd.DataFrame(pipeline_data)
         
         # Build hybrid chart: Trồng mới + Trồng dặm stacked, rest clustered
-        lots_list = list(df_pipeline["Lô"].unique())
+        lots_list = list(df_pipeline["Đợt trồng"].unique())
         
         fig_pipe = go.Figure()
         
         # --- Stacked pair: Trồng mới + Trồng dặm (same offsetgroup) ---
         df_tm = df_pipeline[df_pipeline["Giai đoạn"] == "1a. Trồng mới"]
         fig_pipe.add_trace(go.Bar(
-            name="1a. Trồng mới", x=df_tm["Lô"], y=df_tm["Số lượng"],
+            name="1a. Trồng mới", x=df_tm["Đợt trồng"], y=df_tm["Số lượng"],
             marker_color="#4CAF50", offsetgroup="trong",
             customdata=df_tm["hover"], hovertemplate="%{customdata}<br>Giai đoạn: 1a. Trồng mới<br>Số lượng: %{y:,}<extra></extra>"
         ))
         df_td = df_pipeline[df_pipeline["Giai đoạn"] == "1b. Trồng dặm"]
         fig_pipe.add_trace(go.Bar(
-            name="1b. Trồng dặm", x=df_td["Lô"], y=df_td["Số lượng"],
+            name="1b. Trồng dặm", x=df_td["Đợt trồng"], y=df_td["Số lượng"],
             marker_color="#8BC34A", offsetgroup="trong", base=df_tm["Số lượng"].values,
             customdata=df_td["hover"], hovertemplate="%{customdata}<br>Giai đoạn: 1b. Trồng dặm<br>Số lượng: %{y:,}<extra></extra>"
         ))
@@ -3711,7 +3722,7 @@ def render_global_data_tab(c_farm):
         for stage_name, color in cluster_stages:
             df_s = df_pipeline[df_pipeline["Giai đoạn"] == stage_name]
             fig_pipe.add_trace(go.Bar(
-                name=stage_name, x=df_s["Lô"], y=df_s["Số lượng"],
+                name=stage_name, x=df_s["Đợt trồng"], y=df_s["Số lượng"],
                 marker_color=color, offsetgroup=stage_name,
                 customdata=df_s["hover"], hovertemplate=f"%{{customdata}}<br>Giai đoạn: {stage_name}<br>Số lượng: %{{y:,}}<extra></extra>"
             ))
@@ -3720,7 +3731,7 @@ def render_global_data_tab(c_farm):
             barmode="group",
             plot_bgcolor="rgba(0,0,0,0)",
             yaxis={"showgrid": True, "gridcolor": "rgba(0,0,0,0.1)", "title": "Số lượng cây / buồng"},
-            xaxis={"title": "Danh sách Lô"},
+            xaxis={"title": "Đợt trồng (Lô + Ngày trồng)", "tickangle": -30},
             legend_title_text="Tiến trình"
         )
         st.plotly_chart(fig_pipe, use_container_width=True)
