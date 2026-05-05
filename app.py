@@ -3633,61 +3633,67 @@ def render_global_data_tab(c_farm):
     pipe_har_df = filtered_pipe_dfs["har"]
     pipe_des_df = filtered_pipe_dfs["des"]
 
-    # Gom dữ liệu theo từng đợt trồng (lot_id) để vẽ grouped/stacked bar chart
+    # Gom dữ liệu theo từng đợt trồng (base_lots.id) để vẽ grouped/stacked bar chart
     if not pipe_lots_df.empty:
         pipe_lots_merged = pipe_lots_df
 
-        batches = pipe_lots_merged["lot_id"].unique()
+        # Dùng "id" (PK) của base_lots làm key unique cho mỗi đợt trồng
+        batch_ids = pipe_lots_merged["id"].unique()
         pipeline_data = []
-        for bid in batches:
-            batch_row = pipe_lots_merged[pipe_lots_merged["lot_id"] == bid]
-            lo_name = batch_row["lo"].iloc[0] if not batch_row.empty else bid
+        for bid in batch_ids:
+            batch_row = pipe_lots_merged[pipe_lots_merged["id"] == bid]
+            lo_name = batch_row["lo"].iloc[0] if not batch_row.empty else str(bid)
             ngay_trong = batch_row["ngay_trong"].iloc[0] if "ngay_trong" in batch_row.columns and not batch_row.empty else ""
-            # Tạo label ngắn gọn: "3B (01/01/26)"
+            # Tạo label ngắn gọn: "3B (23/04/25)"
             if ngay_trong:
                 try:
                     dt_obj = pd.to_datetime(ngay_trong)
                     label = f"{lo_name} ({dt_obj.strftime('%d/%m/%y')})"
                 except Exception:
-                    label = bid
+                    label = f"{lo_name} #{bid}"
             else:
-                label = bid
+                label = f"{lo_name} #{bid}"
             
             # 1. Trồng mới và Trồng dặm — mỗi batch chỉ có 1 loại
             sl_trong_moi = batch_row[batch_row["loai_trong"] == "Trồng mới"]["so_luong"].sum()
             sl_trong_dam = batch_row[batch_row["loai_trong"] == "Trồng dặm"]["so_luong"].sum()
-            # Ưu tiên dien_tich_trong (per-batch), fallback dien_tich (per-lot max)
-            if "dien_tich_trong" in batch_row.columns and batch_row["dien_tich_trong"].notna().any():
-                dt = batch_row["dien_tich_trong"].sum()
-            else:
-                dt = batch_row["dien_tich"].max() if "dien_tich" in batch_row.columns else 0
-                if pd.isna(dt): dt = 0
+            # Diện tích trồng: ưu tiên dien_tich_trong (per-batch), fallback dien_tich (lot max)
+            dt = 0
+            if "dien_tich_trong" in batch_row.columns:
+                dt_val = batch_row["dien_tich_trong"].iloc[0]
+                if pd.notna(dt_val):
+                    dt = float(dt_val)
+            if dt == 0 and "dien_tich" in batch_row.columns:
+                dt_val = batch_row["dien_tich"].iloc[0]
+                if pd.notna(dt_val):
+                    dt = float(dt_val)
             
-            hover_base = f"<b>{label}</b><br>Diện tích: {dt:.2f} ha"
+            hover_base = f"<b>{label}</b><br>DT trồng: {dt:.2f} ha"
             pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "1a. Trồng mới", "Số lượng": sl_trong_moi, "hover": hover_base})
             pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "1b. Trồng dặm", "Số lượng": sl_trong_dam, "hover": hover_base})
             
+            # Stage/Harvest/Destruction match via base_lot_id == base_lots.id
             # 2. Chích bắp
-            if not pipe_stg_df.empty:
-                sl_cb = pipe_stg_df[(pipe_stg_df["lot_id"] == bid) & (pipe_stg_df["giai_doan"] == "Chích bắp")]["so_luong"].sum()
+            if not pipe_stg_df.empty and "base_lot_id" in pipe_stg_df.columns:
+                sl_cb = pipe_stg_df[(pipe_stg_df["base_lot_id"] == bid) & (pipe_stg_df["giai_doan"] == "Chích bắp")]["so_luong"].sum()
                 pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "2. Chích bắp", "Số lượng": sl_cb, "hover": hover_base})
             else: pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "2. Chích bắp", "Số lượng": 0, "hover": hover_base})
             
             # 3. Cắt bắp
-            if not pipe_stg_df.empty:
-                sl_cut = pipe_stg_df[(pipe_stg_df["lot_id"] == bid) & (pipe_stg_df["giai_doan"] == "Cắt bắp")]["so_luong"].sum()
+            if not pipe_stg_df.empty and "base_lot_id" in pipe_stg_df.columns:
+                sl_cut = pipe_stg_df[(pipe_stg_df["base_lot_id"] == bid) & (pipe_stg_df["giai_doan"] == "Cắt bắp")]["so_luong"].sum()
                 pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "3. Cắt bắp", "Số lượng": sl_cut, "hover": hover_base})
             else: pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "3. Cắt bắp", "Số lượng": 0, "hover": hover_base})
             
             # 4. Thu hoạch (Buồng ~ Cây)
-            if not pipe_har_df.empty:
-                sl_har = pipe_har_df[pipe_har_df["lot_id"] == bid]["so_luong"].sum()
+            if not pipe_har_df.empty and "base_lot_id" in pipe_har_df.columns:
+                sl_har = pipe_har_df[pipe_har_df["base_lot_id"] == bid]["so_luong"].sum()
                 pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "4. Thu hoạch", "Số lượng": sl_har, "hover": hover_base})
             else: pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "4. Thu hoạch", "Số lượng": 0, "hover": hover_base})
                 
             # 5. Xuất hủy
-            if not pipe_des_df.empty:
-                sl_des = pipe_des_df[pipe_des_df["lot_id"] == bid]["so_luong"].sum()
+            if not pipe_des_df.empty and "base_lot_id" in pipe_des_df.columns:
+                sl_des = pipe_des_df[pipe_des_df["base_lot_id"] == bid]["so_luong"].sum()
                 pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "5. Xuất hủy", "Số lượng": sl_des, "hover": hover_base})
             else: pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "5. Xuất hủy", "Số lượng": 0, "hover": hover_base})
             
