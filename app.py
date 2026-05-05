@@ -96,6 +96,8 @@ FN_CYCLE_DAYS = 174        # 90 + 14 + 70 (từ harvest trước)
 FN_DAYS_CHICH_OFFSET = 90  # Từ harvest trước đến chích bắp Fn
 FN_DAYS_CAT_OFFSET = 104   # 90 + 14
 FN_DAYS_THU_OFFSET = 174   # 90 + 14 + 70
+DAYS_CHICH_TO_THU = F0_DAYS_TO_THU - F0_DAYS_TO_CHICH  # 84 ngày: chích bắp → thu hoạch
+DAYS_CAT_TO_THU   = F0_DAYS_TO_THU - F0_DAYS_TO_CAT    # 70 ngày: cắt bắp → thu hoạch
 CONVERGENCE_DAYS = 15      # Ngưỡng hội tụ: 2 đợt chênh ≤15d → coi như gộp
 MAX_GENERATION = 5         # Tính tối đa F0→F5
 
@@ -3009,6 +3011,8 @@ def render_global_data_tab(c_farm):
         
         # ─── Tạo daily harvest data (3 mốc) ───
         daily_rows = []
+        shift_chich_rows = []  # Shift-based Mốc ② (chích bắp)
+        shift_cat_rows = []    # Shift-based Mốc ③ (cắt bắp)
         lot_gen_midpoints = {}  # {(base_lot_id, gen_index): midpoint_date}
         for _, lot_row in df_lots_trong_moi.iterrows():
             ngay_trong_raw = lot_row.get("ngay_trong")
@@ -3044,23 +3048,27 @@ def render_global_data_tab(c_farm):
                 all_midpoints.append(mp)
                 mp = mp + timedelta(days=FN_CYCLE_DAYS)
             
-            # ── Match cắt bắp records vào generation gần nhất (closest midpoint) ──
-            cat_bap_by_gen = {}  # {gen_index: total_qty}
+            # ── Match cắt bắp records vào generation gần nhất — giữ daily detail ──
+            cat_bap_by_gen = {}       # {gen_index: total_qty}
+            cat_daily_by_gen = {}     # {gen_index: [(ngay, qty), ...]}
             for blid, ngay, qty in cat_bap_records:
                 if blid != base_lot_id:
                     continue
                 closest_gen = min(range(len(all_midpoints)),
                                   key=lambda g: abs((all_midpoints[g] - ngay).days))
                 cat_bap_by_gen[closest_gen] = cat_bap_by_gen.get(closest_gen, 0) + qty
+                cat_daily_by_gen.setdefault(closest_gen, []).append((ngay, qty))
             
-            # ── Match chích bắp records vào generation gần nhất (closest midpoint) ──
-            chich_bap_by_gen = {}  # {gen_index: total_qty}
+            # ── Match chích bắp records vào generation gần nhất — giữ daily detail ──
+            chich_bap_by_gen = {}     # {gen_index: total_qty}
+            chich_daily_by_gen = {}   # {gen_index: [(ngay, qty), ...]}
             for blid, ngay, qty in chich_bap_records:
                 if blid != base_lot_id:
                     continue
                 closest_gen = min(range(len(all_midpoints)),
                                   key=lambda g: abs((all_midpoints[g] - ngay).days))
                 chich_bap_by_gen[closest_gen] = chich_bap_by_gen.get(closest_gen, 0) + qty
+                chich_daily_by_gen.setdefault(closest_gen, []).append((ngay, qty))
             
             harvest_midpoint = ngay_trong + timedelta(days=F0_DAYS_TO_THU)
             for gen in range(FORECAST_GENERATIONS):
@@ -3085,11 +3093,9 @@ def render_global_data_tab(c_farm):
                     actual_date = harvest_midpoint + timedelta(days=int(offset))
                     daily_qty = so_thu_after_loss * weight
                     
-                    # Mốc ②: chích bắp × (1 - 5% hao hụt chích→thu) × weight
-                    daily_qty_chich = (so_chich_bap_gen * (1 - LOSS_RATE_TO_CHICH) * weight) if so_chich_bap_gen is not None else None
-                    
-                    # Mốc ③: cắt bắp × (1 - 5% hao hụt cắt→thu) × weight
-                    daily_qty_cat = (so_cat_bap_gen * (1 - LOSS_RATE_TO_CHICH) * weight) if so_cat_bap_gen is not None else None
+                    # Mốc ②③: giờ dùng shift-based (tính riêng bên dưới)
+                    daily_qty_chich = None
+                    daily_qty_cat = None
                     
                     # Window label cho phase này
                     if phase == "Thu bói":
@@ -3118,6 +3124,48 @@ def render_global_data_tab(c_farm):
                     })
                 
                 harvest_midpoint = harvest_midpoint + timedelta(days=FN_CYCLE_DAYS)
+            
+            # ── Shift-based Mốc ②③: dùng data chích/cắt bắp thực tế ──
+            # Ngưỡng phase dựa trên tổng cây trồng ban đầu
+            threshold_boi = so_luong * target_boi
+            threshold_boi_ro = so_luong * (target_boi + target_ro)
+            
+            def _build_shift_rows(daily_by_gen, days_shift, col_name):
+                """Tạo shift rows cho chích hoặc cắt bắp."""
+                rows = []
+                for gen_idx in range(FORECAST_GENERATIONS):
+                    records = sorted(daily_by_gen.get(gen_idx, []), key=lambda x: x[0])
+                    if not records:
+                        continue
+                    cum = 0
+                    for ngay_src, qty in records:
+                        remaining = qty
+                        while remaining > 0:
+                            if cum < threshold_boi:
+                                phase = "Thu bói"
+                                can_fit = threshold_boi - cum
+                            elif cum < threshold_boi_ro:
+                                phase = "Thu rộ"
+                                can_fit = threshold_boi_ro - cum
+                            else:
+                                phase = "Thu vét"
+                                can_fit = remaining  # tất cả còn lại vào vét
+                            take = min(remaining, can_fit) if can_fit > 0 else remaining
+                            ngay_thu = ngay_src + timedelta(days=days_shift)
+                            row = {
+                                "base_lot_id": base_lot_id,
+                                "vu": f"F{gen_idx}",
+                                "loai_thu": phase,
+                                "thang": ngay_thu.strftime("%m/%Y"),
+                                col_name: int(round(take)),
+                            }
+                            rows.append(row)
+                            cum += take
+                            remaining -= take
+                return rows
+            
+            shift_chich_rows.extend(_build_shift_rows(chich_daily_by_gen, DAYS_CHICH_TO_THU, "so_thu_chich_bap"))
+            shift_cat_rows.extend(_build_shift_rows(cat_daily_by_gen, DAYS_CAT_TO_THU, "so_thu_cat_bap"))
         
         if daily_rows:
             df_daily = pd.DataFrame(daily_rows)
@@ -3132,28 +3180,30 @@ def render_global_data_tab(c_farm):
                 as_index=False
             ).agg(**agg_dict)
             
-            # Mốc ②: Chích bắp (sum daily_qty_chich nếu có)
-            if "daily_qty_chich" in df_daily.columns:
-                chich_agg = df_daily.groupby(
+            # Mốc ②: Chích bắp — shift-based aggregation
+            if shift_chich_rows:
+                df_shift_chich = pd.DataFrame(shift_chich_rows)
+                chich_agg = df_shift_chich.groupby(
                     ["base_lot_id", "vu", "loai_thu", "thang"],
                     as_index=False
-                ).agg(so_thu_chich_bap=("daily_qty_chich", lambda x: x.sum() if x.notna().all() else None))
+                ).agg(so_thu_chich_bap=("so_thu_chich_bap", "sum"))
                 df_harvest = df_harvest.merge(chich_agg, on=["base_lot_id", "vu", "loai_thu", "thang"], how="left")
             else:
                 df_harvest["so_thu_chich_bap"] = None
             
-            # Mốc ③: Cắt bắp (sum daily_qty_cat nếu có)
-            if "daily_qty_cat" in df_daily.columns:
-                cat_agg = df_daily.groupby(
+            # Mốc ③: Cắt bắp — shift-based aggregation
+            if shift_cat_rows:
+                df_shift_cat = pd.DataFrame(shift_cat_rows)
+                cat_agg = df_shift_cat.groupby(
                     ["base_lot_id", "vu", "loai_thu", "thang"],
                     as_index=False
-                ).agg(so_thu_cat_bap=("daily_qty_cat", lambda x: x.sum() if x.notna().all() else None))
+                ).agg(so_thu_cat_bap=("so_thu_cat_bap", "sum"))
                 df_harvest = df_harvest.merge(cat_agg, on=["base_lot_id", "vu", "loai_thu", "thang"], how="left")
             else:
                 df_harvest["so_thu_cat_bap"] = None
             
             # Largest Remainder Method: làm tròn mà đảm bảo tổng mỗi (lô, vụ) chính xác
-            # Áp dụng cho Mốc ① (so_thu_hoach_dk)
+            # Áp dụng cho Mốc ① (so_thu_hoach_dk) — Mốc ②③ đã là int từ shift
             for (lo_k, bid_k, vu_k), grp_idx in df_harvest.groupby(["lo", "base_lot_id", "vu"]).groups.items():
                 vals = df_harvest.loc[grp_idx, "so_thu_hoach_dk"].values.astype(float)
                 target_total = int(round(vals.sum()))
@@ -3164,32 +3214,6 @@ def render_global_data_tab(c_farm):
                     top_idx = np.argsort(-remainders)[:deficit]
                     floors[top_idx] += 1
                 df_harvest.loc[grp_idx, "so_thu_hoach_dk"] = floors
-                
-                # Áp dụng cho Mốc ② (so_thu_chich_bap) nếu có data
-                chich_vals = df_harvest.loc[grp_idx, "so_thu_chich_bap"]
-                if chich_vals.notna().all():
-                    chv = chich_vals.values.astype(float)
-                    ch_total = int(round(chv.sum()))
-                    ch_floors = np.floor(chv).astype(int)
-                    ch_rem = chv - ch_floors
-                    ch_deficit = ch_total - ch_floors.sum()
-                    if ch_deficit > 0:
-                        ch_top = np.argsort(-ch_rem)[:ch_deficit]
-                        ch_floors[ch_top] += 1
-                    df_harvest.loc[grp_idx, "so_thu_chich_bap"] = ch_floors
-                
-                # Áp dụng cho Mốc ③ (so_thu_cat_bap) nếu có data
-                cat_vals = df_harvest.loc[grp_idx, "so_thu_cat_bap"]
-                if cat_vals.notna().all():
-                    cv = cat_vals.values.astype(float)
-                    ct_total = int(round(cv.sum()))
-                    ct_floors = np.floor(cv).astype(int)
-                    ct_rem = cv - ct_floors
-                    ct_deficit = ct_total - ct_floors.sum()
-                    if ct_deficit > 0:
-                        ct_top = np.argsort(-ct_rem)[:ct_deficit]
-                        ct_floors[ct_top] += 1
-                    df_harvest.loc[grp_idx, "so_thu_cat_bap"] = ct_floors
             
             df_harvest["so_thu_hoach_dk"] = df_harvest["so_thu_hoach_dk"].astype(int)
             # so_thu_chich_bap: keep as int or None

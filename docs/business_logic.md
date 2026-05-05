@@ -77,16 +77,20 @@ Cửa sổ thu hoạch mặc định **54 ngày**, chia 3 phase:
 ### 3.3 Bốn Mốc Dự báo (4-Milestone Forecast)
 Mỗi thẻ tháng thu hoạch hiển thị **4 mốc** để so sánh chênh lệch:
 
-| Mốc | Ký hiệu | Nguồn dữ liệu | Công thức |
-|-----|---------|---------------|-----------|
-| Từ Trồng | ① | `base_lots.so_luong` − xuất hủy | `(trồng − hủy) × (1 − LOSS_RATE)` |
-| Từ Chích bắp | ② | `stage_logs` (Chích bắp) | `chích_bắp × (1 − LOSS_RATE_TO_CHICH)` |
-| Từ Cắt bắp | ③ | `stage_logs` (Cắt bắp) | `cắt_bắp × (1 − LOSS_RATE_TO_CHICH)` |
+| Mốc | Ký hiệu | Nguồn dữ liệu | Phương pháp |
+|-----|---------|---------------|-------------|
+| Từ Trồng | ① | `base_lots.so_luong` − xuất hủy | Normal Distribution: `(trồng − hủy) × (1 − LOSS_RATE) × pdf_weight` |
+| Từ Chích bắp | ② | `stage_logs` (Chích bắp) theo ngày | **Shift-based**: dịch ngày chích +84d (`DAYS_CHICH_TO_THU`), phase theo tích lũy % |
+| Từ Cắt bắp | ③ | `stage_logs` (Cắt bắp) theo ngày | **Shift-based**: dịch ngày cắt +70d (`DAYS_CAT_TO_THU`), phase theo tích lũy % |
 | Thực tế | ④ | `harvest_logs` | `so_luong` thu hoạch thực tế |
 
+- **Mốc ①** dùng Normal Distribution (không đổi). Tỷ lệ hao hụt: `LOSS_RATE_TO_THU = 10%`.
+- **Mốc ②③** dùng dữ liệu thực tế theo ngày, **không trừ hao hụt ước tính** (xuất hủy thực tế đã tính riêng qua `destruction_logs`).
+- **Phase (Bói/Rộ/Vét) cho Mốc ②③**: Xác định bằng tổng tích lũy chích/cắt bắp so với `base_lots.so_luong`:
+  - Tích lũy 0% → 10% = Thu Bói
+  - Tích lũy 10% → 90% = Thu Rộ
+  - Tích lũy 90% → 100% = Thu Vét
 - Nếu mốc ②③④ chưa có dữ liệu → hiển thị "Chưa có TT".
-- Dialog chi tiết: `st.metric` 4 cột + bảng 8 cột (Lô, Vụ, Loại thu, ①, ②, ③, ④, Khoảng TG).
-- `LOSS_RATE_TO_CHICH = 0.05` (5% hao hụt) áp dụng cho cả Mốc ② và ③.
 - Chích bắp thường chỉ xảy ra ở F0 (xúc tiến ra hoa), Fn cây tự ra hoa tự nhiên.
 
 ### 3.4 Phân bổ Xuất hủy theo Tỉ lệ
