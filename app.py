@@ -3783,15 +3783,8 @@ def render_global_data_tab(c_farm):
             batch_row = pipe_lots_merged[pipe_lots_merged["id"] == bid]
             lo_name = batch_row["lo"].iloc[0] if not batch_row.empty else str(bid)
             ngay_trong = batch_row["ngay_trong"].iloc[0] if "ngay_trong" in batch_row.columns and not batch_row.empty else ""
-            # Tạo label ngắn gọn: "3B (23/04/25)"
-            if ngay_trong:
-                try:
-                    dt_obj = pd.to_datetime(ngay_trong)
-                    label = f"{lo_name} ({dt_obj.strftime('%d/%m/%y')})"
-                except Exception:
-                    label = f"{lo_name} #{bid}"
-            else:
-                label = f"{lo_name} #{bid}"
+            # Dùng batch_label_map (đã build ở trên): "3B (đợt 1)" hoặc "3B" nếu chỉ 1 đợt
+            label = batch_label_map.get(bid, lo_name)
             
             # 1. Trồng mới và Trồng dặm — mỗi batch chỉ có 1 loại
             sl_trong_moi = batch_row[batch_row["loai_trong"] == "Trồng mới"]["so_luong"].sum()
