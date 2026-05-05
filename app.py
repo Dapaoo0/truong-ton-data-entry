@@ -282,12 +282,14 @@ def fetch_table_data(table_name: str, farm: str) -> pd.DataFrame:
     
     if table_name in tables_with_lo:
         # Use left join (not !inner) so records with dim_lo_id=NULL still appear
-        query = supabase.table(table_name).select("*, dim_lo(lo_name, area_ha, dim_doi(doi_name), dim_farm(farm_name))").eq("is_deleted", False)
+        query = supabase.table(table_name).select("*, dim_lo(lo_name, area_ha, is_active, dim_doi(doi_name), dim_farm(farm_name))").eq("is_deleted", False)
         if farm not in ["Admin", "Phòng Kinh doanh"] and farm:
             # For non-admin, we need dim_lo to exist for farm filtering to work
             # But we still show orphan records to avoid silent data loss
-            query = supabase.table(table_name).select("*, dim_lo!inner(lo_name, area_ha, dim_doi!inner(doi_name), dim_farm!inner(farm_name))").eq("is_deleted", False)
+            query = supabase.table(table_name).select("*, dim_lo!inner(lo_name, area_ha, is_active, dim_doi!inner(doi_name), dim_farm!inner(farm_name))").eq("is_deleted", False)
             query = query.eq("dim_lo.dim_farm.farm_name", farm)
+        # Loại trừ các lô đã bị vô hiệu hóa (is_active = false), VD: lô "11" = 11A + 11B
+        query = query.eq("dim_lo.is_active", True)
     else:
         query = supabase.table(table_name).select("*")
         if table_name != "user_roles":
