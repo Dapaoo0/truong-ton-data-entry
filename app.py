@@ -2901,7 +2901,8 @@ def render_global_data_tab(c_farm):
                 ("Thu hoạch", "Thực tế"): so_thu_hoach,
                 ("Tổng khối lượng (kg)", "Dự toán"): dt_thu_est * get_kg_per_tree(f_vu),
                 ("Tổng khối lượng (kg)", "Thực tế"): so_thu_hoach * get_kg_per_tree(f_vu),
-                "_completed": _season_completed
+                "_completed": _season_completed,
+                "_sort_start_date": start if pd.notna(start) else pd.Timestamp.min,
             })
             
         # ─── Sort bảng theo tên lô tự nhiên (3B < 4A < 12A) rồi đợt trồng ───
@@ -2948,6 +2949,11 @@ def render_global_data_tab(c_farm):
             if _sort_col is None:
                 # Mặc định: sort theo tên lô tự nhiên
                 detail_rows_by_vu[vu_key].sort(key=_lo_sort_key)
+            elif _sort_col == ("Thông tin", "Thời gian vụ"):
+                # Sort theo ngày bắt đầu thực tế (đã lưu trong _sort_start_date)
+                def _date_sort_key(row_dict):
+                    return row_dict.get("_sort_start_date", pd.Timestamp.min)
+                detail_rows_by_vu[vu_key].sort(key=_date_sort_key, reverse=not _sort_asc)
             else:
                 def _custom_sort_key(row_dict, col=_sort_col):
                     val = row_dict.get(col, 0)
@@ -2973,8 +2979,10 @@ def render_global_data_tab(c_farm):
                 for vu_val, rows in detail_rows_by_vu.items():
                     st.markdown(f"##### 🌿 Vụ {vu_val}")
                     df_detail = pd.DataFrame(rows)
-                    # Trích cờ _completed trước khi chuyển MultiIndex
+                    # Trích cờ ẩn trước khi chuyển MultiIndex
                     _completed_series = df_detail.pop("_completed") if "_completed" in df_detail.columns else pd.Series([False] * len(df_detail))
+                    if "_sort_start_date" in df_detail.columns:
+                        df_detail.pop("_sort_start_date")
                     if not isinstance(df_detail.columns, pd.MultiIndex):
                         df_detail.columns = pd.MultiIndex.from_tuples(df_detail.columns)
                     
