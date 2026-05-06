@@ -2,6 +2,40 @@
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
 
+## [06/05/2026] - Tooltip Diện Tích Lô/Trồng, Sort Fix, Data Correction
+
+#### Feature: Tách tooltip "Diện tích" thành "Diện tích lô" + "Diện tích trồng" (`app.py`)
+- **[Trước đó]**: Tooltip bản đồ chỉ hiện 1 dòng "Diện tích" lấy từ `base_lots.dien_tich` (NULL nếu lô chưa trồng).
+- **[Sau]**: 2 dòng riêng biệt:
+  - **Diện tích lô**: từ `dim_lo.area_ha` — luôn có, kể cả lô chưa trồng (VD: Lô 10).
+  - **Diện tích trồng**: tổng `base_lots.dien_tich_trong` — chỉ có khi lô đã trồng.
+- **[Data source]**: Query `dim_lo` riêng cho tất cả lô active Farm 157 → `_dim_lo_area_map`.
+- **[Backfill]**: Lô có polygon nhưng chưa có `base_lots` (VD: Lô 10) giờ được thêm vào `lot_info_map` với `area_ha` từ `dim_lo`.
+- **[SVG]**: Data attributes đổi từ `data-dt` → `data-area-ha` + `data-dt-trong`.
+
+#### Fix: Sort "Thời gian vụ" theo ngày thực tế thay vì string (`app.py`)
+- **[Root Cause]**: Cột "Thời gian vụ" = `"DD/MM/YYYY - Hiện tại"`. Sort cũ cố parse float → thất bại → fallback string sort. String sort theo ký tự đầu (DD) → `"06/12"` < `"08/11"` = tháng 12 xếp trước tháng 11.
+- **[Fix]**: Thêm trường ẩn `_sort_start_date` (pd.Timestamp) vào mỗi row. Khi sort theo "Thời gian vụ", dùng `_sort_start_date` thay vì string → sort chronological.
+- **[Cleanup]**: `_sort_start_date` được pop ra trước khi render DataFrame.
+
+#### Fix: Tổng số cây chỉ cộng F0, không tính trùng F1/F2 (`app.py`)
+- **[Root Cause]**: Lô có nhiều vụ (F0 + F1), tổng số cây cộng cả F0 lẫn F1 → phình to. Nhưng F1 mọc từ cùng gốc F0.
+- **[Fix]**: `total_cay = sum(b["so_cay"] for b in batches if b["vu"] == "F0")`.
+
+#### Fix: Tổng DT lô tính từ tất cả lô active (`app.py`)
+- **[Trước đó]**: Chỉ cộng area_ha của lô có polygon → 58.63 ha.
+- **[Sau]**: Query tất cả lô `is_active=True` trong `dim_lo` → 125.83 ha.
+
+#### Fix: Filter inactive lots (lô 11) (`app.py`)
+- **[Mô tả]**: Thêm `.eq("dim_lo.is_active", True)` vào tất cả query `fetch_table_data()`.
+- **[Impact]**: Lô 11 (trùng 11A + 11B) bị loại khỏi mọi aggregation.
+
+#### Data Correction (Supabase)
+- **[Hard delete]**: `base_lots` ID 24 (3B, test data, 200 cây) — đã soft-delete trước đó.
+- **[Update]**: `base_lots` ID 25 (3B đợt 1): `dien_tich_trong` 0.96 → **0.88 ha** (tổng 3 đợt = 4.42 ha = area_ha).
+- **[Move lot]**: `base_lots` ID 17 + `seasons` ID 17: `dim_lo_id` 43 (8B) → **98 (8C)**. Record này thuộc lô 8C, không phải 8B.
+- **[Kiểm tra]**: Sau sửa, không còn lô nào có tổng `dien_tich_trong` > `area_ha`.
+
 ## [05/05/2026] - Shift-based Forecast cho Mốc ②③ (Chích/Cắt bắp)
 
 #### Refactor: Chuyển Mốc ②③ từ Normal Distribution → Shift-based (`app.py`)

@@ -183,3 +183,35 @@ Liên Farm
 - Ưu tiên cột `lo_raw` (lô thực) trước `lo_code` (tên nhóm đội) khi mapping.
 - Case-insensitive lookup cho `dim_lo`.
 - Missing CV/LO cần được làm sạch trước khi đẩy vào Supabase Dimension.
+
+---
+
+## 8. Bản đồ Farm & Dashboard Aggregation
+
+### 8.1 Diện tích
+Hệ thống phân biệt **2 loại diện tích**:
+
+| Loại | Nguồn | Ý nghĩa |
+|------|-------|---------|
+| **Diện tích lô** | `dim_lo.area_ha` | Diện tích đất thực tế của lô (bao gồm cả lô chưa trồng) |
+| **Diện tích trồng** | `SUM(base_lots.dien_tich_trong)` | Diện tích thực tế đã trồng (per-batch) |
+
+- **Ràng buộc**: Tổng `dien_tich_trong` của các đợt trồng trong 1 lô **không được vượt quá** `area_ha`.
+- **Panel "Diện tích Farm"**: "Tổng DT lô" = `SUM(dim_lo.area_ha)` cho tất cả lô `is_active=True`.
+- **Panel "Đã trồng"**: = `SUM(base_lots.dien_tich_trong)` cho tất cả đợt trồng active.
+- **Tooltip bản đồ**: Hiển thị cả 2 dòng ("Diện tích lô" + "Diện tích trồng") để user phân biệt.
+
+### 8.2 Tổng số cây (Map tooltip)
+- Chỉ cộng số cây của **vụ F0** (`vu == "F0"`), **KHÔNG cộng F1/F2/F3**.
+- Lý do: cây Fn mọc từ **cùng gốc** F0 (ratoon), không phải cây mới → cộng sẽ tính trùng.
+- Formula: `total_cay = SUM(so_cay) WHERE vu = "F0"`.
+
+### 8.3 Inactive lots
+- Tất cả query đều filter `dim_lo.is_active = True`.
+- Lô bị vô hiệu hóa (VD: Lô 11 = gộp 11A + 11B) bị loại khỏi mọi aggregation.
+
+### 8.4 Lô chưa có dữ liệu trồng
+- Lô có polygon trên bản đồ nhưng chưa có record trong `base_lots` (VD: Lô 10):
+  - Hiển thị `area_ha` từ `dim_lo` (Diện tích lô).
+  - Diện tích trồng = "—", Tổng số cây = 0.
+  - Giai đoạn = "Chưa có dữ liệu" (màu xám).
