@@ -1847,7 +1847,7 @@ def render_global_data_tab(c_farm):
     POLYGON_JSON_PATH = os.path.join(os.path.dirname(__file__), "farm_157_polygons.json")
     if os.path.exists(POLYGON_JSON_PATH) and c_farm in ["Farm 157", "Admin", "Phòng Kinh doanh"]:
         st.markdown("#### 🗺️ Bản đồ Farm 157")
-        st.caption("Di chuột vào từng lô để xem thông tin chi tiết. Màu sắc thể hiện giai đoạn hiện tại.")
+        st.caption("Di chuột vào từng lô để xem thông tin chi tiết. Màu sắc thể hiện giai đoạn hiện tại. Lô có nhiều đợt trồng ở giai đoạn khác nhau sẽ ưu tiên hiển thị trạng thái của đợt trồng có nhiều cây nhất.")
 
         with open(POLYGON_JSON_PATH, "r", encoding="utf-8") as f:
             polygon_data = json.load(f)
