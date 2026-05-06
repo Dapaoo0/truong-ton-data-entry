@@ -1560,16 +1560,12 @@ def render_global_data_tab(c_farm):
         opacity: 0.85;
         filter: brightness(0.95);
     }
-    .btn-excel { background-color: #e3f2fd; color: #1565c0 !important; border: 1px solid #90caf9; }
+
     .btn-chich { background-color: #fff8e1; color: #f57f17 !important; border: 1px solid #ffe082; }
     .btn-cat   { background-color: #ffebee; color: #c62828 !important; border: 1px solid #ef9a9a; }
     .btn-trong { background-color: #e8f5e9; color: #2e7d32 !important; border: 1px solid #a5d6a7; }
     /* Popover buttons cho Admin/KD — match original colors */
-    .st-key-pop_excel button {
-        background-color: #e3f2fd !important; color: #1565c0 !important;
-        border: 1px solid #90caf9 !important; font-weight: 600;
-        min-height: 64px; border-radius: 0.5rem;
-    }
+
     .st-key-pop_chich button {
         background-color: #fff8e1 !important; color: #f57f17 !important;
         border: 1px solid #ffe082 !important; font-weight: 600;
@@ -1585,7 +1581,6 @@ def render_global_data_tab(c_farm):
         border: 1px solid #a5d6a7 !important; font-weight: 600;
         min-height: 64px; border-radius: 0.5rem;
     }
-    .st-key-pop_excel button:hover,
     .st-key-pop_chich button:hover,
     .st-key-pop_cat button:hover,
     .st-key-pop_trong button:hover {
@@ -1609,32 +1604,14 @@ def render_global_data_tab(c_farm):
         b64 = base64.b64encode(data_bytes if isinstance(data_bytes, bytes) else data_bytes).decode()
         return f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{filename}" class="custom-dl-btn {css_class}">{label}</a>'
 
-    col_t1, col_t2, col_t3, col_t4, col_t5 = st.columns([2, 1, 1, 1, 1])
+    col_t1, col_t3, col_t4, col_t5 = st.columns([2, 1, 1, 1])
 
     if is_multi_farm and available_farms:
         # ── Admin/KD: mỗi nút download là popover chọn farm ──
         # Dùng session_state để đảm bảo radio value không bị reset khi download rerun
-        for _k in ["pop_farm_excel", "pop_farm_chich", "pop_farm_cat", "pop_farm_trong"]:
+        for _k in ["pop_farm_chich", "pop_farm_cat", "pop_farm_trong"]:
             if _k not in st.session_state:
                 st.session_state[_k] = available_farms[0]
-
-        with col_t2:
-            with st.popover("Xuất Báo Cáo Excel", use_container_width=True, key="pop_excel"):
-                sel_excel = st.radio("Chọn Farm", available_farms, key="pop_farm_excel", horizontal=True)
-                fl = _filter_by_farm(df_lots_all, sel_excel)
-                fs = _filter_by_farm(df_stg_all, sel_excel)
-                fd = _filter_by_farm(df_des_all, sel_excel)
-                fh = _filter_by_farm(df_har_all, sel_excel)
-                fb = _filter_by_farm(df_bsr_all, sel_excel)
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    fl.to_excel(writer, sheet_name='Base Lots (Lô trồng)', index=False)
-                    fs.to_excel(writer, sheet_name='Stage Logs (Tiến độ)', index=False)
-                    fd.to_excel(writer, sheet_name='Destruction Logs', index=False)
-                    fh.to_excel(writer, sheet_name='Harvest Logs (Thu Hoạch)', index=False)
-                    fb.to_excel(writer, sheet_name='BSR Logs (Tỷ lệ)', index=False)
-                fn = f"Bao_cao_{sel_excel}_{date.today().strftime('%Y%m%d')}.xlsx"
-                st.download_button("⬇️ Tải về", data=output.getvalue(), file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
         with col_t3:
             with st.popover("Báo cáo Chích bắp", use_container_width=True, key="pop_chich"):
@@ -1665,18 +1642,6 @@ def render_global_data_tab(c_farm):
                 st.download_button("⬇️ Tải về", data=plant_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
     else:
         # ── User thường: download trực tiếp (giữ nguyên) ──
-        with col_t2:
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df_lots_all.to_excel(writer, sheet_name='Base Lots (Lô trồng)', index=False)
-                df_stg_all.to_excel(writer, sheet_name='Stage Logs (Tiến độ)', index=False)
-                df_des_all.to_excel(writer, sheet_name='Destruction Logs', index=False)
-                df_har_all.to_excel(writer, sheet_name='Harvest Logs (Thu Hoạch)', index=False)
-                df_bsr_all.to_excel(writer, sheet_name='BSR Logs (Tỷ lệ)', index=False)
-            fn = f"Bao_cao_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx"
-            href = _gen_dl_link(output.getvalue(), fn, "btn-excel", "Xuất Báo Cáo Excel")
-            st.markdown(href, unsafe_allow_html=True)
-
         with col_t3:
             chich_excel = generate_chich_bap_excel(df_lots_all, df_stg_all)
             fn = f"Bao_cao_chich_bap_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx"
