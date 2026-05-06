@@ -2018,7 +2018,8 @@ def render_global_data_tab(c_farm):
                 lot_info_map[lo_name] = {
                     "dominant_gd": dominant["gd"],
                     "dien_tich": float(dien_tich) if dien_tich else None,
-                    "total_cay": sum(b["so_cay"] for b in batches),
+                    # Chỉ cộng F0: F1/F2 mọc từ cùng gốc F0 → không tính trùng
+                    "total_cay": sum(b["so_cay"] for b in batches if b["vu"] == "F0"),
                     "batches": batches,
                 }
 
