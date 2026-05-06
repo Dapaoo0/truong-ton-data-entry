@@ -1852,6 +1852,19 @@ def render_global_data_tab(c_farm):
         with open(POLYGON_JSON_PATH, "r", encoding="utf-8") as f:
             polygon_data = json.load(f)
 
+        # ── Query dim_lo.area_ha cho tất cả lô Farm 157 ──
+        _dim_lo_area_map = {}  # lo_code → area_ha
+        try:
+            _dim_lo_all = supabase.table("dim_lo").select("lo_code, area_ha, dim_farm!inner(farm_name)").eq("is_active", True).eq("dim_farm.farm_name", "Farm 157").execute()
+            if _dim_lo_all.data:
+                for _dl in _dim_lo_all.data:
+                    _lc = _dl.get("lo_code")
+                    _ah = _dl.get("area_ha")
+                    if _lc and _ah is not None:
+                        _dim_lo_area_map[_lc] = float(_ah)
+        except Exception:
+            pass
+
         # ── Build lot info từ DB data (per-batch tracking) ──
         lot_info_map = {}  # lo_name → {info dict with batches}
 
@@ -2015,9 +2028,19 @@ def render_global_data_tab(c_farm):
 
                 # Dominant batch = nhiều cây nhất → quyết định màu polygon
                 dominant = max(batches, key=lambda b: b["so_cay"]) if batches else batches[0]
+                # Diện tích trồng = tổng dien_tich_trong của các batch F0 (tránh trùng F1/F2)
+                _dt_trong_total = 0.0
+                if not df_lots_trong_moi.empty and "dien_tich_trong" in df_lots_trong_moi.columns:
+                    _lo_batches_f0 = df_lots_trong_moi[
+                        (df_lots_trong_moi["lo"] == lo_name) & (df_lots_trong_moi["loai_trong"] != "Trồng dặm")
+                    ]
+                    _dt_vals = _lo_batches_f0["dien_tich_trong"].dropna()
+                    if not _dt_vals.empty:
+                        _dt_trong_total = float(_dt_vals.sum())
                 lot_info_map[lo_name] = {
                     "dominant_gd": dominant["gd"],
-                    "dien_tich": float(dien_tich) if dien_tich else None,
+                    "area_ha": _dim_lo_area_map.get(lo_name),
+                    "dien_tich_trong": _dt_trong_total,
                     # Chỉ cộng F0: F1/F2 mọc từ cùng gốc F0 → không tính trùng
                     "total_cay": sum(b["so_cay"] for b in batches if b["vu"] == "F0"),
                     "batches": batches,
@@ -2123,6 +2146,18 @@ def render_global_data_tab(c_farm):
         img_w = polygon_data.get("image_width", 4000)
         img_h = polygon_data.get("image_height", 2250)
 
+        # ── Bổ sung lot_info_map cho các lô có polygon nhưng chưa có base_lots ──
+        for lot in polygon_data.get("lots", []):
+            name = lot["name"]
+            if name not in lot_info_map and name in _dim_lo_area_map:
+                lot_info_map[name] = {
+                    "dominant_gd": "Chưa có dữ liệu",
+                    "area_ha": _dim_lo_area_map.get(name),
+                    "dien_tich_trong": 0.0,
+                    "total_cay": 0,
+                    "batches": [],
+                }
+
         svg_polygons = ""
         for lot in polygon_data.get("lots", []):
             name = lot["name"]
@@ -2130,8 +2165,12 @@ def render_global_data_tab(c_farm):
             info = lot_info_map.get(name, {})
             giai_doan = info.get("dominant_gd", "Chưa có dữ liệu")
             fill = stage_colors.get(giai_doan, default_color)
-            dt = info.get("dien_tich")
-            dt_str = f'{dt:.2f} ha' if dt else "—"
+            # Diện tích lô từ dim_lo.area_ha
+            area_ha = info.get("area_ha")
+            area_ha_str = f'{area_ha:.2f} ha' if area_ha else "—"
+            # Diện tích trồng từ base_lots.dien_tich_trong
+            dt_trong = info.get("dien_tich_trong", 0)
+            dt_trong_str = f'{dt_trong:.2f} ha' if dt_trong > 0 else "—"
             total_cay = info.get("total_cay", 0)
             # Encode batches as JSON string for JS tooltip
             batches_json = json.dumps(info.get("batches", []), ensure_ascii=False).replace('"', '&quot;')
@@ -2142,7 +2181,7 @@ def render_global_data_tab(c_farm):
 
             svg_polygons += f'''
             <polygon class="lot-poly" points="{points_str}" fill="{fill}"
-                data-name="{name}" data-dt="{dt_str}" data-total="{total_cay}"
+                data-name="{name}" data-area-ha="{area_ha_str}" data-dt-trong="{dt_trong_str}" data-total="{total_cay}"
                 data-gd="{giai_doan}" data-batches="{batches_json}" />
             <text x="{cx:.0f}" y="{cy:.0f}" class="lot-label">{name}</text>
             '''
@@ -2530,7 +2569,8 @@ def render_global_data_tab(c_farm):
 
                 let pinIcon = showPin ? '<span class="tt-pin">📌 Đã ghim</span>' : '<span class="tt-pin"></span>';
                 let html = '<div class="tt-title"><span>Lô ' + d.name + '</span>' + pinIcon + '</div>';
-                html += '<div class="tt-row"><span class="tt-label">Diện tích</span><span class="tt-value">' + d.dt + '</span></div>';
+                html += '<div class="tt-row"><span class="tt-label">Diện tích lô</span><span class="tt-value">' + d.areaHa + '</span></div>';
+                html += '<div class="tt-row"><span class="tt-label">Diện tích trồng</span><span class="tt-value">' + d.dtTrong + '</span></div>';
                 html += '<div class="tt-row"><span class="tt-label">Tổng số cây</span><span class="tt-value">' + parseInt(d.total||0).toLocaleString() + '</span></div>';
 
                 if (batches.length > 0) {{
