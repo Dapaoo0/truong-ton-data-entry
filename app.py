@@ -84,6 +84,11 @@ STAGE_NT_OPTIONS = ["Chích bắp", "Cắt bắp"]  # Không còn Thu Hoạch �
 DESTRUCTION_STAGE_OPTIONS = ["Trước chích bắp", "Trước cắt bắp", "Trước thu hoạch"]
 
 # =====================================================
+# BẢNG MÀU DÂY CHUẨN (Ribbon Colors)
+# =====================================================
+BASE_COLORS = ["Đỏ", "Cam", "Tím", "Đen", "Xanh lá", "Xanh dương", "Trắng"]
+
+# =====================================================
 # TIMELINE SINH TRƯỞNG CHUỐI (Constants)
 # =====================================================
 # F0 (từ ngày trồng): Trồng → +180d Chích → +14d Cắt → +70d Thu hoạch (tổng 264d)
@@ -100,6 +105,11 @@ DAYS_CHICH_TO_THU = F0_DAYS_TO_THU - F0_DAYS_TO_CHICH  # 84 ngày: chích bắp 
 DAYS_CAT_TO_THU   = F0_DAYS_TO_THU - F0_DAYS_TO_CAT    # 70 ngày: cắt bắp → thu hoạch
 CONVERGENCE_DAYS = 15      # Ngưỡng hội tụ: 2 đợt chênh ≤15d → coi như gộp
 MAX_GENERATION = 5         # Tính tối đa F0→F5
+
+# ── Micro-PDF cho Mốc ②③ (chích/cắt bắp → thu hoạch) ──
+# Spread hẹp hơn Mốc ① vì gần ngày thu hơn → sai số nhỏ hơn
+MICRO_WINDOW_HALF = 7      # ±7 ngày spread (fixed, không configurable)
+MICRO_SIGMA = 3.0           # sigma cho mini Normal Distribution
 
 # =====================================================
 # SẢN LƯỢNG DỰ TOÁN (kg/buồng)
@@ -148,6 +158,24 @@ _DESTRUCTION_STAGE_MAP = {
     "Trước thu hoạch": "Thu hoạch",
 }
 
+def get_current_season_destruction(bid: int, giai_doan: str = None) -> int:
+    """Tổng xuất hủy thuộc vụ hiện tại (season mới nhất) cho một base_lot.
+    Nếu giai_doan được chỉ định, chỉ đếm destruction cùng giai_doan.
+    """
+    season_res = supabase.table("seasons").select("ngay_bat_dau") \
+        .eq("base_lot_id", bid).eq("is_deleted", False) \
+        .order("ngay_bat_dau", desc=True).limit(1).execute()
+    if not season_res.data:
+        return 0
+    query = supabase.table("destruction_logs").select("so_luong") \
+        .eq("base_lot_id", bid).eq("is_deleted", False) \
+        .gte("ngay_xuat_huy", season_res.data[0]["ngay_bat_dau"])
+    if giai_doan:
+        query = query.eq("giai_doan", giai_doan)
+    dest_res = query.execute()
+    return sum(int(r["so_luong"]) for r in dest_res.data) if dest_res.data else 0
+
+
 def resolve_base_lot_id(dim_lo_id, action_date, giai_doan):
     """
     Tự động suy luận base_lot_id dựa trên FIFO capacity.
@@ -155,7 +183,7 @@ def resolve_base_lot_id(dim_lo_id, action_date, giai_doan):
     Fallback: closest-match nếu tất cả đợt đều full hoặc không xác định được capacity.
     """
     res = supabase.table("base_lots") \
-        .select("id, so_luong, so_luong_con_lai, ngay_trong") \
+        .select("id, so_luong, ngay_trong") \
         .eq("dim_lo_id", dim_lo_id) \
         .eq("is_deleted", False) \
         .eq("loai_trong", "Trồng mới") \
@@ -169,7 +197,7 @@ def resolve_base_lot_id(dim_lo_id, action_date, giai_doan):
     # ── FIFO: đợt cũ nhất có remaining capacity > 0 ──
     for batch in res.data:
         bid = batch["id"]
-        planted = int(batch.get("so_luong_con_lai") or batch.get("so_luong", 0))
+        planted = int(batch.get("so_luong", 0)) - get_current_season_destruction(bid, "Trước chích bắp")
 
         if effective_giai_doan == "Chích bắp":
             used_res = supabase.table("stage_logs").select("so_luong") \
@@ -324,6 +352,68 @@ def get_dim_lo_id(farm_name: str, lo_name: str):
     res = supabase.table("dim_lo").select("lo_id, dim_farm!inner(farm_name)").eq("lo_name", lo_name).eq("dim_farm.farm_name", farm_name).limit(1).execute()
     return res.data[0]["lo_id"] if res.data else None
 
+@st.cache_data(ttl=60)
+def get_farm_id_from_name(farm_name: str):
+    """Resolve farm_name → farm_id from dim_farm."""
+    res = supabase.table("dim_farm").select("farm_id").eq("farm_name", farm_name).limit(1).execute()
+    return res.data[0]["farm_id"] if res.data else None
+
+def lookup_ribbon(farm_id, year, week):
+    """Lookup ribbon color for (farm, year, week). Returns color_name or None."""
+    res = supabase.table("ribbon_schedule").select("color_name") \
+        .eq("farm_id", farm_id).eq("year", year).eq("week_number", week) \
+        .eq("is_deleted", False).maybe_single().execute()
+    return res.data["color_name"] if res.data else None
+
+def get_or_create_ribbon(farm_id, year, week, color_name):
+    """Lookup or create ribbon. Returns (color, None) or (None, error_msg)."""
+    existing = lookup_ribbon(farm_id, year, week)
+    if existing:
+        if existing != color_name:
+            return None, f"❌ Tuần {week}/{year} đã có màu dây '{existing}', không thể nhập '{color_name}'"
+        return existing, None
+    # Auto-create
+    supabase.table("ribbon_schedule").insert({
+        "farm_id": farm_id, "year": year,
+        "week_number": week, "color_name": color_name
+    }).execute()
+    return color_name, None
+
+def get_all_ribbons_for_farm(farm_id):
+    """Get all ribbon colors for a farm (for selectbox options)."""
+    res = supabase.table("ribbon_schedule").select("color_name, year, week_number") \
+        .eq("farm_id", farm_id).eq("is_deleted", False) \
+        .order("year", desc=True).order("week_number", desc=True).execute()
+    return res.data or []
+
+def build_color_selectbox(key_prefix, default_color=None):
+    """Render dual selectbox (primary + secondary color). Returns standardized color string."""
+    c1, c2 = st.columns(2)
+    # Determine default indices
+    primary_default = 0
+    secondary_default = 0
+    if default_color:
+        parts = [p.strip() for p in default_color.split("-")]
+        if len(parts) >= 1 and parts[0] in BASE_COLORS:
+            primary_default = BASE_COLORS.index(parts[0])
+        if len(parts) >= 2 and parts[1] in BASE_COLORS:
+            # secondary options exclude primary, so index shifts
+            pass  # handled below
+
+    with c1:
+        primary = st.selectbox("🎨 Màu chính", options=BASE_COLORS, index=primary_default, key=f"{key_prefix}_pri")
+    secondary_opts = ["Không"] + [c for c in BASE_COLORS if c != primary]
+    sec_default = 0
+    if default_color and " - " in default_color:
+        sec_part = default_color.split(" - ")[1].strip()
+        if sec_part in secondary_opts:
+            sec_default = secondary_opts.index(sec_part)
+    with c2:
+        secondary = st.selectbox("🎨 Màu phụ (nếu có)", options=secondary_opts, index=sec_default, key=f"{key_prefix}_sec")
+
+    return primary if secondary == "Không" else f"{primary} - {secondary}"
+
+
 def get_or_create_dim_lo(farm_name: str, lo_name: str, team_name: str = None):
     """Tìm dim_lo_id. Nếu lô chưa tồn tại → tự động tạo mới trong dim_lo."""
     existing = get_dim_lo_id(farm_name, lo_name)
@@ -425,9 +515,12 @@ def get_available_capacity_for_lot(farm_name, lot_id_str, log_type, giai_doan=No
     dim_id = get_dim_lo_id(farm_name, lot_id_str)
     if not dim_id: return 0, 0
     
-    res_lot = supabase.table("base_lots").select("so_luong, so_luong_con_lai").eq("dim_lo_id", dim_id).eq("is_deleted", False).execute()
+    res_lot = supabase.table("base_lots").select("id, so_luong").eq("dim_lo_id", dim_id).eq("is_deleted", False).execute()
     if not res_lot.data: return 0, 0
-    total_planted = sum(int(row.get("so_luong_con_lai")) if row.get("so_luong_con_lai") is not None else int(row.get("so_luong", 0)) for row in res_lot.data)
+    total_planted = sum(
+        max(0, int(row.get("so_luong", 0)) - get_current_season_destruction(row["id"], "Trước chích bắp"))
+        for row in res_lot.data
+    )
 
     max_allowed = total_planted
 
@@ -452,7 +545,7 @@ def get_available_capacity_for_lot(farm_name, lot_id_str, log_type, giai_doan=No
     return max_allowed, total_used
 
 
-def allocate_fifo_quantity(farm_name, lo_name, new_sl, log_type, target_date, action_type, giai_doan=None):
+def allocate_fifo_quantity(farm_name, lo_name, new_sl, log_type, target_date, action_type, giai_doan=None, mau_day=None):
     """
     Phân bổ số lượng theo FIFO (First-In-First-Out) theo ngày trồng.
     Đợt trồng cũ nhất được ưu tiên phân bổ trước, tràn thì chuyển sang đợt tiếp.
@@ -466,8 +559,12 @@ def allocate_fifo_quantity(farm_name, lo_name, new_sl, log_type, target_date, ac
     if not is_time_valid:
         return False, msg_time, []
 
+    # ── Destruction: delegate to specialized FIFO ──
+    if log_type == "destruction" and giai_doan:
+        return allocate_destruction_fifo(dim_id, lo_name, int(new_sl), giai_doan, target_date, mau_day)
+
     # Lấy tất cả base_lots active của lô, sort FIFO theo ngày trồng (cũ nhất trước)
-    res_bl = supabase.table("base_lots").select("id, so_luong, so_luong_con_lai, ngay_trong") \
+    res_bl = supabase.table("base_lots").select("id, so_luong, ngay_trong") \
         .eq("dim_lo_id", dim_id).eq("is_deleted", False) \
         .eq("loai_trong", "Trồng mới") \
         .order("ngay_trong", desc=False).execute()
@@ -482,7 +579,7 @@ def allocate_fifo_quantity(farm_name, lo_name, new_sl, log_type, target_date, ac
         if quantity_left <= 0:
             break
         bid = batch["id"]
-        planted = int(batch.get("so_luong_con_lai") or batch.get("so_luong", 0))
+        planted = int(batch.get("so_luong", 0)) - get_current_season_destruction(bid, "Trước chích bắp")
 
         if log_type == "stage" and giai_doan == "Chích bắp":
             # Capacity = số cây trồng - chích bắp đã ghi cho đợt này
@@ -532,6 +629,201 @@ def allocate_fifo_quantity(farm_name, lo_name, new_sl, log_type, target_date, ac
         return False, f"❌ Yêu cầu {new_sl} nhưng tổng capacity của lô '{lo_name}' chỉ còn {total_cap}.", []
 
     return True, "", allocations
+
+
+def allocate_destruction_fifo(dim_lo_id, lo_name, quantity, giai_doan, ngay_xuat_huy, mau_day=None):
+    """
+    Phân bổ xuất hủy theo 3 chiến lược FIFO dựa trên giai đoạn.
+    - "Trước chích bắp": FIFO by ngay_trong, cap = planted - đã_chích - hủy_trước_chích
+    - "Trước cắt bắp": Record-level FIFO across chích records
+    - "Trước thu hoạch": Match mau_day → closest week → FIFO
+    """
+    # Lấy tất cả batches
+    res_bl = supabase.table("base_lots").select("id, so_luong, ngay_trong") \
+        .eq("dim_lo_id", dim_lo_id).eq("is_deleted", False) \
+        .eq("loai_trong", "Trồng mới") \
+        .order("ngay_trong", desc=False).execute()
+    
+    if not res_bl.data:
+        return False, f"❌ Lô {lo_name} chưa có đợt trồng nào.", []
+
+    # ━━━━ Strategy 1: Trước chích bắp ━━━━
+    if giai_doan == "Trước chích bắp":
+        quantity_left = quantity
+        allocations = []
+        for batch in res_bl.data:
+            if quantity_left <= 0:
+                break
+            bid = batch["id"]
+            # Cap = planted - đã_chích - hủy_trước_chích_vụ_HT
+            planted = int(batch.get("so_luong", 0))
+            chich_res = supabase.table("stage_logs").select("so_luong") \
+                .eq("base_lot_id", bid).eq("giai_doan", "Chích bắp").eq("is_deleted", False).execute()
+            da_chich = sum(int(r["so_luong"]) for r in chich_res.data) if chich_res.data else 0
+            huy_truoc_chich = get_current_season_destruction(bid, "Trước chích bắp")
+            cap = max(0, planted - da_chich - huy_truoc_chich)
+            if cap <= 0:
+                continue
+            alloc_qty = min(quantity_left, cap)
+            allocations.append({"dim_lo_id": dim_lo_id, "base_lot_id": bid, "so_luong": alloc_qty, "lot_id": lo_name})
+            quantity_left -= alloc_qty
+        if quantity_left > 0:
+            total_cap = sum(a["so_luong"] for a in allocations)
+            return False, f"❌ Số lượng xuất hủy vượt quá số cây khả dụng (còn {total_cap}).", []
+        return True, "", allocations
+
+    # ━━━━ Strategy 2: Trước cắt bắp ━━━━
+    elif giai_doan == "Trước cắt bắp":
+        # Record-level FIFO: gộp chích records từ mọi batch, sort by ngay_thuc_hien, tiebreak by ngay_trong
+        batch_map = {b["id"]: b for b in res_bl.data}
+        all_chich_records = []
+        for batch in res_bl.data:
+            bid = batch["id"]
+            chich_res = supabase.table("stage_logs").select("id, so_luong, ngay_thuc_hien") \
+                .eq("base_lot_id", bid).eq("giai_doan", "Chích bắp").eq("is_deleted", False).execute()
+            for r in (chich_res.data or []):
+                all_chich_records.append({
+                    "bid": bid,
+                    "ngay_trong": batch["ngay_trong"],
+                    "ngay_thuc_hien": r["ngay_thuc_hien"],
+                    "so_luong": int(r["so_luong"]),
+                })
+        if not all_chich_records:
+            return False, "❌ Không có đợt nào đã chích bắp để phân bổ.", []
+        
+        # Sort: ngay_thuc_hien ASC, tiebreak ngay_trong ASC
+        all_chich_records.sort(key=lambda x: (x["ngay_thuc_hien"], x["ngay_trong"]))
+        
+        # Calculate existing destruction "Trước cắt bắp" per batch
+        existing_dest = {}
+        for batch in res_bl.data:
+            bid = batch["id"]
+            dest_res = supabase.table("destruction_logs").select("so_luong") \
+                .eq("base_lot_id", bid).eq("giai_doan", "Trước cắt bắp").eq("is_deleted", False).execute()
+            existing_dest[bid] = sum(int(r["so_luong"]) for r in dest_res.data) if dest_res.data else 0
+        
+        # Calculate remaining capacity per batch: đã_chích - existing_dest_trước_cắt
+        batch_chich_total = {}
+        for r in all_chich_records:
+            batch_chich_total[r["bid"]] = batch_chich_total.get(r["bid"], 0) + r["so_luong"]
+        batch_remaining = {}
+        for bid, total in batch_chich_total.items():
+            batch_remaining[bid] = max(0, total - existing_dest.get(bid, 0))
+        
+        quantity_left = quantity
+        alloc_by_bid = {}
+        for rec in all_chich_records:
+            if quantity_left <= 0:
+                break
+            bid = rec["bid"]
+            if batch_remaining.get(bid, 0) <= 0:
+                continue
+            alloc_qty = min(quantity_left, rec["so_luong"], batch_remaining[bid])
+            alloc_by_bid[bid] = alloc_by_bid.get(bid, 0) + alloc_qty
+            batch_remaining[bid] -= alloc_qty
+            quantity_left -= alloc_qty
+        
+        if quantity_left > 0:
+            total_cap = sum(alloc_by_bid.values())
+            return False, f"❌ Số lượng xuất hủy vượt quá số cây đã chích (còn {total_cap}).", []
+        
+        allocations = [{"dim_lo_id": dim_lo_id, "base_lot_id": bid, "so_luong": qty, "lot_id": lo_name}
+                       for bid, qty in alloc_by_bid.items()]
+        return True, "", allocations
+
+    # ━━━━ Strategy 3: Trước thu hoạch ━━━━
+    elif giai_doan == "Trước thu hoạch":
+        if not mau_day:
+            return False, "❌ Vui lòng nhập màu dây cho giai đoạn Trước thu hoạch.", []
+        
+        # Get farm_id from dim_lo_id via dim_lo table
+        lo_res = supabase.table("dim_lo").select("farm_id").eq("lo_id", dim_lo_id).limit(1).execute()
+        if not lo_res.data:
+            return False, "❌ Không tìm thấy thông tin farm cho lô này.", []
+        farm_id = lo_res.data[0]["farm_id"]
+        
+        # Find all weeks with this color from ribbon_schedule
+        ribbon_res = supabase.table("ribbon_schedule").select("week_number, year") \
+            .eq("farm_id", farm_id).eq("color_name", mau_day).eq("is_deleted", False).execute()
+        if not ribbon_res.data:
+            return False, f"❌ Không tìm thấy tuần nào với màu dây '{mau_day}' trong ribbon_schedule.", []
+        
+        target_weeks = [(r["year"], r["week_number"]) for r in ribbon_res.data]
+        
+        # Find cắt bắp records matching those weeks
+        all_cat_records = []
+        for (yr, wk) in target_weeks:
+            cat_res = supabase.table("stage_logs").select("id, base_lot_id, ngay_thuc_hien, so_luong, tuan") \
+                .eq("dim_lo_id", dim_lo_id).eq("giai_doan", "Cắt bắp").eq("tuan", wk) \
+                .eq("is_deleted", False).execute()
+            if cat_res.data:
+                all_cat_records.extend(cat_res.data)
+        
+        if not all_cat_records:
+            return False, f"❌ Không tìm thấy record cắt bắp với màu dây '{mau_day}'.", []
+        
+        # Tính khoảng cách ngày, chọn tuần gần nhất
+        ngay_huy = pd.to_datetime(ngay_xuat_huy)
+        for r in all_cat_records:
+            r["distance"] = abs((pd.to_datetime(r["ngay_thuc_hien"]) - ngay_huy).days)
+        
+        min_dist = min(r["distance"] for r in all_cat_records)
+        # Tiebreaker equidistant: chọn tuần CŨ hơn
+        eligible = [r for r in all_cat_records if r["distance"] == min_dist]
+        if not eligible:
+            eligible = all_cat_records  # fallback
+        
+        # Lấy ngay_trong cho tiebreaker
+        batch_map = {b["id"]: b["ngay_trong"] for b in res_bl.data}
+        
+        # Sort eligible: ngay_thuc_hien ASC, ngay_trong ASC
+        eligible.sort(key=lambda r: (r["ngay_thuc_hien"], batch_map.get(r["base_lot_id"], "9999-12-31")))
+        
+        # Trừ existing destruction + harvest cùng batch
+        batch_cat_qty = {}
+        for r in eligible:
+            bid = r["base_lot_id"]
+            batch_cat_qty[bid] = batch_cat_qty.get(bid, 0) + int(r["so_luong"])
+        
+        batch_remaining = {}
+        for bid, cat_total in batch_cat_qty.items():
+            # Existing destruction "Trước thu hoạch" cùng batch
+            ex_dest = supabase.table("destruction_logs").select("so_luong") \
+                .eq("base_lot_id", bid).eq("giai_doan", "Trước thu hoạch") \
+                .eq("is_deleted", False).execute()
+            ex_dest_total = sum(int(r["so_luong"]) for r in ex_dest.data) if ex_dest.data else 0
+            # Existing harvest cùng batch
+            ex_har = supabase.table("harvest_logs").select("so_luong") \
+                .eq("base_lot_id", bid).eq("is_deleted", False).execute()
+            ex_har_total = sum(int(r["so_luong"]) for r in ex_har.data) if ex_har.data else 0
+            batch_remaining[bid] = max(0, cat_total - ex_dest_total - ex_har_total)
+        
+        total_available = sum(batch_remaining.values())
+        if total_available <= 0:
+            return False, f"❌ Không còn cây chờ thu hoạch với màu dây '{mau_day}'.", []
+        if quantity > total_available:
+            return False, f"❌ Số lượng xuất hủy ({quantity}) vượt quá số cây cắt bắp cùng màu dây ({total_available}).", []
+        
+        quantity_left = quantity
+        alloc_by_bid = {}
+        for r in eligible:
+            if quantity_left <= 0:
+                break
+            bid = r["base_lot_id"]
+            if batch_remaining.get(bid, 0) <= 0:
+                continue
+            alloc_qty = min(quantity_left, int(r["so_luong"]), batch_remaining[bid])
+            alloc_by_bid[bid] = alloc_by_bid.get(bid, 0) + alloc_qty
+            batch_remaining[bid] -= alloc_qty
+            quantity_left -= alloc_qty
+        
+        allocations = [{"dim_lo_id": dim_lo_id, "base_lot_id": bid, "so_luong": qty, "lot_id": lo_name}
+                       for bid, qty in alloc_by_bid.items()]
+        return True, "", allocations
+
+    # Fallback: giai_doan không xác định
+    else:
+        return False, f"❌ Giai đoạn xuất hủy không hợp lệ: '{giai_doan}'.", []
 
 
 def check_quantity_limit(farm_name, lot_id_str, new_sl, log_type, giai_doan=None, exclude_id=None):
@@ -755,7 +1047,6 @@ def edit_stage_log_dialog(editing_row, available_lots, c_team):
     gd_ops = ["Chích bắp"] if c_team == "Đội BVTV" else ["Cắt bắp"]
     def_lot = available_lots.index(editing_row["lot_id"]) if editing_row["lot_id"] in available_lots else 0
     def_gd = gd_ops.index(editing_row["giai_doan"]) if editing_row["giai_doan"] in gd_ops else 0
-    def_mau = str(editing_row.get("mau_day", ""))
     def_ngay = pd.to_datetime(editing_row["ngay_thuc_hien"]).date()
     def_sl = int(editing_row["so_luong"])
 
@@ -765,10 +1056,6 @@ def edit_stage_log_dialog(editing_row, available_lots, c_team):
             st.text_input("🏷️ Lứa (Mã hệ thống)", value=editing_row["lot_id"], disabled=True, key="dlg_lot_stg")
             lot_id = editing_row["lot_id"]
             giai_doan = st.radio("📌 Giai đoạn", options=gd_ops, index=def_gd, horizontal=True, key="dlg_gd_stg")
-            if giai_doan != "Chích bắp":
-                mau_day = st.text_input("🎨 Màu dây", value=def_mau, key="dlg_mau_stg", placeholder="VD: Đỏ, Xanh lá...")
-            else:
-                mau_day = ""
         with col_b:
             col_b1, col_b2 = st.columns([2, 1])
             with col_b1:
@@ -776,19 +1063,38 @@ def edit_stage_log_dialog(editing_row, available_lots, c_team):
             with col_b2:
                 st.text_input("📍 Tuần", value=str(ngay_th.isocalendar()[1]), disabled=True, key=f"dlg_w_stg_{ngay_th}")
             sl = st.number_input("🔢 Số lượng cây", min_value=0, step=100, value=def_sl, key="dlg_sl_stg")
+
+        # Ribbon color (only for Cắt bắp)
+        mau_day_color = None
+        if giai_doan != "Chích bắp":
+            farm_id = get_farm_id_from_name(editing_row["farm"])
+            iso = ngay_th.isocalendar()
+            existing_ribbon = lookup_ribbon(farm_id, iso[0], iso[1]) if farm_id else None
+            if existing_ribbon:
+                st.info(f"🎨 Tuần {iso[1]}: **{existing_ribbon}**")
+                mau_day_color = existing_ribbon
+            else:
+                mau_day_color = build_color_selectbox("dlg_stg")
         
         if st.button("✅ Cập nhật", key="btn_edit_stg", use_container_width=True, type="primary"):
             if sl <= 0: st.error("❌ Cần nhập số lượng.")
-            elif giai_doan != "Chích bắp" and not mau_day.strip(): st.error("❌ Phải nhập màu dây định danh lứa đối với Cắt bắp.")
+            elif giai_doan != "Chích bắp" and not mau_day_color: st.error("❌ Phải chọn màu dây cho Cắt bắp.")
             else:
-                mau_day_clean = mau_day.strip().capitalize() if mau_day.strip() else None
+                # Auto-create/validate ribbon
+                if giai_doan != "Chích bắp" and mau_day_color:
+                    farm_id = get_farm_id_from_name(editing_row["farm"])
+                    iso = ngay_th.isocalendar()
+                    _, err = get_or_create_ribbon(farm_id, iso[0], iso[1], mau_day_color)
+                    if err:
+                        st.error(err)
+                        st.stop()
                 is_valid, msg = check_quantity_limit(editing_row["farm"], lot_id, sl, "stage", giai_doan=giai_doan, exclude_id=editing_row["id"])
                 if not is_valid: st.error(msg)
                 else:
                     resolved_blid = resolve_base_lot_id(editing_row["dim_lo_id"], ngay_th.isoformat(), giai_doan)
                     data = {
                         "giai_doan": giai_doan, 
-                        "ngay_thuc_hien": ngay_th.isoformat(), "so_luong": sl, "mau_day": mau_day_clean,
+                        "ngay_thuc_hien": ngay_th.isoformat(), "so_luong": sl,
                         "tuan": ngay_th.isocalendar()[1],
                         "base_lot_id": resolved_blid
                     }
@@ -796,13 +1102,13 @@ def edit_stage_log_dialog(editing_row, available_lots, c_team):
                     st.session_state["toast"] = f"✅ Cập nhật tiến độ: {lot_id}!"
                     st.rerun()
 
+
 @dialog_decorator("✏️ Chỉnh sửa Báo cáo Xuất Hủy")
 def edit_destruction_log_dialog(editing_row, available_lots):
     gd_ops = DESTRUCTION_STAGE_OPTIONS
     def_lot = available_lots.index(editing_row["lot_id"]) if editing_row["lot_id"] in available_lots else 0
     def_gd = gd_ops.index(editing_row["giai_doan"]) if editing_row["giai_doan"] in gd_ops else 0
     def_ly_do = str(editing_row["ly_do"])
-    def_mau = str(editing_row.get("mau_day", "") or "")
     def_ngay = pd.to_datetime(editing_row["ngay_xuat_huy"]).date()
     def_sl = int(editing_row["so_luong"])
     
@@ -812,7 +1118,18 @@ def edit_destruction_log_dialog(editing_row, available_lots):
             st.text_input("🏷️ Lứa (Mã hệ thống)", value=editing_row["lot_id"], disabled=True, key="dlg_lot_des")
             lot_id = editing_row["lot_id"]
             gxh = st.selectbox("⏱️ Giai đoạn", options=gd_ops, index=def_gd, key="dlg_gxh_des")
-            mau_day = st.text_input("🎨 Màu dây", value=def_mau, key="dlg_mau_des", placeholder="VD: Đỏ, Xanh lá...")
+            
+            # Ribbon color — only visible for "Trước thu hoạch"
+            mau_day_color = None
+            if gxh == "Trước thu hoạch":
+                farm_id = get_farm_id_from_name(editing_row["farm"])
+                if farm_id:
+                    ribbons = get_all_ribbons_for_farm(farm_id)
+                    ribbon_opts = list({r["color_name"] for r in ribbons})
+                    if ribbon_opts:
+                        mau_day_color = st.selectbox("🎨 Màu dây", options=sorted(ribbon_opts), key="dlg_mau_des_sel")
+                    else:
+                        st.warning("⚠️ Farm chưa có màu dây nào trong ribbon_schedule.")
             
             predefined_reasons = ["Bệnh", "Đổ Ngã", "Khác"]
             matched_reason = "Khác"
@@ -843,20 +1160,19 @@ def edit_destruction_log_dialog(editing_row, available_lots):
             if sl <= 0: st.error("❌ Cần nhập số lượng.")
             elif not ly_do.strip(): st.error("❌ Cần ghi rõ lý do chi tiết.")
             else:
-                mau_day_clean = mau_day.strip().capitalize() if mau_day.strip() else None
                 is_valid, msg = check_quantity_limit(editing_row["farm"], lot_id, sl, "destruction", exclude_id=editing_row["id"])
                 if not is_valid: st.error(msg)
                 else:
                     resolved_blid = resolve_base_lot_id(editing_row["dim_lo_id"], ngay.isoformat(), gxh)
-                    data = {"ngay_xuat_huy": ngay.isoformat(), "giai_doan": gxh, "ly_do": ly_do.strip(), "so_luong": sl, "tuan": ngay.isocalendar()[1], "mau_day": mau_day_clean, "base_lot_id": resolved_blid}
+                    data = {"ngay_xuat_huy": ngay.isoformat(), "giai_doan": gxh, "ly_do": ly_do.strip(), "so_luong": sl, "tuan": ngay.isocalendar()[1], "base_lot_id": resolved_blid}
                     supabase.table("destruction_logs").update(data).eq("id", editing_row["id"]).execute()
                     st.session_state["toast"] = "✅ Đã cập nhật!"
                     st.rerun()
 
+
 @dialog_decorator("✏️ Chỉnh sửa Nhật ký Thu Hoạch")
 def edit_harvest_log_dialog(editing_row, available_lots):
     def_lot = available_lots.index(editing_row["lot_id"]) if editing_row["lot_id"] in available_lots else 0
-    def_mau = str(editing_row.get("mau_day", ""))
     
     hinh_thuc_opts = ["Bằng xe cày", "Bằng ròng rọc"]
     def_hinh_thuc = hinh_thuc_opts.index(editing_row.get("hinh_thuc_thu_hoach", "")) if editing_row.get("hinh_thuc_thu_hoach") in hinh_thuc_opts else 0
@@ -869,7 +1185,15 @@ def edit_harvest_log_dialog(editing_row, available_lots):
         with col_a:
             st.text_input("🏷️ Lứa (Mã hệ thống)", value=editing_row["lot_id"], disabled=True, key="dlg_lot_har")
             lot_id = editing_row["lot_id"]
-            mau_day = st.text_input("🎨 Màu dây", value=def_mau, key="dlg_mau_har", placeholder="VD: Đỏ, Xanh lá...")
+            # Ribbon color from schedule
+            farm_id = get_farm_id_from_name(editing_row["farm"])
+            ribbons = get_all_ribbons_for_farm(farm_id) if farm_id else []
+            ribbon_opts = sorted({r["color_name"] for r in ribbons})
+            if ribbon_opts:
+                mau_day_color = st.selectbox("🎨 Màu dây", options=ribbon_opts, key="dlg_mau_har_sel")
+            else:
+                st.warning("⚠️ Farm chưa có màu dây trong ribbon_schedule.")
+                mau_day_color = None
             hinh_thuc_thu_hoach = st.selectbox("🚜 Hình thức thu hoạch", options=hinh_thuc_opts, index=def_hinh_thuc, key="dlg_hinh_thuc_har")
         with col_b:
             col_b1, col_b2 = st.columns([2, 1])
@@ -880,16 +1204,14 @@ def edit_harvest_log_dialog(editing_row, available_lots):
             sl = st.number_input("🍌 Số lượng buồng", min_value=0, step=50, value=def_sl, key="dlg_sl_har")
 
         if st.button("✅ Cập nhật", key="btn_edit_har", use_container_width=True, type="primary"):
-            if not mau_day.strip(): st.error("❌ Cần nhập Màu dây.")
+            if not mau_day_color: st.error("❌ Cần chọn Màu dây.")
             elif sl <= 0: st.error("❌ Số lượng buồng phải > 0")
             else:
-                mau_day_clean = mau_day.strip().capitalize()
                 is_valid, msg = check_quantity_limit(editing_row["farm"], lot_id, sl, "harvest", exclude_id=editing_row["id"])
                 if not is_valid: st.error(msg)
                 else:
                     resolved_blid = resolve_base_lot_id(editing_row["dim_lo_id"], ngay.isoformat(), "Thu hoạch")
                     data = {
-                        "mau_day": mau_day_clean, 
                         "ngay_thu_hoach": ngay.isoformat(), "so_luong": sl, 
                         "hinh_thuc_thu_hoach": hinh_thuc_thu_hoach, "tuan": ngay.isocalendar()[1],
                         "base_lot_id": resolved_blid
@@ -897,6 +1219,7 @@ def edit_harvest_log_dialog(editing_row, available_lots):
                     supabase.table("harvest_logs").update(data).eq("id", editing_row["id"]).execute()
                     st.session_state["toast"] = f"✅ Lưu thu hoạch {lot_id} thành công!"
                     st.rerun()
+
 
 @dialog_decorator("✏️ Chỉnh sửa BSR")
 def edit_bsr_log_dialog(editing_row, available_lots):
@@ -940,7 +1263,7 @@ def edit_size_measure_dialog(editing_row, available_lots):
         with col_a:
             st.text_input("🏷️ Lứa (Mã hệ thống)", value=editing_row["lot_id"], disabled=True, key="dlg_sm_lot")
             lot_id = editing_row["lot_id"]
-            mau_day = st.text_input("🎨 Màu dây", value=def_mau, key="dlg_sm_mau", placeholder="VD: Đỏ, Xanh lá...")
+            mau_day_color = build_color_selectbox("dlg_sm", default_color=def_mau)
             lan_do = st.radio("📏 Lần đo", options=[1, 2], index=def_lan_do-1, horizontal=True, key="dlg_sm_lando")
         with col_b:
             col_b1, col_b2 = st.columns([2, 1])
@@ -956,18 +1279,25 @@ def edit_size_measure_dialog(editing_row, available_lots):
             sl = st.number_input("🔢 Số lượng buồng mẫu", min_value=0, step=10, value=def_sl, key="dlg_sm_sl")
 
         if st.button("✅ Cập nhật", key="btn_edit_sm", use_container_width=True, type="primary"):
-            if not mau_day.strip(): st.error("❌ Cần nhập màu dây")
+            if not mau_day_color: st.error("❌ Cần chọn màu dây")
             elif sl <= 0: st.error("❌ Số lượng buồng mẫu > 0")
             else:
-                mau_day_clean = mau_day.strip().capitalize()
+                # Auto-create/validate ribbon
+                farm_id = get_farm_id_from_name(editing_row["farm"])
+                iso = ngay.isocalendar()
+                _, err = get_or_create_ribbon(farm_id, iso[0], iso[1], mau_day_color)
+                if err:
+                    st.error(err)
+                    st.stop()
                 data = {
-                    "mau_day": mau_day_clean, "lan_do": lan_do,
+                    "mau_day": mau_day_color, "lan_do": lan_do,
                     "ngay_do": ngay.isoformat(), "so_luong_mau": sl, "tuan": ngay.isocalendar()[1],
                     "hang_kiem_tra": hang_kiem_tra.strip(), "size_cal": size_cal
                 }
                 supabase.table("size_measure_logs").update(data).eq("id", editing_row["id"]).execute()
                 st.session_state["toast"] = f"✅ Sửa đo size {lot_id} thành công!"
                 st.rerun()
+
 
 @dialog_decorator("✏️ Chỉnh sửa Kiểm kê cây")
 def edit_tree_inventory_dialog(editing_row, available_lots):
@@ -1291,9 +1621,9 @@ def generate_chich_bap_excel(df_lots, df_stg) -> bytes:
     return output.getvalue()
 
 
-def generate_cut_bap_excel(df_lots, df_stg, df_des) -> bytes:
+def generate_cut_bap_excel(df_lots, df_stg) -> bytes:
     """Tạo file Excel báo cáo Cắt bắp theo tuần, chia sheet theo năm.
-    Mỗi sheet = 1 năm. Mỗi tuần = 2 cột: CẮT BẮP + XUẤT HỦY."""
+    Mỗi sheet = 1 năm. Mỗi tuần = 1 cột (số bắp đã cắt thực tế)."""
     # Styles
     thin_border = Border(
         left=Side(style='thin'), right=Side(style='thin'),
@@ -1301,7 +1631,6 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des) -> bytes:
     )
     header_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
     cut_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-    des_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
     total_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
     center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
@@ -1315,136 +1644,137 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des) -> bytes:
         hex_color = COLOR_MAP.get(base)
         return PatternFill(start_color=hex_color, end_color=hex_color, fill_type="solid") if hex_color else None
 
-    # Get lots
-    lot_names = sorted(df_lots["lo"].unique().tolist()) if not df_lots.empty else []
-    lot_id_map = {}
-    if not df_lots.empty:
-        for _, row in df_lots.iterrows():
-            lo = row["lo"]
-            if lo not in lot_id_map: lot_id_map[lo] = []
-            lot_id_map[lo].append(row["lot_id"])
-
-    # Filter data
+    # Filter Cắt bắp from stage_logs
     df_cut = df_stg[df_stg["giai_doan"] == "Cắt bắp"].copy() if not df_stg.empty and "giai_doan" in df_stg.columns else pd.DataFrame()
 
     wb = Workbook()
 
-    # Determine years from ngay_thuc_hien
-    all_years = set()
-    if not df_cut.empty and "ngay_thuc_hien" in df_cut.columns:
-        df_cut["ngay_thuc_hien"] = pd.to_datetime(df_cut["ngay_thuc_hien"])
-        df_cut["_year"] = df_cut["ngay_thuc_hien"].dt.year
-        all_years.update(df_cut["_year"].dropna().unique())
-    if not df_des.empty and "ngay_thuc_hien" in df_des.columns:
-        df_des = df_des.copy()
-        df_des["ngay_thuc_hien"] = pd.to_datetime(df_des["ngay_thuc_hien"])
-        df_des["_year"] = df_des["ngay_thuc_hien"].dt.year
-        all_years.update(df_des["_year"].dropna().unique())
-
-    if not all_years:
+    if df_cut.empty:
         ws = wb.active; ws.title = "Báo cáo Cắt bắp"
         ws.cell(row=1, column=1, value="Chưa có dữ liệu Cắt bắp.")
         output = io.BytesIO(); wb.save(output); output.seek(0)
         return output.getvalue()
 
-    years = sorted(all_years)
+    # Parse dates, cast types safely
+    df_cut["ngay_thuc_hien"] = pd.to_datetime(df_cut["ngay_thuc_hien"])
+    df_cut["_year"] = df_cut["ngay_thuc_hien"].dt.year.astype(int)
+    df_cut["tuan"] = pd.to_numeric(df_cut["tuan"], errors="coerce").fillna(
+        df_cut["ngay_thuc_hien"].dt.isocalendar().week
+    ).astype(int)
+
+    # Lot names: union from base_lots AND stage_logs (tránh miss lot chỉ có trong 1 nguồn)
+    lot_names_set = set()
+    if not df_lots.empty and "lo" in df_lots.columns:
+        lot_names_set.update(df_lots["lo"].dropna().unique())
+    if "lo" in df_cut.columns:
+        lot_names_set.update(df_cut["lo"].dropna().unique())
+    lot_names = sorted(lot_names_set)
+
+    # Resolve farm_id for ribbon lookup
+    _excel_farm_id = None
+    if not df_lots.empty and "farm" in df_lots.columns:
+        _farm_name = df_lots["farm"].dropna().iloc[0] if not df_lots["farm"].dropna().empty else None
+        if _farm_name:
+            _excel_farm_id = get_farm_id_from_name(_farm_name)
+    if _excel_farm_id is None and "farm" in df_cut.columns:
+        _farm_name = df_cut["farm"].dropna().iloc[0] if not df_cut["farm"].dropna().empty else None
+        if _farm_name:
+            _excel_farm_id = get_farm_id_from_name(_farm_name)
+
+    years = sorted(df_cut["_year"].unique())
     wb.remove(wb.active)
 
     for year in years:
-        ws = wb.create_sheet(title=str(int(year)))
-        df_cut_yr = df_cut[df_cut["_year"] == year] if not df_cut.empty and "_year" in df_cut.columns else pd.DataFrame()
-        df_des_yr = df_des[df_des["_year"] == year] if not df_des.empty and "_year" in df_des.columns else pd.DataFrame()
+        ws = wb.create_sheet(title=str(year))
+        df_cut_yr = df_cut[df_cut["_year"] == year]
 
-        # Week-color map for this year
+        # Week-color map from ribbon_schedule + data
         week_color = {}
-        if not df_cut_yr.empty and "tuan" in df_cut_yr.columns and "mau_day" in df_cut_yr.columns:
-            for tuan_val in df_cut_yr["tuan"].dropna().unique():
-                wn = int(tuan_val)
-                colors = df_cut_yr[df_cut_yr["tuan"] == tuan_val]["mau_day"].dropna().unique()
-                week_color[wn] = str(colors[0]) if len(colors) > 0 else ""
-        if not df_des_yr.empty and "tuan" in df_des_yr.columns:
-            for tuan_val in df_des_yr["tuan"].dropna().unique():
-                wn = int(tuan_val)
-                if wn not in week_color:
-                    colors = df_des_yr[df_des_yr["tuan"] == tuan_val]["mau_day"].dropna().unique() if "mau_day" in df_des_yr.columns else []
-                    week_color[wn] = str(colors[0]) if len(colors) > 0 else ""
+        if _excel_farm_id:
+            _rb_res = supabase.table("ribbon_schedule").select("week_number, color_name") \
+                .eq("farm_id", _excel_farm_id).eq("year", int(year)).eq("is_deleted", False).execute()
+            for _rb in (_rb_res.data or []):
+                week_color[int(_rb["week_number"])] = _rb["color_name"]
+        for tuan_val in df_cut_yr["tuan"].dropna().unique():
+            wn = int(tuan_val)
+            if wn not in week_color:
+                week_color[wn] = ""
 
         weeks = sorted(week_color.keys())
         if not weeks:
-            ws.cell(row=1, column=1, value=f"Chưa có dữ liệu Cắt bắp năm {int(year)}.")
+            ws.cell(row=1, column=1, value=f"Chưa có dữ liệu Cắt bắp năm {year}.")
             continue
 
-        # === HEADER ===
+        # === HEADER (row 1: Tuần, row 2: Màu dây) ===
         ws.cell(row=1, column=1, value="Lô").font = Font(bold=True, size=10)
         ws.cell(row=1, column=1).fill = header_fill
         ws.cell(row=1, column=1).border = thin_border
         ws.cell(row=1, column=1).alignment = center_align
-        ws.merge_cells(start_row=1, start_column=1, end_row=3, end_column=1)
+        ws.merge_cells(start_row=1, start_column=1, end_row=2, end_column=1)
 
         col_offset = 2
         week_col_map = {}
         for week in weeks:
-            cut_col, des_col = col_offset, col_offset + 1
-            week_col_map[week] = {"cut_col": cut_col, "des_col": des_col}
+            week_col_map[week] = col_offset
             color_name = week_color.get(week, "")
             color_fill_cell = get_mau_day_fill(color_name)
 
-            ws.merge_cells(start_row=1, start_column=cut_col, end_row=1, end_column=des_col)
-            c = ws.cell(row=1, column=cut_col, value=f"Tuần {week}")
+            c = ws.cell(row=1, column=col_offset, value=f"Tuần {week}")
             c.font = Font(bold=True, size=11); c.fill = header_fill
             c.alignment = center_align; c.border = thin_border
 
-            c1 = ws.cell(row=2, column=cut_col, value="CẮT BẮP")
-            c1.font = Font(bold=True, color="006100"); c1.fill = cut_fill
-            c1.alignment = center_align; c1.border = thin_border
-            c2 = ws.cell(row=2, column=des_col, value="XUẤT HỦY")
-            c2.font = Font(bold=True, color="9C0006"); c2.fill = des_fill
+            c2 = ws.cell(row=2, column=col_offset, value=color_name if color_name else "")
+            c2.font = Font(bold=True, size=9)
+            c2.fill = color_fill_cell if color_fill_cell else cut_fill
             c2.alignment = center_align; c2.border = thin_border
+            col_offset += 1
 
-            c3 = ws.cell(row=3, column=cut_col, value=color_name)
-            c3.font = Font(bold=True, size=9); c3.fill = color_fill_cell if color_fill_cell else cut_fill
-            c3.alignment = center_align; c3.border = thin_border
-            c4 = ws.cell(row=3, column=des_col, value=color_name)
-            c4.font = Font(bold=True, size=9); c4.fill = color_fill_cell if color_fill_cell else des_fill
-            c4.alignment = center_align; c4.border = thin_border
-            col_offset += 2
+        # Lũy kế column
+        grand_col = col_offset
+        c_gt = ws.cell(row=1, column=grand_col, value="Lũy kế")
+        c_gt.font = Font(bold=True, size=11); c_gt.fill = total_fill
+        c_gt.alignment = center_align; c_gt.border = thin_border
+        ws.cell(row=2, column=grand_col).fill = total_fill
+        ws.cell(row=2, column=grand_col).border = thin_border
+        col_offset += 1
 
-        for r in range(1, 4):
+        for r in range(1, 3):
             for ci in range(1, col_offset):
                 ws.cell(row=r, column=ci).border = thin_border
 
         # === DATA ===
-        data_start_row = 4
+        data_start_row = 3
         for li, lo_name in enumerate(lot_names):
             row_idx = data_start_row + li
             c = ws.cell(row=row_idx, column=1, value=lo_name)
             c.font = Font(bold=True); c.border = thin_border; c.alignment = center_align
-            valid_ids = lot_id_map.get(lo_name, [])
+            lot_total = 0
             for week in weeks:
-                wm = week_col_map[week]
-                val_cut = int(df_cut_yr[df_cut_yr["lot_id"].isin(valid_ids) & (df_cut_yr["tuan"] == week)]["so_luong"].sum()) if not df_cut_yr.empty else 0
-                cell = ws.cell(row=row_idx, column=wm["cut_col"], value=val_cut if val_cut > 0 else "")
+                col_idx = week_col_map[week]
+                val = int(df_cut_yr[(df_cut_yr["lo"] == lo_name) & (df_cut_yr["tuan"] == week)]["so_luong"].sum())
+                cell = ws.cell(row=row_idx, column=col_idx, value=val if val > 0 else "")
                 cell.border = thin_border; cell.alignment = center_align
-                val_des = int(df_des_yr[df_des_yr["lot_id"].isin(valid_ids) & (df_des_yr["tuan"] == week)]["so_luong"].sum()) if not df_des_yr.empty else 0
-                cell = ws.cell(row=row_idx, column=wm["des_col"], value=val_des if val_des > 0 else "")
-                cell.border = thin_border; cell.alignment = center_align
+                lot_total += val
+            # Lũy kế
+            c_gt_val = ws.cell(row=row_idx, column=grand_col, value=lot_total if lot_total > 0 else "")
+            c_gt_val.font = Font(bold=True); c_gt_val.fill = PatternFill(start_color="FFF3E0", end_color="FFF3E0", fill_type="solid")
+            c_gt_val.border = thin_border; c_gt_val.alignment = center_align
 
-        # === TOTAL ===
+        # === TOTAL ROW ===
         total_row = data_start_row + len(lot_names)
         c = ws.cell(row=total_row, column=1, value="Tổng")
         c.font = Font(bold=True, size=11); c.fill = total_fill
         c.border = thin_border; c.alignment = center_align
-        for week in weeks:
-            wm = week_col_map[week]
-            for col_idx in [wm["cut_col"], wm["des_col"]]:
-                total = sum(int(ws.cell(row=r, column=col_idx).value) for r in range(data_start_row, total_row) if isinstance(ws.cell(row=r, column=col_idx).value, (int, float)))
-                c = ws.cell(row=total_row, column=col_idx, value=total if total > 0 else "")
-                c.font = Font(bold=True); c.fill = total_fill
-                c.border = thin_border; c.alignment = center_align
+        for ci in range(2, col_offset):
+            col_sum = sum(int(ws.cell(row=r, column=ci).value) for r in range(data_start_row, total_row) if isinstance(ws.cell(row=r, column=ci).value, (int, float)))
+            c_tot = ws.cell(row=total_row, column=ci, value=col_sum if col_sum > 0 else "")
+            c_tot.font = Font(bold=True); c_tot.fill = total_fill
+            c_tot.border = thin_border; c_tot.alignment = center_align
 
         ws.column_dimensions[get_column_letter(1)].width = 8
         for ci in range(2, col_offset):
             ws.column_dimensions[get_column_letter(ci)].width = 12
+        ws.freeze_panes = "B3"
 
     output = io.BytesIO(); wb.save(output); output.seek(0)
     return output.getvalue()
@@ -1466,13 +1796,15 @@ def generate_planting_excel(df_lots, df_seasons):
         output = io.BytesIO(); wb.save(output); output.seek(0)
         return output.getvalue()
 
-    df_plot = df_lots[['ngay_trong', 'farm', 'lo', 'so_luong', 'lot_id']].copy()
+    df_plot = df_lots[['ngay_trong', 'farm', 'lo', 'so_luong']].copy()
     df_plot.dropna(subset=['ngay_trong'], inplace=True)
     df_plot['ngay_trong'] = pd.to_datetime(df_plot['ngay_trong'])
     df_plot.sort_values(by='ngay_trong', inplace=True)
 
-    # Map loai_trong
-    if not df_seasons.empty and 'loai_trong' in df_seasons.columns and 'lo' in df_seasons.columns:
+    # loai_trong already available in base_lots
+    if 'loai_trong' in df_lots.columns:
+        df_plot['loai_trong'] = df_lots['loai_trong']
+    elif not df_seasons.empty and 'loai_trong' in df_seasons.columns and 'lo' in df_seasons.columns:
         seasons_map = df_seasons.drop_duplicates(subset=['farm', 'lo'])[['farm', 'lo', 'loai_trong']]
         df_plot = pd.merge(df_plot, seasons_map, on=['farm', 'lo'], how='left')
     else:
@@ -1627,8 +1959,7 @@ def render_global_data_tab(c_farm):
                 sel_cat = st.radio("Chọn Farm", available_farms, key="pop_farm_cat", horizontal=True)
                 fl = _filter_by_farm(df_lots_all, sel_cat)
                 fs = _filter_by_farm(df_stg_all, sel_cat)
-                fd = _filter_by_farm(df_des_all, sel_cat)
-                cut_excel = generate_cut_bap_excel(fl, fs, fd)
+                cut_excel = generate_cut_bap_excel(fl, fs)
                 fn = f"Bao_cao_cat_bap_{sel_cat}_{date.today().strftime('%Y%m%d')}.xlsx"
                 st.download_button("⬇️ Tải về", data=cut_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
@@ -1649,7 +1980,7 @@ def render_global_data_tab(c_farm):
             st.markdown(href, unsafe_allow_html=True)
 
         with col_t4:
-            cut_excel = generate_cut_bap_excel(df_lots_all, df_stg_all, df_des_all)
+            cut_excel = generate_cut_bap_excel(df_lots_all, df_stg_all)
             fn = f"Bao_cao_cat_bap_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx"
             href = _gen_dl_link(cut_excel, fn, "btn-cat", "Báo cáo Cắt bắp")
             st.markdown(href, unsafe_allow_html=True)
@@ -3157,19 +3488,56 @@ def render_global_data_tab(c_farm):
         # Đảm bảo tổng = 1.0 (phòng floating point)
         pdf_weights /= pdf_weights.sum()
         
+        # ─── Pre-compute: micro-PDF weights cho Mốc ②③ ───
+        # Mỗi điểm chích/cắt bắp spread ±7d Normal Distribution (σ=3)
+        micro_offsets = np.arange(-MICRO_WINDOW_HALF, MICRO_WINDOW_HALF + 1)  # [-7..+7]
+        micro_weights = scipy_norm.pdf(micro_offsets, loc=0, scale=MICRO_SIGMA)
+        micro_weights /= micro_weights.sum()  # normalize tổng = 1.0
+        
+        # ─── Pre-compute: ribbon lookup for resolving mau_day from tuan ───
+        _forecast_farm_id = get_farm_id_from_name(c_farm)
+        _ribbon_lookup = {}  # {(year, week_number): color_name}
+        if _forecast_farm_id:
+            _ribbon_res = supabase.table("ribbon_schedule").select("year, week_number, color_name") \
+                .eq("farm_id", _forecast_farm_id).eq("is_deleted", False).execute()
+            for _rb in (_ribbon_res.data or []):
+                _ribbon_lookup[(_rb["year"], _rb["week_number"])] = _rb["color_name"]
+        
+        def _resolve_ribbon_color(row):
+            """Resolve mau_day from ribbon_schedule using tuan and date year."""
+            tuan = row.get("tuan")
+            if not tuan or not pd.notna(tuan):
+                return None
+            tuan = int(tuan)
+            # Try to derive year from the date column
+            for date_col in ["ngay_xuat_huy", "ngay_thuc_hien", "ngay_thu_hoach"]:
+                d = row.get(date_col)
+                if d and pd.notna(d):
+                    yr = pd.to_datetime(d, errors="coerce").year
+                    color = _ribbon_lookup.get((yr, tuan))
+                    if color:
+                        return color
+            return None
+        
         # ─── Pre-compute: xuất hủy & cắt bắp & thu hoạch per (base_lot_id) ───
-        # Destruction: group by base_lot_id (trừ trực tiếp) và dim_lo_id (phân bổ tỉ lệ)
-        des_by_base_lot = {}  # {base_lot_id: total_destroyed}
-        des_by_lo_only = {}   # {dim_lo_id: total_destroyed} — chỉ records thiếu base_lot_id
+        # Giữ raw destruction records để match vào generation per-lot (closest midpoint)
+        # Tách theo giai_doan: mỗi giai đoạn chỉ ảnh hưởng 1 mốc dự báo
+        des_records_direct = []  # [(blid, giai_doan, ngay, qty, mau_day), ...]
+        # Proportional: records thiếu base_lot_id, tách theo (dim_lo_id, giai_doan)
+        des_lo_by_stage = {}  # {(dim_lo_id, giai_doan): total_qty}
         if not df_des_all.empty:
             for _, d_row in df_des_all.iterrows():
                 blid = d_row.get("base_lot_id")
                 dlid = d_row.get("dim_lo_id")
+                gd = d_row.get("giai_doan", "")
+                ngay_h = pd.to_datetime(d_row.get("ngay_xuat_huy"), errors="coerce")
                 qty = int(d_row.get("so_luong", 0)) if pd.notna(d_row.get("so_luong")) else 0
+                md = _resolve_ribbon_color(d_row)
                 if pd.notna(blid):
-                    des_by_base_lot[blid] = des_by_base_lot.get(blid, 0) + qty
+                    des_records_direct.append((blid, gd, ngay_h, qty, md))
                 elif pd.notna(dlid):
-                    des_by_lo_only[dlid] = des_by_lo_only.get(dlid, 0) + qty
+                    key = (dlid, gd)
+                    des_lo_by_stage[key] = des_lo_by_stage.get(key, 0) + qty
         
         # Pre-compute tổng cây trồng mới theo dim_lo_id (cho phân bổ tỉ lệ)
         lot_trees_by_lo = {}  # {dim_lo_id: total_trees_trong_moi}
@@ -3180,8 +3548,8 @@ def render_global_data_tab(c_farm):
                 if pd.notna(dlid):
                     lot_trees_by_lo[dlid] = lot_trees_by_lo.get(dlid, 0) + qty
         
-        # Cắt bắp: giữ raw records (base_lot_id, ngày, qty) để match theo generation
-        cat_bap_records = []  # [(base_lot_id, ngay, so_luong), ...]
+        # Cắt bắp: giữ raw records (base_lot_id, ngày, qty, mau_day) để match theo generation
+        cat_bap_records = []  # [(base_lot_id, ngay, so_luong, mau_day), ...]
         if not df_stg_all.empty:
             df_cat = df_stg_all[df_stg_all["giai_doan"] == "Cắt bắp"]
             if not df_cat.empty:
@@ -3189,8 +3557,9 @@ def render_global_data_tab(c_farm):
                     blid = s_row.get("base_lot_id")
                     ngay = pd.to_datetime(s_row.get("ngay_thuc_hien"), errors="coerce")
                     qty = int(s_row.get("so_luong", 0)) if pd.notna(s_row.get("so_luong")) else 0
+                    md = _resolve_ribbon_color(s_row)
                     if pd.notna(blid) and pd.notna(ngay):
-                        cat_bap_records.append((blid, ngay, qty))
+                        cat_bap_records.append((blid, ngay, qty, md))
         
         # Chích bắp: giữ raw records (base_lot_id, ngày, qty) để match theo generation
         chich_bap_records = []  # [(base_lot_id, ngay, so_luong), ...]
@@ -3232,20 +3601,6 @@ def render_global_data_tab(c_farm):
             
             ngay_trong = pd.to_datetime(ngay_trong_raw)
             
-            # ── Mốc ①: Dự báo từ Trồng (trừ xuất hủy thực tế) ──
-            # Xuất hủy trực tiếp (có base_lot_id)
-            direct_des = des_by_base_lot.get(base_lot_id, 0)
-            # Xuất hủy phân bổ tỉ lệ (chỉ dim_lo_id, không có base_lot_id)
-            proportional_des = 0
-            if pd.notna(dim_lo_id) and dim_lo_id in des_by_lo_only:
-                total_lo_trees = lot_trees_by_lo.get(dim_lo_id, so_luong)
-                if total_lo_trees > 0:
-                    lot_ratio = so_luong / total_lo_trees
-                    proportional_des = int(round(des_by_lo_only[dim_lo_id] * lot_ratio))
-            total_des = direct_des + proportional_des
-            so_luong_sau_huy = max(so_luong - total_des, 0)
-            so_thu_after_loss = so_luong_sau_huy * (1 - LOSS_RATE)  # Trừ hao hụt ước tính
-            
             # ── Pre-compute midpoints cho tất cả generations ──
             all_midpoints = []
             mp = ngay_trong + timedelta(days=F0_DAYS_TO_THU)
@@ -3253,16 +3608,67 @@ def render_global_data_tab(c_farm):
                 all_midpoints.append(mp)
                 mp = mp + timedelta(days=FN_CYCLE_DAYS)
             
-            # ── Match cắt bắp records vào generation gần nhất — giữ daily detail ──
+            # ── Match destruction records vào generation (closest midpoint) ──
+            # Tách theo giai_doan → mỗi giai đoạn chỉ ảnh hưởng 1 mốc dự báo
+            des_gen_chich = {}   # {gen: qty} — "Trước chích bắp" → Mốc ①
+            des_gen_cat = {}     # {gen: qty} — "Trước cắt bắp" → Mốc ②
+            des_gen_thu = {}     # {gen: {mau_day: qty}} — "Trước thu hoạch" → Mốc ③
+            des_gen_thu_total = {}  # {gen: total_qty} — tổng hủy TH per gen (cho fallback)
+            for d_blid, d_gd, d_ngay, d_qty, d_md in des_records_direct:
+                if d_blid != base_lot_id or pd.isna(d_ngay):
+                    continue
+                closest_gen = min(range(len(all_midpoints)),
+                                  key=lambda g: abs((all_midpoints[g] - d_ngay).days))
+                if d_gd == "Trước chích bắp":
+                    des_gen_chich[closest_gen] = des_gen_chich.get(closest_gen, 0) + d_qty
+                elif d_gd == "Trước cắt bắp":
+                    des_gen_cat[closest_gen] = des_gen_cat.get(closest_gen, 0) + d_qty
+                elif d_gd == "Trước thu hoạch":
+                    des_gen_thu.setdefault(closest_gen, {})
+                    if d_md:
+                        des_gen_thu[closest_gen][d_md] = des_gen_thu[closest_gen].get(d_md, 0) + d_qty
+                    else:
+                        des_gen_thu[closest_gen]["__no_md__"] = des_gen_thu[closest_gen].get("__no_md__", 0) + d_qty
+                    des_gen_thu_total[closest_gen] = des_gen_thu_total.get(closest_gen, 0) + d_qty
+            
+            # Proportional allocation per giai_doan (records thiếu base_lot_id)
+            lot_ratio_prop = 0
+            if pd.notna(dim_lo_id):
+                total_lo_trees = lot_trees_by_lo.get(dim_lo_id, so_luong)
+                lot_ratio_prop = so_luong / total_lo_trees if total_lo_trees > 0 else 0
+            for (dlid, gd_key), gd_qty in des_lo_by_stage.items():
+                if dlid != dim_lo_id or not pd.notna(dim_lo_id):
+                    continue
+                prop_qty = int(round(gd_qty * lot_ratio_prop))
+                if prop_qty <= 0:
+                    continue
+                # Phân bổ tỉ lệ vào gen 0 (F0) — proportional records thiếu ngày nên mặc định F0
+                if gd_key == "Trước chích bắp":
+                    des_gen_chich[0] = des_gen_chich.get(0, 0) + prop_qty
+                elif gd_key == "Trước cắt bắp":
+                    des_gen_cat[0] = des_gen_cat.get(0, 0) + prop_qty
+                elif gd_key == "Trước thu hoạch":
+                    des_gen_thu_total[0] = des_gen_thu_total.get(0, 0) + prop_qty
+                    des_gen_thu.setdefault(0, {})
+                    des_gen_thu[0]["__no_md__"] = des_gen_thu[0].get("__no_md__", 0) + prop_qty
+            
+            # Tổng destruction (tất cả giai đoạn, tất cả gen) — cho UI info
+            total_des_all = sum(d_qty for d_blid, _, _, d_qty, _ in des_records_direct if d_blid == base_lot_id)
+            if pd.notna(dim_lo_id):
+                for (dlid, _), gd_qty in des_lo_by_stage.items():
+                    if dlid == dim_lo_id:
+                        total_des_all += int(round(gd_qty * lot_ratio_prop))
+            
+            # ── Match cắt bắp records vào generation gần nhất — giữ daily detail + mau_day ──
             cat_bap_by_gen = {}       # {gen_index: total_qty}
-            cat_daily_by_gen = {}     # {gen_index: [(ngay, qty), ...]}
-            for blid, ngay, qty in cat_bap_records:
+            cat_daily_by_gen = {}     # {gen_index: [(ngay, qty, mau_day), ...]}
+            for blid, ngay, qty, md in cat_bap_records:
                 if blid != base_lot_id:
                     continue
                 closest_gen = min(range(len(all_midpoints)),
                                   key=lambda g: abs((all_midpoints[g] - ngay).days))
                 cat_bap_by_gen[closest_gen] = cat_bap_by_gen.get(closest_gen, 0) + qty
-                cat_daily_by_gen.setdefault(closest_gen, []).append((ngay, qty))
+                cat_daily_by_gen.setdefault(closest_gen, []).append((ngay, qty, md))
             
             # ── Match chích bắp records vào generation gần nhất — giữ daily detail ──
             chich_bap_by_gen = {}     # {gen_index: total_qty}
@@ -3279,6 +3685,11 @@ def render_global_data_tab(c_farm):
             for gen in range(FORECAST_GENERATIONS):
                 vu_label = f"F{gen}"
                 lot_gen_midpoints[(base_lot_id, gen)] = harvest_midpoint
+                
+                # ── Mốc ①: Dự báo từ Trồng (trừ chỉ 'Trước chích bắp' per gen) ──
+                des_chich_gen = des_gen_chich.get(gen, 0)
+                so_luong_sau_huy = max(so_luong - des_chich_gen, 0)
+                so_thu_after_loss = so_luong_sau_huy * (1 - LOSS_RATE)
                 
                 # ── Mốc ② (Chích bắp) & Mốc ③ (Cắt bắp) cho ĐÚNG generation này ──
                 so_chich_bap_gen = chich_bap_by_gen.get(gen, None)  # None = chưa chích bắp cho vụ này
@@ -3320,7 +3731,7 @@ def render_global_data_tab(c_farm):
                         "thang": actual_date.strftime("%m/%Y"),
                         "year": actual_date.year,
                         "so_luong_trong": so_luong,
-                        "so_xuat_huy": total_des,
+                        "so_xuat_huy": total_des_all,
                         "daily_qty": daily_qty,
                         "daily_qty_chich": daily_qty_chich,
                         "daily_qty_cat": daily_qty_cat,
@@ -3330,47 +3741,196 @@ def render_global_data_tab(c_farm):
                 
                 harvest_midpoint = harvest_midpoint + timedelta(days=FN_CYCLE_DAYS)
             
-            # ── Shift-based Mốc ②③: dùng data chích/cắt bắp thực tế ──
-            # Ngưỡng phase dựa trên tổng cây trồng ban đầu
-            threshold_boi = so_luong * target_boi
-            threshold_boi_ro = so_luong * (target_boi + target_ro)
-            
-            def _build_shift_rows(daily_by_gen, days_shift, col_name):
-                """Tạo shift rows cho chích hoặc cắt bắp."""
+            def _build_shift_rows(daily_by_gen, days_shift, col_name, des_by_gen_total=None, des_by_gen_mau_day=None):
+                """Tạo shift rows cho chích hoặc cắt bắp — Micro-PDF approach.
+                
+                Mỗi record → shift +days_shift → spread ±7d Normal Distribution
+                → gộp tất cả mini-PDFs → xác định phase bằng diện tích tích lũy 10/80/10
+                với boundary-day splitting để đảm bảo tỷ lệ chính xác.
+                
+                des_by_gen_total: {gen: qty} — Aggregate Ratio (Mốc ②)
+                des_by_gen_mau_day: {gen: {mau_day: qty}} — Pro-rata mau_day (Mốc ③)
+                """
                 rows = []
                 for gen_idx in range(FORECAST_GENERATIONS):
                     records = sorted(daily_by_gen.get(gen_idx, []), key=lambda x: x[0])
                     if not records:
                         continue
+                    
+                    # ── Destruction deduction (GIỮ NGUYÊN) ──
+                    # Pro-rata mau_day: trừ destruction từ đúng records cùng mau_day
+                    if des_by_gen_mau_day is not None:
+                        des_md_map = des_by_gen_mau_day.get(gen_idx, {})
+                        des_total_gen = des_gen_thu_total.get(gen_idx, 0)
+                        des_no_md = des_md_map.get("__no_md__", 0)
+                        # Tính tổng qty per mau_day cho cắt bắp
+                        cat_by_md = {}  # {mau_day: total_cat_qty}
+                        total_qty_gen = 0
+                        for rec in records:
+                            r_md = rec[2] if len(rec) > 2 else None
+                            r_qty = rec[1]
+                            total_qty_gen += r_qty
+                            if r_md:
+                                cat_by_md[r_md] = cat_by_md.get(r_md, 0) + r_qty
+                        
+                        # Tính adjusted qty per record
+                        adjusted_records = []
+                        for rec in records:
+                            ngay_src = rec[0]
+                            qty = rec[1]
+                            r_md = rec[2] if len(rec) > 2 else None
+                            
+                            if r_md and r_md in des_md_map:
+                                # Pro-rata: trừ destruction cùng mau_day
+                                total_cat_md = cat_by_md.get(r_md, qty)
+                                if total_cat_md > 0:
+                                    ratio_md = qty / total_cat_md
+                                    des_this = int(round(des_md_map[r_md] * ratio_md))
+                                else:
+                                    des_this = 0
+                                qty = max(0, qty - des_this)
+                            elif r_md is None and des_no_md > 0 and total_qty_gen > 0:
+                                # Fallback Aggregate Ratio cho records thiếu mau_day
+                                ratio_agg = max(0, 1 - des_no_md / total_qty_gen)
+                                qty = max(0, int(round(qty * ratio_agg)))
+                            
+                            adjusted_records.append((ngay_src, qty))
+                    # Aggregate Ratio: nhân đều tỷ lệ cho tất cả records
+                    elif des_by_gen_total is not None:
+                        des_qty = des_by_gen_total.get(gen_idx, 0)
+                        total_qty_gen = sum(r[1] for r in records)
+                        ratio = max(0, 1 - des_qty / total_qty_gen) if total_qty_gen > 0 else 1
+                        adjusted_records = [(r[0], max(0, int(round(r[1] * ratio)))) for r in records]
+                    else:
+                        adjusted_records = [(r[0], r[1]) for r in records]
+                    
+                    # ── Bước 1: Spread ±7d Normal Distribution cho từng record ──
+                    daily_harvest = {}  # {day_ordinal: float_qty}
+                    for ngay_src, qty in adjusted_records:
+                        if qty <= 0:
+                            continue
+                        mid = ngay_src + timedelta(days=days_shift)
+                        for offset, weight in zip(micro_offsets, micro_weights):
+                            day = mid + timedelta(days=int(offset))
+                            day_key = day.toordinal()
+                            daily_harvest[day_key] = daily_harvest.get(day_key, 0) + qty * weight
+                    
+                    if not daily_harvest:
+                        continue
+                    
+                    # ── Bước 2: Sort theo ngày, tính tổng ──
+                    sorted_days = sorted(daily_harvest.items())  # [(ordinal, qty), ...]
+                    total_all = sum(v for _, v in sorted_days)
+                    if total_all <= 0:
+                        continue
+                    
+                    # ── Bước 3: Phase assignment với boundary-day splitting ──
+                    # Dùng diện tích tích lũy: 10% bói, 80% rộ, 10% vét
+                    cum_target_boi = total_all * target_boi
+                    cum_target_boi_ro = total_all * (target_boi + target_ro)
                     cum = 0
-                    for ngay_src, qty in records:
-                        remaining = qty
-                        while remaining > 0:
-                            if cum < threshold_boi:
-                                phase = "Thu bói"
-                                can_fit = threshold_boi - cum
-                            elif cum < threshold_boi_ro:
-                                phase = "Thu rộ"
-                                can_fit = threshold_boi_ro - cum
-                            else:
-                                phase = "Thu vét"
-                                can_fit = remaining  # tất cả còn lại vào vét
-                            take = min(remaining, can_fit) if can_fit > 0 else remaining
-                            ngay_thu = ngay_src + timedelta(days=days_shift)
-                            row = {
+                    
+                    for day_ord, qty in sorted_days:
+                        actual_date = date.fromordinal(day_ord)
+                        thang = actual_date.strftime("%m/%Y")
+                        
+                        if cum + qty <= cum_target_boi:
+                            # Toàn bộ ngày này thuộc bói
+                            rows.append({
                                 "base_lot_id": base_lot_id,
                                 "vu": f"F{gen_idx}",
-                                "loai_thu": phase,
-                                "thang": ngay_thu.strftime("%m/%Y"),
-                                col_name: int(round(take)),
-                            }
-                            rows.append(row)
-                            cum += take
-                            remaining -= take
+                                "loai_thu": "Thu bói",
+                                "thang": thang,
+                                col_name: qty,
+                            })
+                            cum += qty
+                        elif cum < cum_target_boi:
+                            # Boundary split: bói + rộ (có thể + vét nếu qty rất lớn)
+                            boi_part = cum_target_boi - cum
+                            rest = qty - boi_part
+                            rows.append({
+                                "base_lot_id": base_lot_id,
+                                "vu": f"F{gen_idx}",
+                                "loai_thu": "Thu bói",
+                                "thang": thang,
+                                col_name: boi_part,
+                            })
+                            if cum + qty > cum_target_boi_ro:
+                                # Edge case: ngày này chứa cả bói, rộ, vét
+                                ro_part = cum_target_boi_ro - cum_target_boi
+                                vet_part = qty - boi_part - ro_part
+                                rows.append({
+                                    "base_lot_id": base_lot_id,
+                                    "vu": f"F{gen_idx}",
+                                    "loai_thu": "Thu rộ",
+                                    "thang": thang,
+                                    col_name: ro_part,
+                                })
+                                rows.append({
+                                    "base_lot_id": base_lot_id,
+                                    "vu": f"F{gen_idx}",
+                                    "loai_thu": "Thu vét",
+                                    "thang": thang,
+                                    col_name: vet_part,
+                                })
+                            else:
+                                rows.append({
+                                    "base_lot_id": base_lot_id,
+                                    "vu": f"F{gen_idx}",
+                                    "loai_thu": "Thu rộ",
+                                    "thang": thang,
+                                    col_name: rest,
+                                })
+                            cum += qty
+                        elif cum + qty <= cum_target_boi_ro:
+                            # Toàn bộ ngày này thuộc rộ
+                            rows.append({
+                                "base_lot_id": base_lot_id,
+                                "vu": f"F{gen_idx}",
+                                "loai_thu": "Thu rộ",
+                                "thang": thang,
+                                col_name: qty,
+                            })
+                            cum += qty
+                        elif cum < cum_target_boi_ro:
+                            # Boundary split: rộ + vét
+                            ro_part = cum_target_boi_ro - cum
+                            vet_part = qty - ro_part
+                            rows.append({
+                                "base_lot_id": base_lot_id,
+                                "vu": f"F{gen_idx}",
+                                "loai_thu": "Thu rộ",
+                                "thang": thang,
+                                col_name: ro_part,
+                            })
+                            rows.append({
+                                "base_lot_id": base_lot_id,
+                                "vu": f"F{gen_idx}",
+                                "loai_thu": "Thu vét",
+                                "thang": thang,
+                                col_name: vet_part,
+                            })
+                            cum += qty
+                        else:
+                            # Toàn bộ ngày này thuộc vét
+                            rows.append({
+                                "base_lot_id": base_lot_id,
+                                "vu": f"F{gen_idx}",
+                                "loai_thu": "Thu vét",
+                                "thang": thang,
+                                col_name: qty,
+                            })
+                            cum += qty
                 return rows
             
-            shift_chich_rows.extend(_build_shift_rows(chich_daily_by_gen, DAYS_CHICH_TO_THU, "so_thu_chich_bap"))
-            shift_cat_rows.extend(_build_shift_rows(cat_daily_by_gen, DAYS_CAT_TO_THU, "so_thu_cat_bap"))
+            shift_chich_rows.extend(_build_shift_rows(
+                chich_daily_by_gen, DAYS_CHICH_TO_THU, "so_thu_chich_bap",
+                des_by_gen_total=des_gen_cat  # Mốc ②: Aggregate Ratio "Trước cắt bắp"
+            ))
+            shift_cat_rows.extend(_build_shift_rows(
+                cat_daily_by_gen, DAYS_CAT_TO_THU, "so_thu_cat_bap",
+                des_by_gen_mau_day=des_gen_thu  # Mốc ③: Pro-rata mau_day "Trước thu hoạch"
+            ))
         
         if daily_rows:
             df_daily = pd.DataFrame(daily_rows)
@@ -3408,25 +3968,30 @@ def render_global_data_tab(c_farm):
                 df_harvest["so_thu_cat_bap"] = None
             
             # Largest Remainder Method: làm tròn mà đảm bảo tổng mỗi (lô, vụ) chính xác
-            # Áp dụng cho Mốc ① (so_thu_hoach_dk) — Mốc ②③ đã là int từ shift
+            # Áp dụng cho cả 3 mốc — Mốc ②③ bây giờ cũng là float từ micro-PDF spread
             for (lo_k, bid_k, vu_k), grp_idx in df_harvest.groupby(["lo", "base_lot_id", "vu"]).groups.items():
-                vals = df_harvest.loc[grp_idx, "so_thu_hoach_dk"].values.astype(float)
-                target_total = int(round(vals.sum()))
-                floors = np.floor(vals).astype(int)
-                remainders = vals - floors
-                deficit = target_total - floors.sum()
-                if deficit > 0:
-                    top_idx = np.argsort(-remainders)[:deficit]
-                    floors[top_idx] += 1
-                df_harvest.loc[grp_idx, "so_thu_hoach_dk"] = floors
+                for col in ["so_thu_hoach_dk", "so_thu_chich_bap", "so_thu_cat_bap"]:
+                    vals = df_harvest.loc[grp_idx, col].values.copy()
+                    # Skip nếu toàn None/NaN
+                    if pd.isna(vals).all():
+                        continue
+                    vals = np.where(pd.isna(vals), 0, vals).astype(float)
+                    target_total = int(round(vals.sum()))
+                    floors = np.floor(vals).astype(int)
+                    remainders = vals - floors
+                    deficit = target_total - floors.sum()
+                    if deficit > 0:
+                        top_idx = np.argsort(-remainders)[:deficit]
+                        floors[top_idx] += 1
+                    df_harvest.loc[grp_idx, col] = floors
             
             df_harvest["so_thu_hoach_dk"] = df_harvest["so_thu_hoach_dk"].astype(int)
             # so_thu_chich_bap: keep as int or None
             df_harvest["so_thu_chich_bap"] = df_harvest["so_thu_chich_bap"].apply(
-                lambda x: int(x) if pd.notna(x) else None)
+                lambda x: int(x) if pd.notna(x) and x != 0 else None)
             # so_thu_cat_bap: keep as int or None
             df_harvest["so_thu_cat_bap"] = df_harvest["so_thu_cat_bap"].apply(
-                lambda x: int(x) if pd.notna(x) else None)
+                lambda x: int(x) if pd.notna(x) and x != 0 else None)
             # ── Mốc ④: Thu hoạch thực tế — match từng record theo (gen, phase, tháng) ──
             # harvest_logs có từng ngày riêng lẻ, cần xác định mỗi record
             # thuộc generation nào + phase nào (Thu bói/rộ/vét) + tháng nào.
@@ -4333,7 +4898,7 @@ def render_main_app():
                     col_a, col_b = st.columns(2)
                     with col_a:
                         lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, key="add_sm_lot")
-                        mau_day = st.text_input("🎨 Màu dây", placeholder="VD: Đỏ, Xanh lá...", key="add_sm_mau")
+                        mau_day_color = build_color_selectbox("add_sm")
                         lan_do = st.radio("📏 Lần đo", options=[1, 2], horizontal=True, key="add_sm_lando")
                     with col_b:
                         col_b1, col_b2 = st.columns([2, 1])
@@ -4349,22 +4914,28 @@ def render_main_app():
                         sl = st.number_input("🔢 Số lượng buồng mẫu", min_value=0, step=10, key="add_sm_sl")
                     
                     if st.button("➕ Thêm vào Danh sách", key="btn_add_sm", use_container_width=True, type="secondary"):
-                        if not mau_day.strip(): st.error("❌ Phải nhập màu dây")
+                        if not mau_day_color: st.error("❌ Phải chọn màu dây")
                         elif sl <= 0: st.error("❌ Số lượng buồng > 0")
                         else:
-                            mau_day_clean = mau_day.strip().capitalize()
+                            # Validate/create ribbon
+                            farm_id = get_farm_id_from_name(c_farm)
+                            iso = ngay_do.isocalendar()
+                            _, err = get_or_create_ribbon(farm_id, iso[0], iso[1], mau_day_color)
+                            if err:
+                                st.error(err)
+                                st.stop()
                             # Validation: Nếu chọn là Lần 2, phải kiểm tra xem Lần 1 đã có chưa.
                             if lan_do == 2:
                                 _dim_id = get_dim_lo_id(c_farm, lot_id)
                                 if _dim_id:
                                     res_lan1 = supabase.table("size_measure_logs") \
-                                        .select("id").eq("dim_lo_id", _dim_id).eq("mau_day", mau_day_clean).eq("lan_do", 1).eq("is_deleted", False).execute()
+                                        .select("id").eq("dim_lo_id", _dim_id).eq("mau_day", mau_day_color).eq("lan_do", 1).eq("is_deleted", False).execute()
                                     if not res_lan1.data:
-                                        st.error(f"❌ Không thể đo Lần 2. Lô `{lot_id}` với màu dây `{mau_day_clean}` chưa được đo Lần 1.")
+                                        st.error(f"❌ Không thể đo Lần 2. Lô `{lot_id}` với màu dây `{mau_day_color}` chưa được đo Lần 1.")
                                         st.stop()
                                     
                             st.session_state["queue_sm"].append({
-                                "Lô": lot_id, "Màu dây": mau_day_clean, "Lần đo": lan_do, "Số lượng": sl,
+                                "Lô": lot_id, "Màu dây": mau_day_color, "Lần đo": lan_do, "Số lượng": sl,
                                 "Ngày đo": ngay_do.isoformat(), "Tuần": ngay_do.isocalendar()[1],
                                 "Hàng KT": hang_kiem_tra.strip(), "Size": size_cal
                             })
@@ -4590,10 +5161,9 @@ def render_main_app():
                             giai_doan_opts = ["Cắt bắp"]
                         giai_doan = st.radio("📌 Giai đoạn", options=giai_doan_opts, horizontal=True, key="add_stg_gd")
                         # Đội BVTV chỉ nhập Chích bắp → không cần màu dây
+                        mau_day_color = None
                         if giai_doan == "Cắt bắp":
-                            mau_day = st.text_input("🎨 Màu dây", placeholder="VD: Đỏ, Xanh lá...", key="add_stg_mau")
-                        else:
-                            mau_day = ""
+                            mau_day_color = build_color_selectbox("add_stg")
                     with col_b:
                         col_b1, col_b2 = st.columns([2, 1])
                         with col_b1:
@@ -4604,15 +5174,22 @@ def render_main_app():
 
                     if st.button("➕ Thêm vào Danh sách", key="btn_add_stg", use_container_width=True, type="secondary"):
                         if sl <= 0: st.error("❌ Nhập số lượng > 0.")
-                        elif giai_doan == "Cắt bắp" and not mau_day.strip(): st.error("❌ Phải nhập màu dây định danh lứa.")
+                        elif giai_doan == "Cắt bắp" and not mau_day_color: st.error("❌ Phải chọn màu dây định danh lứa.")
                         else:
-                            mau_day_clean = mau_day.strip().capitalize() if mau_day.strip() else None
+                            # Validate/create ribbon for Cắt bắp
+                            if giai_doan == "Cắt bắp" and mau_day_color:
+                                farm_id = get_farm_id_from_name(c_farm)
+                                iso = ngay_th.isocalendar()
+                                _, err = get_or_create_ribbon(farm_id, iso[0], iso[1], mau_day_color)
+                                if err:
+                                    st.error(err)
+                                    st.stop()
                             is_time_valid, msg_time = validate_timeline_logic(c_farm, lot_id, ngay_th, giai_doan)
                             if not is_time_valid:
                                 st.error(msg_time)
                             else:
                                 st.session_state["queue_stg"].append({
-                                    "Lô": lot_id, "Giai đoạn": giai_doan, "Màu dây": mau_day_clean,
+                                    "Lô": lot_id, "Giai đoạn": giai_doan, "Màu dây": mau_day_color,
                                     "Ngày": ngay_th.isoformat(), "Số lượng": sl, "Tuần": ngay_th.isocalendar()[1]
                                 })
                                 st.rerun()
@@ -4633,7 +5210,7 @@ def render_main_app():
                         is_valid, msg, allocations = allocate_fifo_quantity(c_farm, item["Lô"], item["Số lượng"], "stage", item["Ngày"], item["Giai đoạn"], item["Giai đoạn"])
                         if is_valid:
                             for alloc in allocations:
-                                data = {"farm": c_farm, "team": c_team, "giai_doan": item["Giai đoạn"], "ngay_thuc_hien": item["Ngày"], "mau_day": item["Màu dây"], "tuan": item["Tuần"], "lot_id": alloc["lot_id"], "so_luong": alloc["so_luong"], "base_lot_id": alloc.get("base_lot_id")}
+                                data = {"farm": c_farm, "team": c_team, "giai_doan": item["Giai đoạn"], "ngay_thuc_hien": item["Ngày"], "tuan": item["Tuần"], "lot_id": alloc["lot_id"], "so_luong": alloc["so_luong"], "base_lot_id": alloc.get("base_lot_id")}
                                 if not insert_to_db("stage_logs", data):
                                     st.error(f"❌ Lỗi ghi phân rã {alloc['lot_id']}")
                                     return
@@ -4662,7 +5239,7 @@ def render_main_app():
                 elif is_editing and not is_within_48h:
                     with col_e: st.caption("🔒 Quá 48h")
                 
-                render_team_dataframe("stage_logs", df_stg_team, ["lot_id", "giai_doan", "ngay_thuc_hien", "so_luong", "mau_day"])
+                render_team_dataframe("stage_logs", df_stg_team, ["lot_id", "giai_doan", "ngay_thuc_hien", "so_luong"])
 
         # TAB 3: XUẤT HỦY
         elif active_tab == "🗑️ Cập nhật Xuất hủy":
@@ -4681,7 +5258,18 @@ def render_main_app():
                     with col_a:
                         lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, key="add_des_lot")
                         giai_doan_xuat_huy = st.selectbox("⏱️ Giai đoạn xuất hủy", options=DESTRUCTION_STAGE_OPTIONS, key="add_des_gxh")
-                        mau_day_des = st.text_input("🎨 Màu dây", placeholder="VD: Đỏ, Xanh lá...", key="add_des_mau")
+                        
+                        # Ribbon color — only for "Trước thu hoạch"
+                        mau_day_color = None
+                        if giai_doan_xuat_huy == "Trước thu hoạch":
+                            farm_id = get_farm_id_from_name(c_farm)
+                            if farm_id:
+                                ribbons = get_all_ribbons_for_farm(farm_id)
+                                ribbon_opts = sorted({r["color_name"] for r in ribbons})
+                                if ribbon_opts:
+                                    mau_day_color = st.selectbox("🎨 Màu dây", options=ribbon_opts, key="add_des_mau_sel")
+                                else:
+                                    st.warning("⚠️ Farm chưa có màu dây nào trong ribbon_schedule.")
                         
                         predefined_reasons = ["Bệnh", "Đổ Ngã", "Khác"]
                         if hasattr(st, "pills"):
@@ -4708,9 +5296,8 @@ def render_main_app():
                         if sl <= 0: st.error("❌ Nhập số lượng > 0.")
                         elif selected_reason == "Khác" and not ly_do.strip(): st.error("❌ Cần ghi rõ chi tiết lý do (khi chọn Khác).")
                         else:
-                            mau_day_clean = mau_day_des.strip().capitalize() if mau_day_des.strip() else ""
                             st.session_state["queue_des"].append({
-                                "Lô": lot_id, "Giai đoạn": giai_doan_xuat_huy, "Màu dây": mau_day_clean, "Lý do": ly_do.strip(),
+                                "Lô": lot_id, "Giai đoạn": giai_doan_xuat_huy, "Màu dây": mau_day_color or "", "Lý do": ly_do.strip(),
                                 "Ngày": ngay.isoformat(), "Số lượng": sl, "Tuần": ngay.isocalendar()[1]
                             })
                             st.rerun()
@@ -4727,10 +5314,10 @@ def render_main_app():
                             return
                     success_count = 0
                     for item in queue:
-                        is_valid, msg, allocations = allocate_fifo_quantity(c_farm, item["Lô"], item["Số lượng"], "destruction", item["Ngày"], "Xuất hủy")
+                        is_valid, msg, allocations = allocate_fifo_quantity(c_farm, item["Lô"], item["Số lượng"], "destruction", item["Ngày"], "Xuất hủy", giai_doan=item.get("Giai đoạn"), mau_day=item.get("Màu dây"))
                         if is_valid:
                             for alloc in allocations:
-                                data = {"farm": c_farm, "team": c_team, "ngay_xuat_huy": item["Ngày"], "giai_doan": item["Giai đoạn"], "mau_day": item.get("Màu dây", "") or None, "ly_do": item["Lý do"], "tuan": item["Tuần"], "lot_id": alloc["lot_id"], "so_luong": alloc["so_luong"], "base_lot_id": alloc.get("base_lot_id")}
+                                data = {"farm": c_farm, "team": c_team, "ngay_xuat_huy": item["Ngày"], "giai_doan": item["Giai đoạn"], "ly_do": item["Lý do"], "tuan": item["Tuần"], "lot_id": alloc["lot_id"], "so_luong": alloc["so_luong"], "base_lot_id": alloc.get("base_lot_id")}
                                 if not insert_to_db("destruction_logs", data):
                                     st.error(f"❌ Lỗi ghi phân rã {alloc['lot_id']}")
                                     return
@@ -4759,7 +5346,7 @@ def render_main_app():
                 elif is_editing and not is_within_48h:
                     with col_e: st.caption("🔒 Quá 48h")
                     
-                render_team_dataframe("destruction_logs", df_des_team, ["lot_id", "ngay_xuat_huy", "giai_doan", "mau_day", "so_luong", "ly_do"])
+                render_team_dataframe("destruction_logs", df_des_team, ["lot_id", "ngay_xuat_huy", "giai_doan", "so_luong", "ly_do"])
 
         # TAB 8: KIỂM TRA FUSARIUM
         elif active_tab == "🦠 Kiểm tra Fusarium":
@@ -4864,7 +5451,15 @@ def render_main_app():
                     col_a, col_b = st.columns(2)
                     with col_a:
                         lot_id = st.selectbox("🏷️ Chọn Lô thu hoạch", options=available_lots, key="add_har_lot")
-                        mau_day = st.text_input("🎨 Màu dây", placeholder="VD: Đỏ, Xanh lá...", key="add_har_mau")
+                        # Ribbon color from schedule
+                        farm_id_har = get_farm_id_from_name(c_farm)
+                        ribbons_har = get_all_ribbons_for_farm(farm_id_har) if farm_id_har else []
+                        ribbon_opts_har = sorted({r["color_name"] for r in ribbons_har})
+                        if ribbon_opts_har:
+                            mau_day_color = st.selectbox("🎨 Màu dây", options=ribbon_opts_har, key="add_har_mau_sel")
+                        else:
+                            st.warning("⚠️ Farm chưa có màu dây trong ribbon_schedule.")
+                            mau_day_color = None
                         hinh_thuc_thu_hoach = st.selectbox("🚜 Hình thức thu hoạch", options=["Bằng xe cày", "Bằng ròng rọc"], key="add_har_hinh_thuc")
                     with col_b:
                         col_b1, col_b2 = st.columns([2, 1])
@@ -4876,21 +5471,20 @@ def render_main_app():
     
                     st.markdown("")
                     if st.button("➕ Thêm vào Danh sách", key="btn_add_har", use_container_width=True, type="secondary"):
-                        if not mau_day.strip(): st.error("❌ Cần nhập Màu dây.")
+                        if not mau_day_color: st.error("❌ Cần chọn Màu dây.")
                         elif sl <= 0: st.error("❌ Số lượng buồng phải > 0")
                         else:
-                            mau_day_clean = mau_day.strip().capitalize()
                             # Validation: Bắt buộc đã đo size lần 1 cho lô và màu dây này
                             _dim_id_har = get_dim_lo_id(c_farm, lot_id)
                             if _dim_id_har:
                                 res_sm = supabase.table("size_measure_logs").select("id") \
-                                    .eq("dim_lo_id", _dim_id_har).eq("mau_day", mau_day_clean).eq("lan_do", 1).eq("is_deleted", False).execute()
+                                    .eq("dim_lo_id", _dim_id_har).eq("mau_day", mau_day_color).eq("lan_do", 1).eq("is_deleted", False).execute()
                                 if not res_sm.data:
-                                    st.error(f"❌ Cảnh báo: Lô `{lot_id}` với màu dây `{mau_day_clean}` chưa qua Đo Size lần 1. Hãy nhắc NT.")
+                                    st.error(f"❌ Cảnh báo: Lô `{lot_id}` với màu dây `{mau_day_color}` chưa qua Đo Size lần 1. Hãy nhắc NT.")
                                     st.stop()
                                 
                             st.session_state["queue_har"].append({
-                                "Lô": lot_id, "Màu dây": mau_day_clean, "Hình thức": hinh_thuc_thu_hoach,
+                                "Lô": lot_id, "Màu dây": mau_day_color, "Hình thức": hinh_thuc_thu_hoach,
                                 "Số lượng": sl, "Ngày": ngay.isoformat(), "Tuần": ngay.isocalendar()[1]
                             })
                             st.rerun()
@@ -4911,7 +5505,7 @@ def render_main_app():
                         if is_valid:
                             for alloc in allocations:
                                 data = {
-                                    "farm": c_farm, "team": c_team, "ngay_thu_hoach": item["Ngày"], "mau_day": item["Màu dây"],
+                                    "farm": c_farm, "team": c_team, "ngay_thu_hoach": item["Ngày"],
                                     "hinh_thuc_thu_hoach": item["Hình thức"], "tuan": item["Tuần"], "lot_id": alloc["lot_id"], "so_luong": alloc["so_luong"],
                                     "base_lot_id": alloc.get("base_lot_id")
                                 }
