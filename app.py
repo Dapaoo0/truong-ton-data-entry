@@ -2569,10 +2569,24 @@ def render_global_data_tab(c_farm):
             info_panel_html += f'<div class="info-row"><span class="info-label">{_label}</span><span class="info-value" style="color:{_color}">{_value}</span></div>'
 
         html_content = f'''
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
         <style>
             * {{ margin:0; padding:0; box-sizing:border-box; }}
-            html, body {{ background: transparent; overflow: hidden; height: auto; width: 100%; max-width: 100vw; }}
+            html {{
+                background: transparent;
+                width: 100%;
+                max-width: 100%;
+                overflow-x: hidden;   /* prevent horizontal scroll on iOS */
+            }}
+            body {{
+                background: transparent;
+                width: 100%;
+                max-width: 100%;
+                overflow-x: hidden;
+                overflow-y: hidden;
+                height: auto;
+                -webkit-text-size-adjust: 100%;  /* prevent iOS text inflation */
+            }}
             .farm-map-container {{
                 position: relative;
                 width: 100%;
@@ -2740,12 +2754,74 @@ def render_global_data_tab(c_farm):
                 font-weight: 700;
                 white-space: nowrap;
             }}
-            /* Responsive tooltip for small screens */
-            @media (max-width: 600px) {{
+            /* ═══════════════════════════════════════════════════
+               RESPONSIVE BREAKPOINTS
+               Mobile:       320–480px   (phones portrait)
+               Small tablet: 481–768px   (phones landscape, small tablets)
+               Tablet:       769–1024px  (iPad portrait, Android tablets)
+               Default:      1025–1199px (iPad landscape, small laptops)
+               Large:        1200–1799px (laptops, desktops)
+               XL:           1800px+     (large monitors, 4K)
+               ═══════════════════════════════════════════════════ */
+
+            /* ── Mobile: 320–480px ── */
+            @media (max-width: 480px) {{
+                .farm-map-container {{
+                    border-radius: 6px;
+                }}
                 .map-tooltip {{
-                    min-width: 150px;
-                    max-width: 200px;
-                    padding: 8px 10px;
+                    min-width: 140px;
+                    max-width: 190px;
+                    padding: 7px 9px;
+                    font-size: 10px;
+                    line-height: 1.4;
+                    border-radius: 7px;
+                }}
+                .map-tooltip .tt-title {{
+                    font-size: 12px;
+                    margin-bottom: 3px;
+                    padding-bottom: 3px;
+                }}
+                .map-tooltip .tt-pin {{ font-size: 9px; }}
+                .map-tooltip .tt-row {{ gap: 6px; }}
+                .map-tooltip .tt-stage {{
+                    padding: 1px 5px;
+                    font-size: 9px;
+                }}
+                .map-tooltip .tt-hint {{
+                    font-size: 8px;
+                    margin-top: 3px;
+                    padding-top: 3px;
+                }}
+                .map-tooltip.pinned {{
+                    max-height: 240px;
+                }}
+                .legend-bar {{
+                    gap: 6px;
+                    padding: 5px 6px;
+                }}
+                .legend-item {{ font-size: 9px; gap: 3px; }}
+                .legend-dot {{ width: 8px; height: 8px; border-radius: 2px; }}
+                .map-info-panel {{
+                    bottom: 30px;
+                    left: 4px;
+                    padding: 5px 7px;
+                    font-size: 9px;
+                    min-width: 110px;
+                    border-radius: 6px;
+                }}
+                .map-info-panel .info-title {{ font-size: 8px; margin-bottom: 2px; }}
+            }}
+
+            /* ── Small tablet / phone landscape: 481–768px ── */
+            @media (min-width: 481px) and (max-width: 768px) {{
+                .farm-map-container {{
+                    border-radius: 8px;
+                }}
+                .map-tooltip {{
+                    min-width: 160px;
+                    max-width: 220px;
+                    padding: 8px 11px;
                     font-size: 11px;
                     line-height: 1.45;
                     border-radius: 8px;
@@ -2767,11 +2843,11 @@ def render_global_data_tab(c_farm):
                     padding-top: 4px;
                 }}
                 .map-tooltip.pinned {{
-                    max-height: 280px;
+                    max-height: 300px;
                 }}
                 .legend-bar {{
                     gap: 8px;
-                    padding: 6px 8px;
+                    padding: 6px 10px;
                 }}
                 .legend-item {{ font-size: 10px; gap: 4px; }}
                 .legend-dot {{ width: 9px; height: 9px; }}
@@ -2780,46 +2856,51 @@ def render_global_data_tab(c_farm):
                     left: 6px;
                     padding: 6px 8px;
                     font-size: 10px;
-                    min-width: 130px;
+                    min-width: 135px;
                     border-radius: 7px;
                 }}
                 .map-info-panel .info-title {{ font-size: 9px; margin-bottom: 3px; }}
             }}
-            /* Responsive for tablets / iPads (601–1024px) */
-            @media (min-width: 601px) and (max-width: 1024px) {{
+
+            /* ── Tablet / iPad portrait: 769–1024px ── */
+            @media (min-width: 769px) and (max-width: 1024px) {{
+                .farm-map-container {{
+                    border-radius: 10px;
+                }}
                 .map-tooltip {{
                     min-width: 200px;
-                    max-width: 260px;
+                    max-width: 280px;
                     padding: 10px 14px;
                     font-size: 12px;
                     line-height: 1.5;
                     border-radius: 9px;
                 }}
-                .map-tooltip .tt-title {{ font-size: 14px; }}
+                .map-tooltip .tt-title {{ font-size: 15px; }}
                 .map-tooltip .tt-stage {{ font-size: 11px; padding: 2px 8px; }}
                 .map-tooltip .tt-hint {{ font-size: 10px; }}
-                .map-tooltip.pinned {{ max-height: 340px; }}
+                .map-tooltip.pinned {{ max-height: 360px; }}
                 .legend-bar {{
-                    gap: 10px;
-                    padding: 8px 12px;
+                    gap: 12px;
+                    padding: 8px 14px;
                 }}
-                .legend-item {{ font-size: 11px; gap: 5px; }}
-                .legend-dot {{ width: 10px; height: 10px; }}
-                .farm-map-container {{
-                    border-radius: 8px;
-                }}
+                .legend-item {{ font-size: 12px; gap: 5px; }}
+                .legend-dot {{ width: 11px; height: 11px; }}
                 .map-info-panel {{
-                    bottom: 38px;
+                    bottom: 40px;
                     left: 8px;
-                    padding: 8px 10px;
+                    padding: 8px 11px;
                     font-size: 11px;
-                    min-width: 150px;
+                    min-width: 160px;
                     border-radius: 8px;
                 }}
                 .map-info-panel .info-title {{ font-size: 10px; }}
             }}
-            /* Responsive for large screens (1200px+) */
-            @media (min-width: 1200px) {{
+
+            /* ── Default: 1025–1199px (iPad landscape, small laptops) ── */
+            /* Base styles already cover this range */
+
+            /* ── Large: 1200–1799px (laptops, desktops) ── */
+            @media (min-width: 1200px) and (max-width: 1799px) {{
                 .map-tooltip {{
                     min-width: 280px;
                     max-width: 380px;
@@ -2840,7 +2921,8 @@ def render_global_data_tab(c_farm):
                 }}
                 .map-info-panel .info-title {{ font-size: 12px; }}
             }}
-            /* Responsive for extra-large screens (1800px+) */
+
+            /* ── XL: 1800px+ (large monitors, 4K, ultrawide) ── */
             @media (min-width: 1800px) {{
                 .map-tooltip {{
                     min-width: 340px;
