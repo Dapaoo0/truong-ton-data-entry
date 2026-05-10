@@ -79,23 +79,45 @@ Cửa sổ thu hoạch mặc định **54 ngày**, chia 3 phase:
 ### 3.3 Bốn Mốc Dự báo (4-Milestone Forecast)
 Mỗi thẻ tháng thu hoạch hiển thị **4 mốc** để so sánh chênh lệch:
 
-| Mốc | Ký hiệu | Nguồn dữ liệu | Phương pháp |
-|-----|---------|---------------|-------------|
-| Từ Trồng | ① | `base_lots.so_luong` − xuất hủy | Normal Distribution: `(trồng − hủy) × (1 − LOSS_RATE) × pdf_weight` |
-| Từ Chích bắp | ② | `stage_logs` (Chích bắp) theo ngày | **Shift-based**: dịch ngày chích +84d (`DAYS_CHICH_TO_THU`), phase theo tích lũy % |
-| Từ Cắt bắp | ③ | `stage_logs` (Cắt bắp) theo ngày | **Shift-based**: dịch ngày cắt +70d (`DAYS_CAT_TO_THU`), phase theo tích lũy % |
-| Thực tế | ④ | `harvest_logs` | `so_luong` thu hoạch thực tế |
+| Mốc | Ký hiệu | Nguồn dữ liệu | Phương pháp | Trừ xuất hủy |
+|-----|---------|---------------|-------------|-------------|
+| Từ Trồng | ① | `base_lots.so_luong` − xuất hủy | Normal Distribution: `(trồng − hủy) × (1 − LOSS_RATE) × pdf_weight` | Chỉ "Trước chích bắp" |
+| Từ Chích bắp | ② | `stage_logs` (Chích bắp) theo ngày | **Shift-based**: dịch ngày chích +84d (`DAYS_CHICH_TO_THU`), phase theo tích lũy % | "Trước cắt bắp" (Aggregate Ratio) |
+| Từ Cắt bắp | ③ | `stage_logs` (Cắt bắp) theo ngày | **Shift-based**: dịch ngày cắt +70d (`DAYS_CAT_TO_THU`), phase theo tích lũy % | "Trước thu hoạch" (Pro-rata theo `ribbon_schedule`) |
+| Thực tế | ④ | `harvest_logs` | `so_luong` thu hoạch thực tế | — |
 
 - **Mốc ①** dùng Normal Distribution (không đổi). Tỷ lệ hao hụt: `LOSS_RATE_TO_THU = 10%`.
 - **Mốc ②③** dùng dữ liệu thực tế theo ngày, **không trừ hao hụt ước tính** (xuất hủy thực tế đã tính riêng qua `destruction_logs`).
-- **Phase (Bói/Rộ/Vét) cho Mốc ②③**: Xác định bằng tổng tích lũy chích/cắt bắp so với `base_lots.so_luong`:
-  - Tích lũy 0% → 10% = Thu Bói
-  - Tích lũy 10% → 90% = Thu Rộ
-  - Tích lũy 90% → 100% = Thu Vét
+- **Phase (Bói/Rộ/Vét) cho Mốc ②③ — Micro-PDF** (08/05/2026):
+  - Mỗi record chích/cắt bắp → shift +84d/+70d → spread ±7d Normal Distribution (σ=3, fixed)
+  - Gộp tất cả mini-PDFs thành 1 đường cong harvest tổng hợp
+  - Phase xác định bằng **diện tích tích lũy** trên đường cong tổng hợp:
+    - 0% → 10% diện tích = Thu Bói
+    - 10% → 90% diện tích = Thu Rộ
+    - 90% → 100% diện tích = Thu Vét
+  - **Boundary-day splitting**: Ngày ranh giới được chia thành 2 phần để đảm bảo tỷ lệ chính xác
+  - **Largest Remainder Method**: Làm tròn float→int mà bảo toàn tổng
+  - Tỷ lệ 10/80/10 configurable bởi user (dùng chung setting Mốc ①)
+  - Window ±7d là **fixed**, user không điều chỉnh được (khác Mốc ① có thể chỉnh)
 - Nếu mốc ②③④ chưa có dữ liệu → hiển thị "Chưa có TT".
 - Chích bắp xảy ra ở **cả F0 lẫn Fn**. F0 dùng hóa chất xúc tiến ra hoa, Fn vẫn được chích để đồng bộ thời gian thu hoạch.
+- **Xuất hủy giảm DỰ BÁO, không giảm số thực tế** đã chích/cắt. VD: cắt 100 cây + hủy 5 cây → dự báo thu hoạch = 95 (vẫn ghi nhận cắt 100).
+- **Cross-season isolation**: Xuất hủy match vào generation bằng closest-midpoint (cùng logic chích/cắt). Hủy F0 KHÔNG ảnh hưởng F1+.
 
-### 3.4 Phân bổ Xuất hủy theo Tỉ lệ
+### 3.4 Phân bổ Xuất hủy theo Giai đoạn (Stage-Aware Destruction)
+
+Mỗi `destruction_logs.giai_doan` chỉ ảnh hưởng **đúng 1 mốc** dự báo:
+
+| Giai đoạn hủy | Mốc bị ảnh hưởng | Cách phân bổ phase |
+|---------------|-------------------|-------------------|
+| Trước chích bắp | Mốc ① (Từ Trồng) | Trừ trực tiếp từ `so_luong`, Normal Distribution tự phân bổ phase |
+| Trước cắt bắp | Mốc ② (Từ Chích) | **Aggregate Ratio**: `ratio = 1 − hủy/tổng_chích`, mỗi record × ratio |
+| Trước thu hoạch | Mốc ③ (Từ Cắt) | **Pro-rata theo `ribbon_schedule`**: resolve `mau_day` từ `(farm_id, year, tuan)` qua `ribbon_schedule`, trừ destruction cùng màu dây. Fallback Aggregate Ratio nếu không resolve được |
+
+**Per-generation matching**: Destruction records match vào generation gần nhất bằng `closest_gen = min(range(N), key=|midpoint[g] − ngay_xuat_huy|)`.
+
+**Proportional allocation** (records thiếu `base_lot_id`): Tách theo `giai_doan` trước khi phân bổ tỉ lệ. Default vào F0.
+
 Khi `destruction_logs` có `base_lot_id` → trừ trực tiếp cho đợt trồng đó.
 
 Khi chỉ có `dim_lo_id` (nhiều đợt trồng chung 1 lô, thiếu `base_lot_id`):
@@ -115,10 +137,12 @@ Hệ thống tự động liên kết log entries (stage_logs, harvest_logs, des
 
 ### 4.2 Thuật toán FIFO Allocation (allocate_fifo_quantity)
 - **FIFO theo ngày trồng**: Đợt trồng cũ nhất (`ngay_trong` ascending) được ưu tiên phân bổ trước.
+- **Season-aware planted** (fix 06/05/2026): `planted = so_luong - get_current_season_destruction(bid, "Trước chích bắp")`. Không dùng `so_luong_con_lai` (bị nhiễm destruction F0).
 - **Capacity per batch**:
   - Chích bắp: `planted - already_chich_this_batch`
   - Cắt bắp: `chich_this_batch - cat_this_batch`
   - Thu hoạch: `cat_this_batch - har_this_batch`
+  - Xuất hủy: delegate sang `allocate_destruction_fifo()` (xem §4.5)
 - Nếu đợt cũ đã full → tự động tràn sang đợt kế tiếp.
 - Kết quả: mỗi allocation kèm `base_lot_id` → ghi chính xác vào DB.
 - **Ví dụ**: Lô 3B có đợt 1 (1376 cây, đã chích 1149, còn 227) và đợt 2 (500 cây, chưa chích). User nhập "chích bắp 3B = 300" → đợt 1 nhận 227, đợt 2 nhận 73.
@@ -131,9 +155,42 @@ Hệ thống tự động liên kết log entries (stage_logs, harvest_logs, des
 - So sánh expected dates của F0→F5 với ngày hành động thực tế.
 - **Chồng chập timeline** (≤15 ngày giữa 2 đợt): gán theo đợt gần nhất.
 
-### 4.4 Destruction mapping
-- Giai đoạn xuất hủy ("Trước chích bắp/cắt bắp/thu hoạch") được map sang stage tương ứng để dùng timeline matching chính xác.
-- Không dùng fallback closest-planted (có thể match sai đợt mới trồng).
+### 4.4 Season-aware Capacity (`get_current_season_destruction`)
+- Tìm `MAX(seasons.ngay_bat_dau)` cho batch → lấy destruction `WHERE ngay_xuat_huy >= season_start`.
+- **Filter by `giai_doan`**: Chỉ trừ destruction cùng giai_doan. VD: hủy "Trước cắt bắp" KHÔNG trừ capacity chích bắp.
+- Giải quyết bug: F0 hủy 184 cây → F1 vẫn có capacity = so_luong gốc (1,502), không phải 1,318.
+- Trigger `update_lot_inventory` scope fix: `WHERE id = NEW.base_lot_id` (thay vì `dim_lo_id` cũ gây cross-batch).
+- Trigger `auto_assign_base_lot_id` cũng đã được cập nhật dùng season-aware planted.
+
+### 4.5 Destruction FIFO — 3 Chiến lược (`allocate_destruction_fifo`)
+
+| Giai đoạn | Ý nghĩa | Chiến lược FIFO | Pool/Capacity |
+|-----------|---------|-----------------|---------------|
+| **Trước chích bắp** | Cây chết trước khi chích | FIFO by `ngay_trong` ASC | `planted - đã_chích - hủy_trước_chích_vụ_HT` |
+| **Trước cắt bắp** | Cây chết sau chích, trước cắt | Record-level FIFO cross-batch by `ngay_thuc_hien` | `đã_chích_batch - hủy_trước_cắt_batch` |
+| **Trước thu hoạch** | Cây chết sau cắt, trước thu | Match `mau_day` via `ribbon_schedule` → closest week → FIFO | `cắt_bắp_cùng_tuần_mau_day - hủy_TH_cùng_batch - harvest_cùng_batch` |
+
+- **Trước chích bắp**: FIFO theo đợt trồng cũ nhất. Capacity = cây chưa chích và chưa hủy.
+- **Trước cắt bắp**: Gộp tất cả record chích bắp từ mọi batch, sort by `ngay_thuc_hien` ASC (tiebreak `ngay_trong`). Phân bổ record-level để handle xen-kẽ giữa các đợt.
+- **Trước thu hoạch**: Bắt buộc chọn `mau_day` từ `ribbon_schedule`. Tìm tất cả record cắt bắp có `tuan` khớp với tuần của màu dây đó, chọn tuần gần nhất với ngày xuất hủy (closest-date). Trừ harvest + destruction cùng `base_lot_id` đã có.
+
+### 4.6 Ribbon Schedule (Quản lý Màu dây Tập trung)
+
+**Bảng `ribbon_schedule`** là nguồn dữ liệu duy nhất cho màu dây, thay thế cột `mau_day` cũ trên `stage_logs`, `destruction_logs`, `harvest_logs` (đã xóa).
+
+| Thuộc tính | Giá trị |
+|---|---|
+| **Grain** | `(farm_id, year, week_number)` — 1 farm × 1 tuần = 1 màu dây |
+| **Resolve logic** | Join `stage_logs.tuan` + date year → `ribbon_schedule.(year, week_number)` → `color_name` |
+| **Auto-create** | Khi user nhập cắt bắp/đo size với màu dây mới cho tuần chưa có → tự động insert |
+| **Conflict guard** | Chặn nếu tuần đó đã có màu dây khác |
+| **UI** | Tất cả selectbox dùng `build_color_selectbox()` helper (chuẩn hóa viết thường, không viết tắt) |
+
+**Nơi sử dụng:**
+- Forecast engine: `_resolve_ribbon_color(row)` dùng `_ribbon_lookup` dict pre-computed
+- FIFO Strategy 3: Query `ribbon_schedule` để tìm tuần khớp màu dây → match `stage_logs.tuan`
+- Excel export: Resolve week-color từ `ribbon_schedule` thay vì `df_cut["mau_day"]`
+- UI display: Selectbox `build_color_selectbox` + `get_or_create_ribbon` validation
 
 ---
 
@@ -146,6 +203,12 @@ Hệ thống tự động liên kết log entries (stage_logs, harvest_logs, des
 - **Đã giải quyết**: `allocate_fifo_quantity()` tự động phân bổ chích bắp vào đúng đợt trồng theo FIFO (đợt cũ nhất trước).
 - Mỗi record `stage_logs` giờ có `base_lot_id` chính xác → phân biệt được chích bắp thuộc đợt nào.
 - Xem chi tiết thuật toán tại §4.2.
+
+### 5.3 Edge case: Lô F vụ cũ (không có base_lot)
+- Một số lô vẫn đang thu hoạch chuối Fn từ đợt trồng trước khi hệ thống được triển khai. Các lô này **không có record `base_lots`** trong database.
+- VD: Lô D3 Farm 126 — chích bắp 43 cây ngày 30/04/2026 nhưng không có đợt trồng nào.
+- **Xử lý**: Insert `stage_logs` với `base_lot_id = NULL`. Record vẫn được lưu để tracking nhưng **không ảnh hưởng forecast** (forecast chỉ tạo cho `loai_trong = 'Trồng mới'`).
+- **Lưu ý**: `base_lot_id` trong `stage_logs` là **nullable** (`is_nullable = YES`). FIFO trigger skip khi `base_lot_id IS NOT NULL`, và không auto-assign nếu không tìm thấy batch phù hợp.
 
 ---
 
@@ -217,3 +280,31 @@ Hệ thống phân biệt **2 loại diện tích**:
   - Hiển thị `area_ha` từ `dim_lo` (Diện tích lô).
   - Diện tích trồng = "—", Tổng số cây = 0.
   - Giai đoạn = "Chưa có dữ liệu" (màu xám).
+
+---
+
+## 9. Báo cáo Excel (Excel Export)
+
+### 9.1 Nguyên tắc chung
+- Báo cáo Excel chỉ hiển thị **số liệu thực tế đã xảy ra** — không bao gồm xuất hủy hoặc hao hụt ước tính.
+- Ví dụ: Tuần 10 cắt 100 bắp → báo cáo hiển thị 100. Xuất hủy trước/sau đó không ảnh hưởng.
+- Dữ liệu xuất hủy (destruction) được xem ở dashboard riêng, không nằm trong báo cáo Excel.
+
+### 9.2 Báo cáo Cắt bắp (`generate_cut_bap_excel`)
+- **Input**: `df_lots` (base_lots filtered), `df_stg` (stage_logs filtered, `giai_doan == "Cắt bắp"`).
+- **Layout**: Chia sheet theo năm. Mỗi sheet = 1 năm.
+  - Cột A: Tên lô (sorted tự nhiên: 1A, 2A, 3A... không phải 10A, 11A, 1A).
+  - Mỗi tuần = 1 cột. Header 2 dòng: Tuần (số) + Màu dây (từ `ribbon_schedule`).
+  - Cột cuối: **Lũy kế** = tổng cộng dồn theo lô.
+- **Data matching**: `df_cut["lo"] == lo_name` — so khớp trực tiếp, không qua `lot_id`.
+- **Type safety**: `tuan` → `pd.to_numeric().astype(int)`, `_year` → `.astype(int)`.
+- **Lot union**: Tên lô lấy từ CẢ `base_lots` VÀ `stage_logs` (tránh miss lô chỉ tồn tại trong 1 nguồn).
+
+### 9.3 Báo cáo Chích bắp (`generate_chich_bap_excel`)
+- **Input**: `df_lots` (base_lots filtered), `df_stg` (stage_logs filtered, `giai_doan == "Chích bắp"`).
+- **Layout**: Tương tự Cắt bắp — chia sheet theo năm, 1 cột/tuần, có Lũy kế.
+
+### 9.4 Báo cáo Trồng mới (`generate_planting_excel`)
+- **Input**: `df_lots` (base_lots filtered), `df_seasons` (seasons data).
+- **`loai_trong`**: Ưu tiên lấy trực tiếp từ `base_lots.loai_trong` (không cần join `seasons`). Fallback join nếu cột không tồn tại.
+- **Layout**: Danh sách đợt trồng kèm ngày, farm, lô, số lượng, loại trồng.

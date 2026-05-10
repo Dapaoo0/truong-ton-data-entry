@@ -2,6 +2,85 @@
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
 
+## [10/05/2026] - Responsive Map Overhaul (6 Breakpoints)
+
+#### Fix: Bản đồ farm bị cắt bên phải trên iPad (`app.py`)
+- **[Root Cause]**: Thiếu `overflow-x: hidden` trên `html/body` trong iframe, thiếu `<meta viewport>`, và chỉ có 3 breakpoint (mobile/desktop/XL) — bỏ sót iPad (769–1024px).
+- **[Fix — CSS]**: Viết lại toàn bộ responsive system với **6 breakpoints chuẩn công nghiệp**:
+  - **Mobile** (320–480px): `border-radius: 6px`, font 9–10px
+  - **Small tablet** (481–768px): `border-radius: 8px`, font 10–11px
+  - **Tablet / iPad portrait** (769–1024px): `border-radius: 10px`, font 11–12px
+  - **Default** (1025–1199px): Base styles (iPad landscape, small laptops)
+  - **Large** (1200–1799px): Desktop/laptop full styling
+  - **XL** (1800px+): 4K/ultrawide, font 14–15px
+- **[Fix — HTML]**: Thêm `<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">` trong iframe HTML.
+- **[Fix — iOS]**: `overflow-x: hidden` trên `html` + `body`, `-webkit-text-size-adjust: 100%` chống text inflation.
+- **[SVG]**: Thêm `preserveAspectRatio="xMidYMid meet"` cho SVG element.
+
+---
+
+## [09/05/2026] - Excel Export Refactor (Cắt bắp / Trồng mới)
+
+#### Refactor: Viết lại `generate_cut_bap_excel()` (`app.py`)
+- **[Xóa]**: Param `df_des` (destruction data) — báo cáo Cắt bắp giờ chỉ hiển thị **số cắt thực tế**, không bao gồm xuất hủy.
+- **[Xóa]**: Cột "XUẤT HỦY" khỏi sheet Excel — mỗi tuần = 1 cột duy nhất (số bắp cắt).
+- **[Xóa]**: `lot_id_map` alias mapping — thay bằng so khớp trực tiếp `df_cut["lo"] == lo_name`.
+- **[Thêm]**: Cột **Lũy kế** cuối bảng — tổng cộng dồn theo lô.
+- **[Fix]**: Type casting `tuan` → `pd.to_numeric(...).astype(int)` và `_year` → `.astype(int)` — chống lọc sai do float/string.
+- **[Fix]**: Union tên lô từ CẢ `df_lots` VÀ `df_cut` — tránh miss lô chỉ tồn tại trong 1 nguồn.
+- **[Layout]**: 2 header rows (Tuần + Màu dây), `freeze_panes = "B3"`.
+
+#### Fix: `generate_planting_excel()` — Bỏ `lot_id`, dùng `loai_trong` trực tiếp (`app.py`)
+- **[Trước đó]**: Dùng `lot_id` (alias từ PostgREST join) + join `df_seasons` để lấy `loai_trong`.
+- **[Sau]**: Bỏ `lot_id` khỏi danh sách cột. Ưu tiên `loai_trong` trực tiếp từ `base_lots` (cột đã tồn tại trong bảng), fallback sang `df_seasons` join nếu không có.
+
+#### Cleanup: Xóa debug code, cập nhật caller sites (`app.py`)
+- **[Xóa]**: Debug `st.caption` blocks (6 dòng) trong popover Cắt bắp.
+- **[Update]**: Caller Admin popover + User thường → bỏ `df_des` param, gọi `generate_cut_bap_excel(df_lots, df_stg)` 2 param.
+
+---
+
+## [08/05/2026] - Micro-PDF Forecast Engine (Mốc ②③)
+
+#### Refactor: Thay thế Cumulative Threshold → Micro-PDF ±7d cho dự báo từ Chích/Cắt bắp (`app.py`)
+- **[Xóa]**: `threshold_boi`, `threshold_boi_ro` — không còn dùng `so_luong_trong` làm ngưỡng tích lũy.
+- **[Thêm]**: Constants `MICRO_WINDOW_HALF=7`, `MICRO_SIGMA=3.0` — spread ±7d Normal Distribution (fixed).
+- **[Logic mới]**: Mỗi record chích/cắt bắp → shift +84d/+70d → spread ±7d Normal Distribution → gộp tất cả mini-PDFs → xác định phase bằng diện tích tích lũy 10/80/10.
+- **[Boundary-day splitting]**: Ngày ranh giới bói/rộ và rộ/vét được chia chính xác thành 2 phần để đảm bảo tỷ lệ đúng 10.0/80.0/10.0%.
+- **[Rounding]**: Largest Remainder Method áp dụng cho cả 3 mốc (trước đây chỉ Mốc ①).
+- **[Test]**: 11/11 test cases passed — uniform, skewed, bimodal, destruction, custom ratios, small/large quantities.
+
+---
+
+## [08/05/2026] - Ribbon Schedule Centralization (Chuẩn hóa Màu dây)
+
+#### Schema Migration: Xóa cột `mau_day` từ 3 bảng, tập trung vào `ribbon_schedule` (DB, `app.py`)
+- **[DB DDL]**: DROP COLUMN `mau_day` từ `stage_logs`, `destruction_logs`, `harvest_logs`. Cột chỉ còn tồn tại ở `size_measure_logs`.
+- **[Nguồn dữ liệu mới]**: Bảng `ribbon_schedule` (`farm_id`, `year`, `week_number`, `color_name`) là **single source of truth** cho màu dây. Mỗi farm × tuần = 1 màu dây duy nhất.
+- **[Lý do]**: Màu dây là thuộc tính cấp (farm, tuần), không phải cấp record. Lưu per-record tạo dư thừa và nguy cơ mâu thuẫn.
+
+#### Refactor: FIFO Strategy 3 — "Trước thu hoạch" (`app.py`)
+- **[Trước đó]**: Query `stage_logs.mau_day` và `destruction_logs.mau_day` (đã xóa) → crash.
+- **[Sau]**: Resolve `farm_id` từ `dim_lo_id` → query `ribbon_schedule` cho tất cả tuần khớp màu dây → match `stage_logs.tuan` → FIFO allocation.
+- **[Impact]**: Logic phân bổ không đổi, chỉ thay nguồn dữ liệu màu dây.
+
+#### Refactor: Forecast Engine — Mốc ③ Pro-rata mau_day (`app.py`)
+- **[Trước đó]**: `d_row.get("mau_day")` và `s_row.get("mau_day")` trả về `None` (silent failure, mất tất cả pro-rata).
+- **[Sau]**: Pre-compute `_ribbon_lookup = {(year, week): color}` từ `ribbon_schedule`. Helper `_resolve_ribbon_color(row)` resolve từ `tuan` + date year.
+- **[Impact]**: Pro-rata phân bổ xuất hủy theo màu dây ở Mốc ③ hoạt động chính xác trở lại.
+
+#### Refactor: Excel Export — Week-color mapping (`app.py`)
+- **[Trước đó]**: Trích `mau_day` từ `df_cut_yr["mau_day"]` (đã xóa) → mất màu header.
+- **[Sau]**: Query `ribbon_schedule` trực tiếp cho farm và năm.
+
+#### Refactor: UI Display — Bỏ cột `mau_day` khỏi render (`app.py`)
+- **[Mô tả]**: Loại `mau_day` khỏi danh sách cột hiển thị `render_team_dataframe()` cho `stage_logs` và `destruction_logs`.
+
+#### Docs: Cập nhật toàn bộ tài liệu
+- **[schema.md]**: Xóa `mau_day` từ schema `stage_logs`, `destruction_logs`, `harvest_logs`. Thêm bảng `ribbon_schedule`.
+- **[business_logic.md]**: Cập nhật §3.3, §3.4, §4.5 dùng `ribbon_schedule`. Thêm §4.6 Ribbon Schedule architecture.
+- **[codebase_summary.md]**: Thêm `mau_day` param cho `allocate_fifo_quantity`, mô tả `_resolve_ribbon_color`.
+
 ## [06/05/2026] - Tooltip Diện Tích Lô/Trồng, Sort Fix, Data Correction
 
 #### Feature: Tách tooltip "Diện tích" thành "Diện tích lô" + "Diện tích trồng" (`app.py`)
