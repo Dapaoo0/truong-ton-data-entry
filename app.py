@@ -2569,12 +2569,14 @@ def render_global_data_tab(c_farm):
             info_panel_html += f'<div class="info-row"><span class="info-label">{_label}</span><span class="info-value" style="color:{_color}">{_value}</span></div>'
 
         html_content = f'''
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
         <style>
             * {{ margin:0; padding:0; box-sizing:border-box; }}
-            html, body {{ background: transparent; overflow: hidden; height: auto; }}
+            html, body {{ background: transparent; overflow: hidden; height: auto; width: 100%; max-width: 100vw; }}
             .farm-map-container {{
                 position: relative;
                 width: 100%;
+                max-width: 100%;
                 background: #1a1a2e;
                 border-radius: 12px;
                 overflow: hidden;
@@ -2803,6 +2805,9 @@ def render_global_data_tab(c_farm):
                 }}
                 .legend-item {{ font-size: 11px; gap: 5px; }}
                 .legend-dot {{ width: 10px; height: 10px; }}
+                .farm-map-container {{
+                    border-radius: 8px;
+                }}
                 .map-info-panel {{
                     bottom: 38px;
                     left: 8px;
