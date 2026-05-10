@@ -2783,6 +2783,36 @@ def render_global_data_tab(c_farm):
                 }}
                 .map-info-panel .info-title {{ font-size: 9px; margin-bottom: 3px; }}
             }}
+            /* Responsive for tablets / iPads (601–1024px) */
+            @media (min-width: 601px) and (max-width: 1024px) {{
+                .map-tooltip {{
+                    min-width: 200px;
+                    max-width: 260px;
+                    padding: 10px 14px;
+                    font-size: 12px;
+                    line-height: 1.5;
+                    border-radius: 9px;
+                }}
+                .map-tooltip .tt-title {{ font-size: 14px; }}
+                .map-tooltip .tt-stage {{ font-size: 11px; padding: 2px 8px; }}
+                .map-tooltip .tt-hint {{ font-size: 10px; }}
+                .map-tooltip.pinned {{ max-height: 340px; }}
+                .legend-bar {{
+                    gap: 10px;
+                    padding: 8px 12px;
+                }}
+                .legend-item {{ font-size: 11px; gap: 5px; }}
+                .legend-dot {{ width: 10px; height: 10px; }}
+                .map-info-panel {{
+                    bottom: 38px;
+                    left: 8px;
+                    padding: 8px 10px;
+                    font-size: 11px;
+                    min-width: 150px;
+                    border-radius: 8px;
+                }}
+                .map-info-panel .info-title {{ font-size: 10px; }}
+            }}
             /* Responsive for large screens (1200px+) */
             @media (min-width: 1200px) {{
                 .map-tooltip {{
@@ -2836,7 +2866,7 @@ def render_global_data_tab(c_farm):
         </style>
 
         <div class="farm-map-container" id="farmMapContainer">
-            <svg viewBox="0 0 {img_w} {img_h}" xmlns="http://www.w3.org/2000/svg">
+            <svg viewBox="0 0 {img_w} {img_h}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
                 <rect width="{img_w}" height="{img_h}" fill="#1a1a2e"/>
                 {svg_polygons}
             </svg>
