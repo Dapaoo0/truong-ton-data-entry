@@ -1629,8 +1629,7 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
         top=Side(style='thin'), bottom=Side(style='thin')
     )
     header_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
-    cut_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-    des_fill = PatternFill(start_color="E2B8F5", end_color="E2B8F5", fill_type="solid")
+    white_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
     total_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
     center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
@@ -1750,20 +1749,20 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
 
             # Row 2: "CẮT BẮP" | "XUẤT HỦY"
             c_cut = ws.cell(row=2, column=cut_col, value="CẮT BẮP")
-            c_cut.font = Font(bold=True, size=9); c_cut.fill = cut_fill
+            c_cut.font = Font(bold=True, size=9); c_cut.fill = white_fill
             c_cut.alignment = center_align; c_cut.border = thin_border
             c_des = ws.cell(row=2, column=des_col, value="XUẤT HỦY")
-            c_des.font = Font(bold=True, size=9); c_des.fill = des_fill
+            c_des.font = Font(bold=True, size=9); c_des.fill = white_fill
             c_des.alignment = center_align; c_des.border = thin_border
 
             # Row 3: màu dây
             c_r3a = ws.cell(row=3, column=cut_col, value=color_name)
             c_r3a.font = Font(bold=True, size=8)
-            c_r3a.fill = color_fill_cell if color_fill_cell else cut_fill
+            c_r3a.fill = color_fill_cell if color_fill_cell else white_fill
             c_r3a.alignment = center_align; c_r3a.border = thin_border
             c_r3b = ws.cell(row=3, column=des_col, value=color_name)
             c_r3b.font = Font(bold=True, size=8)
-            c_r3b.fill = color_fill_cell if color_fill_cell else des_fill
+            c_r3b.fill = color_fill_cell if color_fill_cell else white_fill
             c_r3b.alignment = center_align; c_r3b.border = thin_border
 
             col += 2
@@ -1777,9 +1776,9 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
         lk_cut_col = col
         lk_des_col = col + 1
         c_lk_c = ws.cell(row=2, column=lk_cut_col, value="CẮT"); c_lk_c.font = Font(bold=True, size=9)
-        c_lk_c.fill = cut_fill; c_lk_c.alignment = center_align; c_lk_c.border = thin_border
+        c_lk_c.fill = white_fill; c_lk_c.alignment = center_align; c_lk_c.border = thin_border
         c_lk_d = ws.cell(row=2, column=lk_des_col, value="HỦY"); c_lk_d.font = Font(bold=True, size=9)
-        c_lk_d.fill = des_fill; c_lk_d.alignment = center_align; c_lk_d.border = thin_border
+        c_lk_d.fill = white_fill; c_lk_d.alignment = center_align; c_lk_d.border = thin_border
         for c_i in [lk_cut_col, lk_des_col]:
             ws.cell(row=3, column=c_i).border = thin_border
             ws.cell(row=3, column=c_i).fill = total_fill
