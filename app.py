@@ -1621,16 +1621,16 @@ def generate_chich_bap_excel(df_lots, df_stg) -> bytes:
     return output.getvalue()
 
 
-def generate_cut_bap_excel(df_lots, df_stg) -> bytes:
-    """Tạo file Excel báo cáo Cắt bắp theo tuần, chia sheet theo năm.
-    Mỗi sheet = 1 năm. Mỗi tuần = 1 cột (số bắp đã cắt thực tế)."""
-    # Styles
+def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
+    """Tạo file Excel báo cáo Cắt bắp + Xuất hủy trước thu hoạch theo tuần.
+    Mỗi sheet = 1 năm. Mỗi tuần = 2 cột (CẮT BẮP | XUẤT HỦY)."""
     thin_border = Border(
         left=Side(style='thin'), right=Side(style='thin'),
         top=Side(style='thin'), bottom=Side(style='thin')
     )
     header_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
     cut_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+    des_fill = PatternFill(start_color="E2B8F5", end_color="E2B8F5", fill_type="solid")
     total_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
     center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
@@ -1644,8 +1644,11 @@ def generate_cut_bap_excel(df_lots, df_stg) -> bytes:
         hex_color = COLOR_MAP.get(base)
         return PatternFill(start_color=hex_color, end_color=hex_color, fill_type="solid") if hex_color else None
 
-    # Filter Cắt bắp from stage_logs
+    # Filter data
     df_cut = df_stg[df_stg["giai_doan"] == "Cắt bắp"].copy() if not df_stg.empty and "giai_doan" in df_stg.columns else pd.DataFrame()
+    df_xh = pd.DataFrame()
+    if df_des is not None and not df_des.empty and "giai_doan" in df_des.columns:
+        df_xh = df_des[df_des["giai_doan"] == "Trước thu hoạch"].copy()
 
     wb = Workbook()
 
@@ -1655,19 +1658,28 @@ def generate_cut_bap_excel(df_lots, df_stg) -> bytes:
         output = io.BytesIO(); wb.save(output); output.seek(0)
         return output.getvalue()
 
-    # Parse dates, cast types safely
+    # Parse dates, cast types
     df_cut["ngay_thuc_hien"] = pd.to_datetime(df_cut["ngay_thuc_hien"])
     df_cut["_year"] = df_cut["ngay_thuc_hien"].dt.year.astype(int)
     df_cut["tuan"] = pd.to_numeric(df_cut["tuan"], errors="coerce").fillna(
         df_cut["ngay_thuc_hien"].dt.isocalendar().week
     ).astype(int)
 
-    # Lot names: union from base_lots AND stage_logs (tránh miss lot chỉ có trong 1 nguồn)
+    if not df_xh.empty:
+        df_xh["ngay_xuat_huy"] = pd.to_datetime(df_xh["ngay_xuat_huy"])
+        df_xh["_year"] = df_xh["ngay_xuat_huy"].dt.year.astype(int)
+        df_xh["tuan"] = pd.to_numeric(df_xh["tuan"], errors="coerce").fillna(
+            df_xh["ngay_xuat_huy"].dt.isocalendar().week
+        ).astype(int)
+
+    # Lot names union
     lot_names_set = set()
     if not df_lots.empty and "lo" in df_lots.columns:
         lot_names_set.update(df_lots["lo"].dropna().unique())
     if "lo" in df_cut.columns:
         lot_names_set.update(df_cut["lo"].dropna().unique())
+    if not df_xh.empty and "lo" in df_xh.columns:
+        lot_names_set.update(df_xh["lo"].dropna().unique())
     lot_names = sorted(lot_names_set)
 
     # Resolve farm_id for ribbon lookup
@@ -1687,94 +1699,136 @@ def generate_cut_bap_excel(df_lots, df_stg) -> bytes:
     for year in years:
         ws = wb.create_sheet(title=str(year))
         df_cut_yr = df_cut[df_cut["_year"] == year]
+        df_xh_yr = df_xh[df_xh["_year"] == year] if not df_xh.empty and "_year" in df_xh.columns else pd.DataFrame()
 
-        # Week-color map from ribbon_schedule + data
+        # Week-color map
         week_color = {}
         if _excel_farm_id:
             _rb_res = supabase.table("ribbon_schedule").select("week_number, color_name") \
                 .eq("farm_id", _excel_farm_id).eq("year", int(year)).eq("is_deleted", False).execute()
             for _rb in (_rb_res.data or []):
                 week_color[int(_rb["week_number"])] = _rb["color_name"]
-        for tuan_val in df_cut_yr["tuan"].dropna().unique():
-            wn = int(tuan_val)
+        all_weeks = set()
+        for t in df_cut_yr["tuan"].dropna().unique(): all_weeks.add(int(t))
+        if not df_xh_yr.empty:
+            for t in df_xh_yr["tuan"].dropna().unique(): all_weeks.add(int(t))
+        for wn in all_weeks:
             if wn not in week_color:
                 week_color[wn] = ""
 
         weeks = sorted(week_color.keys())
         if not weeks:
-            ws.cell(row=1, column=1, value=f"Chưa có dữ liệu Cắt bắp năm {year}.")
+            ws.cell(row=1, column=1, value=f"Chưa có dữ liệu năm {year}.")
             continue
 
-        # === HEADER (row 1: Tuần, row 2: Màu dây) ===
-        ws.cell(row=1, column=1, value="Lô").font = Font(bold=True, size=10)
-        ws.cell(row=1, column=1).fill = header_fill
-        ws.cell(row=1, column=1).border = thin_border
-        ws.cell(row=1, column=1).alignment = center_align
-        ws.merge_cells(start_row=1, start_column=1, end_row=2, end_column=1)
+        # === HEADER: 3 rows ===
+        # Row 1: "Lô" merged R1-R3 | "Tuần X" merged across 2 cols
+        # Row 2: (merged)          | "CẮT BẮP" | "XUẤT HỦY"
+        # Row 3: (merged)          | màu dây    | màu dây
+        ws.merge_cells(start_row=1, start_column=1, end_row=3, end_column=1)
+        c_lo = ws.cell(row=1, column=1, value="Lô")
+        c_lo.font = Font(bold=True, size=10); c_lo.fill = header_fill
+        c_lo.border = thin_border; c_lo.alignment = center_align
 
-        col_offset = 2
-        week_col_map = {}
+        col = 2
+        week_cut_col = {}   # week → col index of CẮT BẮP
+        week_des_col = {}   # week → col index of XUẤT HỦY
         for week in weeks:
-            week_col_map[week] = col_offset
+            cut_col = col
+            des_col = col + 1
+            week_cut_col[week] = cut_col
+            week_des_col[week] = des_col
             color_name = week_color.get(week, "")
             color_fill_cell = get_mau_day_fill(color_name)
 
-            c = ws.cell(row=1, column=col_offset, value=f"Tuần {week}")
-            c.font = Font(bold=True, size=11); c.fill = header_fill
-            c.alignment = center_align; c.border = thin_border
+            # Row 1: "Tuần X" merged
+            ws.merge_cells(start_row=1, start_column=cut_col, end_row=1, end_column=des_col)
+            c_w = ws.cell(row=1, column=cut_col, value=f"Tuần {week}")
+            c_w.font = Font(bold=True, size=11); c_w.fill = header_fill
+            c_w.alignment = center_align; c_w.border = thin_border
+            ws.cell(row=1, column=des_col).border = thin_border
 
-            c2 = ws.cell(row=2, column=col_offset, value=color_name if color_name else "")
-            c2.font = Font(bold=True, size=9)
-            c2.fill = color_fill_cell if color_fill_cell else cut_fill
-            c2.alignment = center_align; c2.border = thin_border
-            col_offset += 1
+            # Row 2: "CẮT BẮP" | "XUẤT HỦY"
+            c_cut = ws.cell(row=2, column=cut_col, value="CẮT BẮP")
+            c_cut.font = Font(bold=True, size=9); c_cut.fill = cut_fill
+            c_cut.alignment = center_align; c_cut.border = thin_border
+            c_des = ws.cell(row=2, column=des_col, value="XUẤT HỦY")
+            c_des.font = Font(bold=True, size=9); c_des.fill = des_fill
+            c_des.alignment = center_align; c_des.border = thin_border
 
-        # Lũy kế column
-        grand_col = col_offset
-        c_gt = ws.cell(row=1, column=grand_col, value="Lũy kế")
-        c_gt.font = Font(bold=True, size=11); c_gt.fill = total_fill
-        c_gt.alignment = center_align; c_gt.border = thin_border
-        ws.cell(row=2, column=grand_col).fill = total_fill
-        ws.cell(row=2, column=grand_col).border = thin_border
-        col_offset += 1
+            # Row 3: màu dây
+            c_r3a = ws.cell(row=3, column=cut_col, value=color_name)
+            c_r3a.font = Font(bold=True, size=8)
+            c_r3a.fill = color_fill_cell if color_fill_cell else cut_fill
+            c_r3a.alignment = center_align; c_r3a.border = thin_border
+            c_r3b = ws.cell(row=3, column=des_col, value=color_name)
+            c_r3b.font = Font(bold=True, size=8)
+            c_r3b.fill = color_fill_cell if color_fill_cell else des_fill
+            c_r3b.alignment = center_align; c_r3b.border = thin_border
 
-        for r in range(1, 3):
-            for ci in range(1, col_offset):
-                ws.cell(row=r, column=ci).border = thin_border
+            col += 2
+
+        # Lũy kế: 2 cols (CẮT + HỦY)
+        ws.merge_cells(start_row=1, start_column=col, end_row=1, end_column=col + 1)
+        c_lk = ws.cell(row=1, column=col, value="Lũy kế")
+        c_lk.font = Font(bold=True, size=11); c_lk.fill = total_fill
+        c_lk.alignment = center_align; c_lk.border = thin_border
+        ws.cell(row=1, column=col + 1).border = thin_border
+        lk_cut_col = col
+        lk_des_col = col + 1
+        c_lk_c = ws.cell(row=2, column=lk_cut_col, value="CẮT"); c_lk_c.font = Font(bold=True, size=9)
+        c_lk_c.fill = cut_fill; c_lk_c.alignment = center_align; c_lk_c.border = thin_border
+        c_lk_d = ws.cell(row=2, column=lk_des_col, value="HỦY"); c_lk_d.font = Font(bold=True, size=9)
+        c_lk_d.fill = des_fill; c_lk_d.alignment = center_align; c_lk_d.border = thin_border
+        for c_i in [lk_cut_col, lk_des_col]:
+            ws.cell(row=3, column=c_i).border = thin_border
+            ws.cell(row=3, column=c_i).fill = total_fill
+        last_col = lk_des_col
 
         # === DATA ===
-        data_start_row = 3
+        data_start_row = 4
         for li, lo_name in enumerate(lot_names):
             row_idx = data_start_row + li
             c = ws.cell(row=row_idx, column=1, value=lo_name)
             c.font = Font(bold=True); c.border = thin_border; c.alignment = center_align
-            lot_total = 0
+            lot_cut_total = 0
+            lot_des_total = 0
             for week in weeks:
-                col_idx = week_col_map[week]
-                val = int(df_cut_yr[(df_cut_yr["lo"] == lo_name) & (df_cut_yr["tuan"] == week)]["so_luong"].sum())
-                cell = ws.cell(row=row_idx, column=col_idx, value=val if val > 0 else "")
-                cell.border = thin_border; cell.alignment = center_align
-                lot_total += val
+                # CẮT BẮP
+                val_cut = int(df_cut_yr[(df_cut_yr["lo"] == lo_name) & (df_cut_yr["tuan"] == week)]["so_luong"].sum())
+                cell_c = ws.cell(row=row_idx, column=week_cut_col[week], value=val_cut if val_cut > 0 else "")
+                cell_c.border = thin_border; cell_c.alignment = center_align
+                lot_cut_total += val_cut
+                # XUẤT HỦY
+                val_des = 0
+                if not df_xh_yr.empty:
+                    val_des = int(df_xh_yr[(df_xh_yr["lo"] == lo_name) & (df_xh_yr["tuan"] == week)]["so_luong"].sum())
+                cell_d = ws.cell(row=row_idx, column=week_des_col[week], value=val_des if val_des > 0 else "")
+                cell_d.border = thin_border; cell_d.alignment = center_align
+                lot_des_total += val_des
             # Lũy kế
-            c_gt_val = ws.cell(row=row_idx, column=grand_col, value=lot_total if lot_total > 0 else "")
-            c_gt_val.font = Font(bold=True); c_gt_val.fill = PatternFill(start_color="FFF3E0", end_color="FFF3E0", fill_type="solid")
-            c_gt_val.border = thin_border; c_gt_val.alignment = center_align
+            c_lc = ws.cell(row=row_idx, column=lk_cut_col, value=lot_cut_total if lot_cut_total > 0 else "")
+            c_lc.font = Font(bold=True); c_lc.fill = PatternFill(start_color="FFF3E0", end_color="FFF3E0", fill_type="solid")
+            c_lc.border = thin_border; c_lc.alignment = center_align
+            c_ld = ws.cell(row=row_idx, column=lk_des_col, value=lot_des_total if lot_des_total > 0 else "")
+            c_ld.font = Font(bold=True); c_ld.fill = PatternFill(start_color="F3E5F5", end_color="F3E5F5", fill_type="solid")
+            c_ld.border = thin_border; c_ld.alignment = center_align
 
         # === TOTAL ROW ===
         total_row = data_start_row + len(lot_names)
         c = ws.cell(row=total_row, column=1, value="Tổng")
         c.font = Font(bold=True, size=11); c.fill = total_fill
         c.border = thin_border; c.alignment = center_align
-        for ci in range(2, col_offset):
+        for ci in range(2, last_col + 1):
             col_sum = sum(int(ws.cell(row=r, column=ci).value) for r in range(data_start_row, total_row) if isinstance(ws.cell(row=r, column=ci).value, (int, float)))
             c_tot = ws.cell(row=total_row, column=ci, value=col_sum if col_sum > 0 else "")
             c_tot.font = Font(bold=True); c_tot.fill = total_fill
             c_tot.border = thin_border; c_tot.alignment = center_align
 
         ws.column_dimensions[get_column_letter(1)].width = 8
-        for ci in range(2, col_offset):
-            ws.column_dimensions[get_column_letter(ci)].width = 12
-        ws.freeze_panes = "B3"
+        for ci in range(2, last_col + 1):
+            ws.column_dimensions[get_column_letter(ci)].width = 11
+        ws.freeze_panes = "B4"
 
     output = io.BytesIO(); wb.save(output); output.seek(0)
     return output.getvalue()
@@ -1959,7 +2013,8 @@ def render_global_data_tab(c_farm):
                 sel_cat = st.radio("Chọn Farm", available_farms, key="pop_farm_cat", horizontal=True)
                 fl = _filter_by_farm(df_lots_all, sel_cat)
                 fs = _filter_by_farm(df_stg_all, sel_cat)
-                cut_excel = generate_cut_bap_excel(fl, fs)
+                fd = _filter_by_farm(df_des_all, sel_cat)
+                cut_excel = generate_cut_bap_excel(fl, fs, fd)
                 fn = f"Bao_cao_cat_bap_{sel_cat}_{date.today().strftime('%Y%m%d')}.xlsx"
                 st.download_button("⬇️ Tải về", data=cut_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
@@ -1980,7 +2035,7 @@ def render_global_data_tab(c_farm):
             st.markdown(href, unsafe_allow_html=True)
 
         with col_t4:
-            cut_excel = generate_cut_bap_excel(df_lots_all, df_stg_all)
+            cut_excel = generate_cut_bap_excel(df_lots_all, df_stg_all, df_des_all)
             fn = f"Bao_cao_cat_bap_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx"
             href = _gen_dl_link(cut_excel, fn, "btn-cat", "Báo cáo Cắt bắp")
             st.markdown(href, unsafe_allow_html=True)
