@@ -1671,15 +1671,44 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
             df_xh["ngay_xuat_huy"].dt.isocalendar().week
         ).astype(int)
 
-    # Lot names union
-    lot_names_set = set()
-    if not df_lots.empty and "lo" in df_lots.columns:
-        lot_names_set.update(df_lots["lo"].dropna().unique())
-    if "lo" in df_cut.columns:
-        lot_names_set.update(df_cut["lo"].dropna().unique())
-    if not df_xh.empty and "lo" in df_xh.columns:
-        lot_names_set.update(df_xh["lo"].dropna().unique())
-    lot_names = sorted(lot_names_set)
+    # ── Build lot display names (chia đợt giống chích bắp) ──
+    import re as _re_cut
+    lot_batch_keys = []
+    if not df_lots.empty and "id" in df_lots.columns:
+        lot_groups = df_lots.groupby("lo")
+        for lo_name, grp in lot_groups:
+            if len(grp) > 1:
+                sorted_grp = grp.sort_values("ngay_trong") if "ngay_trong" in grp.columns else grp
+                for i, (_, b_row) in enumerate(sorted_grp.iterrows(), 1):
+                    lot_batch_keys.append((lo_name, b_row["id"], f"{lo_name} (đợt {i})"))
+            else:
+                for _, b_row in grp.iterrows():
+                    lot_batch_keys.append((lo_name, b_row["id"], lo_name))
+    # Also include lots from df_cut/df_xh that might not be in df_lots
+    active_blids_cut = set()
+    if not df_cut.empty and "base_lot_id" in df_cut.columns:
+        active_blids_cut.update(df_cut["base_lot_id"].dropna().astype(int).unique())
+    if not df_xh.empty and "base_lot_id" in df_xh.columns:
+        active_blids_cut.update(df_xh["base_lot_id"].dropna().astype(int).unique())
+    # Keep only lots that have data
+    lot_batch_keys = [x for x in lot_batch_keys if x[1] in active_blids_cut]
+    mapped_blids = {x[1] for x in lot_batch_keys}
+    for blid in active_blids_cut - mapped_blids:
+        lo_name = ""
+        if "lo" in df_cut.columns:
+            _m = df_cut[df_cut["base_lot_id"] == blid]["lo"]
+            lo_name = _m.iloc[0] if not _m.empty else f"Lot_{blid}"
+        else:
+            lo_name = f"Lot_{blid}"
+        lot_batch_keys.append((lo_name, blid, lo_name))
+
+    def _nat_sort_cut(item):
+        name = item[2]
+        m_batch = _re_cut.match(r"^(.+?)\s*\(đợt\s*(\d+)\)$", name)
+        base_name, batch_num = (m_batch.group(1), int(m_batch.group(2))) if m_batch else (name, 0)
+        m_num = _re_cut.match(r"^(\d+)(.*)", base_name)
+        return (int(m_num.group(1)), m_num.group(2), batch_num) if m_num else (9999, base_name, batch_num)
+    lot_batch_keys.sort(key=_nat_sort_cut)
 
     # Resolve farm_id for ribbon lookup
     _excel_farm_id = None
@@ -1785,22 +1814,34 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
         last_col = lk_des_col
 
         # === DATA ===
+        # Filter lot_batch_keys to only include lots with data this year
+        yr_blids = set()
+        if "base_lot_id" in df_cut_yr.columns:
+            yr_blids.update(df_cut_yr["base_lot_id"].dropna().astype(int).unique())
+        if not df_xh_yr.empty and "base_lot_id" in df_xh_yr.columns:
+            yr_blids.update(df_xh_yr["base_lot_id"].dropna().astype(int).unique())
+        yr_lots = [x for x in lot_batch_keys if x[1] in yr_blids]
+
         data_start_row = 4
-        for li, lo_name in enumerate(lot_names):
+        for li, (lo_name, blid, display_name) in enumerate(yr_lots):
             row_idx = data_start_row + li
-            c = ws.cell(row=row_idx, column=1, value=lo_name)
+            c = ws.cell(row=row_idx, column=1, value=display_name)
             c.font = Font(bold=True); c.border = thin_border; c.alignment = center_align
             lot_cut_total = 0
             lot_des_total = 0
             for week in weeks:
-                # CẮT BẮP
-                val_cut = int(df_cut_yr[(df_cut_yr["lo"] == lo_name) & (df_cut_yr["tuan"] == week)]["so_luong"].sum())
+                # CẮT BẮP — filter by base_lot_id
+                cut_mask = (df_cut_yr["base_lot_id"] == blid) & (df_cut_yr["tuan"] == week) if "base_lot_id" in df_cut_yr.columns else (df_cut_yr["lo"] == lo_name) & (df_cut_yr["tuan"] == week)
+                val_cut = int(df_cut_yr[cut_mask]["so_luong"].sum())
                 cell_c = ws.cell(row=row_idx, column=week_cut_col[week], value=val_cut if val_cut > 0 else "")
                 cell_c.border = thin_border; cell_c.alignment = center_align
                 lot_cut_total += val_cut
-                # XUẤT HỦY
+                # XUẤT HỦY — filter by base_lot_id
                 val_des = 0
-                if not df_xh_yr.empty:
+                if not df_xh_yr.empty and "base_lot_id" in df_xh_yr.columns:
+                    des_mask = (df_xh_yr["base_lot_id"] == blid) & (df_xh_yr["tuan"] == week)
+                    val_des = int(df_xh_yr[des_mask]["so_luong"].sum())
+                elif not df_xh_yr.empty:
                     val_des = int(df_xh_yr[(df_xh_yr["lo"] == lo_name) & (df_xh_yr["tuan"] == week)]["so_luong"].sum())
                 cell_d = ws.cell(row=row_idx, column=week_des_col[week], value=val_des if val_des > 0 else "")
                 cell_d.border = thin_border; cell_d.alignment = center_align
@@ -1814,7 +1855,7 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
             c_ld.border = thin_border; c_ld.alignment = center_align
 
         # === TOTAL ROW ===
-        total_row = data_start_row + len(lot_names)
+        total_row = data_start_row + len(yr_lots)
         c = ws.cell(row=total_row, column=1, value="Tổng")
         c.font = Font(bold=True, size=11); c.fill = total_fill
         c.border = thin_border; c.alignment = center_align
@@ -1824,7 +1865,7 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
             c_tot.font = Font(bold=True); c_tot.fill = total_fill
             c_tot.border = thin_border; c_tot.alignment = center_align
 
-        ws.column_dimensions[get_column_letter(1)].width = 8
+        ws.column_dimensions[get_column_letter(1)].width = 14
         for ci in range(2, last_col + 1):
             ws.column_dimensions[get_column_letter(ci)].width = 11
         ws.freeze_panes = "B4"
