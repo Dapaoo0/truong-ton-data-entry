@@ -2572,8 +2572,8 @@ def render_global_data_tab(c_farm):
                 if pd.notna(_dt_val):
                     _dt_trong_map[_blid] = float(_dt_val)
 
-        # Map base_lot_id → giai_doan from seasons/lot_info
-        _blid_gd_map = {}  # base_lot_id → giai_doan
+        # Map base_lot_id → {gd, chich, cat, thu} from seasons/lot_info
+        _blid_stats_map = {}  # base_lot_id → {gd, chich, cat, thu}
         if not df_seasons.empty and "base_lot_id" in df_seasons.columns:
             for lo_name_s in lot_info_map:
                 info_s = lot_info_map[lo_name_s]
@@ -2584,24 +2584,37 @@ def render_global_data_tab(c_farm):
                 for batch_info, (_, s_row) in zip(info_s["batches"], lo_seasons_s.iterrows()):
                     blid_s = s_row.get("base_lot_id")
                     if blid_s and pd.notna(blid_s):
-                        _blid_gd_map[int(blid_s)] = batch_info["gd"]
+                        _blid_stats_map[int(blid_s)] = {
+                            "gd": batch_info["gd"],
+                            "chich": batch_info.get("chich", 0),
+                            "cat": batch_info.get("cat", 0),
+                            "thu": batch_info.get("thu", 0),
+                            "so_cay": batch_info.get("so_cay", 0),
+                        }
 
+        # ── Tính diện tích theo tỷ lệ cây thực tế ──
+        # VD: 500 cây / 5 ha → chích 200 cây = 200/500 * 5 = 2 ha
         _area_planted = 0.0      # Tổng DT đã trồng
         _area_growing = 0.0      # Đang sinh trưởng
         _area_chich = 0.0        # Chích bắp
         _area_cat = 0.0          # Cắt bắp
         _area_harvest = 0.0      # Thu hoạch
-        for _blid, _gd in _blid_gd_map.items():
+        for _blid, _stats in _blid_stats_map.items():
             _dt = _dt_trong_map.get(_blid, 0)
             _area_planted += _dt
-            if _gd == "Đang sinh trưởng":
-                _area_growing += _dt
-            elif _gd == "Chích bắp":
-                _area_chich += _dt
-            elif _gd == "Cắt bắp":
-                _area_cat += _dt
-            elif _gd == "Thu hoạch":
-                _area_harvest += _dt
+            _total_cay = _stats["so_cay"]
+            if _total_cay <= 0 or _dt <= 0:
+                continue
+            # Tính số cây ở mỗi giai đoạn (proportional)
+            _n_thu = max(_stats["thu"], 0)
+            _n_cat = max(_stats["cat"] - _n_thu, 0)   # đã cắt nhưng chưa thu
+            _n_chich = max(_stats["chich"] - _stats["cat"], 0)  # đã chích nhưng chưa cắt
+            _n_grow = max(_total_cay - _stats["chich"], 0)  # chưa chích
+            _ratio = _dt / _total_cay
+            _area_harvest += _n_thu * _ratio
+            _area_cat += _n_cat * _ratio
+            _area_chich += _n_chich * _ratio
+            _area_growing += _n_grow * _ratio
 
         # Build info panel HTML
         _info_rows = [
