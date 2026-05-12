@@ -2571,12 +2571,6 @@ def render_global_data_tab(c_farm):
                 _dt_val = _r.get("dien_tich_trong")
                 if pd.notna(_dt_val):
                     _dt_trong_map[_blid] = float(_dt_val)
-                else:
-                    # Fallback: dien_tich (lot max) / số đợt cùng lô
-                    _lo = _r.get("lo")
-                    _lot_dt = _r.get("dien_tich")
-                    if pd.notna(_lot_dt):
-                        _dt_trong_map[_blid] = float(_lot_dt)
 
         # Map base_lot_id → giai_doan from seasons/lot_info
         _blid_gd_map = {}  # base_lot_id → giai_doan
