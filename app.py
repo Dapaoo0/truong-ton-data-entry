@@ -1749,18 +1749,47 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
             ws.cell(row=1, column=1, value=f"Chưa có dữ liệu năm {year}.")
             continue
 
-        # === HEADER: 3 rows ===
-        # Row 1: "Lô" merged R1-R3 | "Tuần X" merged across 2 cols
-        # Row 2: (merged)          | "CẮT BẮP" | "XUẤT HỦY"
-        # Row 3: (merged)          | màu dây    | màu dây
-        ws.merge_cells(start_row=1, start_column=1, end_row=3, end_column=1)
+        # === Helper: forecast harvest label ===
+        def _forecast_harvest_label(cut_week, cut_year):
+            """Tạo label dự báo thu hoạch: '25 (+8)/26 (+9)'.
+            Nếu chuyển năm: '5-2027 (+8)/6-2027 (+9)'."""
+            from datetime import date as _date
+            dec_28 = _date(cut_year, 12, 28)
+            max_week = dec_28.isocalendar()[1]  # 52 or 53
+
+            h8_week = cut_week + 7  # 8 tuần tính cả tuần cắt
+            h9_week = cut_week + 8  # 9 tuần tính cả tuần cắt
+            h8_year = cut_year
+            h9_year = cut_year
+
+            if h8_week > max_week:
+                h8_week -= max_week
+                h8_year += 1
+            if h9_week > max_week:
+                h9_week -= max_week
+                h9_year += 1
+
+            # Cùng năm → chỉ số tuần; khác năm → kèm năm
+            h8_str = f"{h8_week}" if h8_year == cut_year else f"{h8_week}-{h8_year}"
+            h9_str = f"{h9_week}" if h9_year == cut_year else f"{h9_week}-{h9_year}"
+
+            return f"{h8_str} (+8)/{h9_str} (+9)"
+
+        forecast_fill = PatternFill(start_color="FFF9C4", end_color="FFF9C4", fill_type="solid")
+
+        # === HEADER: 4 rows ===
+        # Row 1: "Lô" merged R1-R4 | Dự báo thu hoạch merged 2 cols
+        # Row 2: (merged)          | "Tuần X" merged across 2 cols
+        # Row 3: (merged)          | "CẮT BẮP" | "XUẤT HỦY"
+        # Row 4: (merged)          | màu dây    | màu dây
+        ws.merge_cells(start_row=1, start_column=1, end_row=4, end_column=1)
         c_lo = ws.cell(row=1, column=1, value="Lô")
         c_lo.font = Font(bold=True, size=10); c_lo.fill = header_fill
         c_lo.border = thin_border; c_lo.alignment = center_align
 
         col = 2
-        week_cut_col = {}   # week → col index of CẮT BẮP
-        week_des_col = {}   # week → col index of XUẤT HỦY
+        week_cut_col = {}   # week -> col index of CẮT BẮP
+        week_des_col = {}   # week -> col index of XUẤT HỦY
         for week in weeks:
             cut_col = col
             des_col = col + 1
@@ -1769,48 +1798,58 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
             color_name = week_color.get(week, "")
             color_fill_cell = get_mau_day_fill(color_name)
 
-            # Row 1: "Tuần X" merged
+            # Row 1: Dự báo thu hoạch merged
+            forecast_label = _forecast_harvest_label(week, year)
             ws.merge_cells(start_row=1, start_column=cut_col, end_row=1, end_column=des_col)
-            c_w = ws.cell(row=1, column=cut_col, value=f"Tuần {week}")
-            c_w.font = Font(bold=True, size=11); c_w.fill = header_fill
-            c_w.alignment = center_align; c_w.border = thin_border
+            c_fc = ws.cell(row=1, column=cut_col, value=forecast_label)
+            c_fc.font = Font(bold=True, size=9, italic=True); c_fc.fill = forecast_fill
+            c_fc.alignment = center_align; c_fc.border = thin_border
             ws.cell(row=1, column=des_col).border = thin_border
 
-            # Row 2: "CẮT BẮP" | "XUẤT HỦY"
-            c_cut = ws.cell(row=2, column=cut_col, value="CẮT BẮP")
+            # Row 2: "Tuần X" merged
+            ws.merge_cells(start_row=2, start_column=cut_col, end_row=2, end_column=des_col)
+            c_w = ws.cell(row=2, column=cut_col, value=f"Tuần {week}")
+            c_w.font = Font(bold=True, size=11); c_w.fill = header_fill
+            c_w.alignment = center_align; c_w.border = thin_border
+            ws.cell(row=2, column=des_col).border = thin_border
+
+            # Row 3: "CẮT BẮP" | "XUẤT HỦY"
+            c_cut = ws.cell(row=3, column=cut_col, value="CẮT BẮP")
             c_cut.font = Font(bold=True, size=9); c_cut.fill = white_fill
             c_cut.alignment = center_align; c_cut.border = thin_border
-            c_des = ws.cell(row=2, column=des_col, value="XUẤT HỦY")
+            c_des = ws.cell(row=3, column=des_col, value="XUẤT HỦY")
             c_des.font = Font(bold=True, size=9); c_des.fill = white_fill
             c_des.alignment = center_align; c_des.border = thin_border
 
-            # Row 3: màu dây
-            c_r3a = ws.cell(row=3, column=cut_col, value=color_name)
-            c_r3a.font = Font(bold=True, size=8)
-            c_r3a.fill = color_fill_cell if color_fill_cell else white_fill
-            c_r3a.alignment = center_align; c_r3a.border = thin_border
-            c_r3b = ws.cell(row=3, column=des_col, value=color_name)
-            c_r3b.font = Font(bold=True, size=8)
-            c_r3b.fill = color_fill_cell if color_fill_cell else white_fill
-            c_r3b.alignment = center_align; c_r3b.border = thin_border
+            # Row 4: màu dây
+            c_r4a = ws.cell(row=4, column=cut_col, value=color_name)
+            c_r4a.font = Font(bold=True, size=8)
+            c_r4a.fill = color_fill_cell if color_fill_cell else white_fill
+            c_r4a.alignment = center_align; c_r4a.border = thin_border
+            c_r4b = ws.cell(row=4, column=des_col, value=color_name)
+            c_r4b.font = Font(bold=True, size=8)
+            c_r4b.fill = color_fill_cell if color_fill_cell else white_fill
+            c_r4b.alignment = center_align; c_r4b.border = thin_border
 
             col += 2
 
         # Lũy kế: 2 cols (CẮT + HỦY)
-        ws.merge_cells(start_row=1, start_column=col, end_row=1, end_column=col + 1)
+        ws.merge_cells(start_row=1, start_column=col, end_row=2, end_column=col + 1)
         c_lk = ws.cell(row=1, column=col, value="Lũy kế")
         c_lk.font = Font(bold=True, size=11); c_lk.fill = total_fill
         c_lk.alignment = center_align; c_lk.border = thin_border
         ws.cell(row=1, column=col + 1).border = thin_border
+        ws.cell(row=2, column=col).border = thin_border
+        ws.cell(row=2, column=col + 1).border = thin_border
         lk_cut_col = col
         lk_des_col = col + 1
-        c_lk_c = ws.cell(row=2, column=lk_cut_col, value="CẮT"); c_lk_c.font = Font(bold=True, size=9)
+        c_lk_c = ws.cell(row=3, column=lk_cut_col, value="CẮT"); c_lk_c.font = Font(bold=True, size=9)
         c_lk_c.fill = white_fill; c_lk_c.alignment = center_align; c_lk_c.border = thin_border
-        c_lk_d = ws.cell(row=2, column=lk_des_col, value="HỦY"); c_lk_d.font = Font(bold=True, size=9)
+        c_lk_d = ws.cell(row=3, column=lk_des_col, value="HỦY"); c_lk_d.font = Font(bold=True, size=9)
         c_lk_d.fill = white_fill; c_lk_d.alignment = center_align; c_lk_d.border = thin_border
         for c_i in [lk_cut_col, lk_des_col]:
-            ws.cell(row=3, column=c_i).border = thin_border
-            ws.cell(row=3, column=c_i).fill = total_fill
+            ws.cell(row=4, column=c_i).border = thin_border
+            ws.cell(row=4, column=c_i).fill = total_fill
         last_col = lk_des_col
 
         # === DATA ===
@@ -1822,7 +1861,7 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
             yr_blids.update(df_xh_yr["base_lot_id"].dropna().astype(int).unique())
         yr_lots = [x for x in lot_batch_keys if x[1] in yr_blids]
 
-        data_start_row = 4
+        data_start_row = 5
         for li, (lo_name, blid, display_name) in enumerate(yr_lots):
             row_idx = data_start_row + li
             c = ws.cell(row=row_idx, column=1, value=display_name)
@@ -1868,7 +1907,7 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
         ws.column_dimensions[get_column_letter(1)].width = 14
         for ci in range(2, last_col + 1):
             ws.column_dimensions[get_column_letter(ci)].width = 11
-        ws.freeze_panes = "B4"
+        ws.freeze_panes = "B5"
 
     output = io.BytesIO(); wb.save(output); output.seek(0)
     return output.getvalue()
@@ -2233,6 +2272,174 @@ def render_global_data_tab(c_farm):
     st.divider()
 
     # ═══════════════════════════════════════════════════════════════════
+    # 🗺️ SHARED MAP CONSTANTS & HELPERS  (dùng cho cả Farm 157 & 195)
+    # ═══════════════════════════════════════════════════════════════════
+    _MAP_STAGE_COLORS = {
+        "Đang sinh trưởng": "#00b894",
+        "Chích bắp": "#fdcb6e",
+        "Cắt bắp": "#e17055",
+        "Thu hoạch": "#0984e3",
+    }
+    _MAP_STAGE_COLORS_JSON = json.dumps(_MAP_STAGE_COLORS, ensure_ascii=False)
+    _MAP_DEFAULT_COLOR = "#636e72"
+
+    def _map_point_in_polygon(px, py, pts):
+        """Ray casting algorithm."""
+        n = len(pts)
+        inside = False
+        j = n - 1
+        for i in range(n):
+            xi, yi = pts[i]
+            xj, yj = pts[j]
+            if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi) + xi):
+                inside = not inside
+            j = i
+        return inside
+
+    def _map_geometric_centroid(pts):
+        """Shoelace-based area centroid — trọng tâm diện tích chính xác."""
+        n = len(pts)
+        if n < 3:
+            return sum(p[0] for p in pts)/n, sum(p[1] for p in pts)/n
+        signed_area = 0
+        cx = cy = 0
+        for i in range(n):
+            x0, y0 = pts[i]
+            x1, y1 = pts[(i + 1) % n]
+            cross = x0 * y1 - x1 * y0
+            signed_area += cross
+            cx += (x0 + x1) * cross
+            cy += (y0 + y1) * cross
+        signed_area *= 0.5
+        if abs(signed_area) < 1e-10:
+            return sum(p[0] for p in pts)/n, sum(p[1] for p in pts)/n
+        cx /= (6 * signed_area)
+        cy /= (6 * signed_area)
+        return cx, cy
+
+    def _map_pole_of_inaccessibility(pts):
+        """Simple grid-search for the 'visual center'."""
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        best = (sum(xs)/len(xs), sum(ys)/len(ys))
+        best_dist = 0
+        steps = 12
+        for xi in range(steps + 1):
+            for yi in range(steps + 1):
+                px = min_x + (max_x - min_x) * xi / steps
+                py = min_y + (max_y - min_y) * yi / steps
+                if _map_point_in_polygon(px, py, pts):
+                    min_edge_dist = float('inf')
+                    n = len(pts)
+                    for i in range(n):
+                        x1, y1 = pts[i]
+                        x2, y2 = pts[(i + 1) % n]
+                        dx, dy = x2 - x1, y2 - y1
+                        if dx == 0 and dy == 0:
+                            d = ((px - x1)**2 + (py - y1)**2)**0.5
+                        else:
+                            t = max(0, min(1, ((px - x1)*dx + (py - y1)*dy) / (dx*dx + dy*dy)))
+                            d = ((px - (x1 + t*dx))**2 + (py - (y1 + t*dy))**2)**0.5
+                        min_edge_dist = min(min_edge_dist, d)
+                    if min_edge_dist > best_dist:
+                        best_dist = min_edge_dist
+                        best = (px, py)
+        return best
+
+    def _map_best_label_pos(pts):
+        """Hybrid: geometric centroid → fallback pole of inaccessibility."""
+        cx, cy = _map_geometric_centroid(pts)
+        if _map_point_in_polygon(cx, cy, pts):
+            return cx, cy
+        return _map_pole_of_inaccessibility(pts)
+
+    # ─── Shared: compute_batch_stats (dùng cho Map 157, Map 195, Table) ───
+    HARVEST_MIN_GROWTH_WEEKS = 18
+
+    def compute_batch_stats(lo_name, base_lot_id, vu="F0", season_start=None,
+                            season_end=None, next_season_start=None, next_vu_producing=False):
+        """Tính (giai_doan, so_chich, so_cat, so_thu) cho 1 batch/season."""
+        so_chich, so_cat, so_thu = 0, 0, 0
+        season_start_ts = pd.Timestamp(season_start) if season_start is not None else None
+        if not df_stg_all.empty and "lo" in df_stg_all.columns and "base_lot_id" in df_stg_all.columns:
+            stg = df_stg_all[(df_stg_all["lo"] == lo_name) & (df_stg_all["base_lot_id"] == base_lot_id)]
+            if season_start_ts is not None and not stg.empty and "ngay_thuc_hien" in stg.columns:
+                stg_dates = pd.to_datetime(stg["ngay_thuc_hien"], errors="coerce")
+                stg = stg[stg_dates >= season_start_ts]
+            if next_season_start is not None and next_vu_producing and not stg.empty and "ngay_thuc_hien" in stg.columns:
+                stg_dates = pd.to_datetime(stg["ngay_thuc_hien"], errors="coerce")
+                stg = stg[stg_dates < pd.Timestamp(next_season_start)]
+            if not stg.empty:
+                c = stg[stg["giai_doan"] == "Chích bắp"]
+                k = stg[stg["giai_doan"] == "Cắt bắp"]
+                so_chich = int(c["so_luong"].sum()) if not c.empty else 0
+                so_cat = int(k["so_luong"].sum()) if not k.empty else 0
+        if not df_har_all.empty and "lo" in df_har_all.columns and "base_lot_id" in df_har_all.columns:
+            har = df_har_all[(df_har_all["lo"] == lo_name) & (df_har_all["base_lot_id"] == base_lot_id)]
+            if not har.empty and "ngay_thu_hoach" in har.columns:
+                har_dates = pd.to_datetime(har["ngay_thu_hoach"], errors="coerce")
+                if season_start_ts is not None:
+                    har = har[har_dates >= season_start_ts]
+                    har_dates = pd.to_datetime(har["ngay_thu_hoach"], errors="coerce")
+                if vu != "F0" and season_start is not None:
+                    harvest_min = pd.Timestamp(season_start) + pd.Timedelta(weeks=HARVEST_MIN_GROWTH_WEEKS)
+                    har = har[har_dates >= harvest_min]
+                    har_dates = pd.to_datetime(har["ngay_thu_hoach"], errors="coerce")
+                if next_season_start is not None and next_vu_producing:
+                    harvest_upper = pd.Timestamp(next_season_start) + pd.Timedelta(weeks=HARVEST_MIN_GROWTH_WEEKS)
+                    har = har[har_dates < harvest_upper]
+            so_thu = int(har["so_luong"].sum()) if not har.empty else 0
+        if vu != "F0" and so_chich == 0:
+            so_thu = 0
+        gd = "Đang sinh trưởng"
+        if so_thu > 0: gd = "Thu hoạch"
+        elif so_cat > 0: gd = "Cắt bắp"
+        elif so_chich > 0: gd = "Chích bắp"
+        return gd, so_chich, so_cat, so_thu
+
+    # ─── Build next_season_map (dùng chung cho Map 157, 195, Table) ───
+    _map_next_season = {}
+    _map_next_producing = set()
+    if not df_seasons.empty and not df_stg_all.empty and "base_lot_id" in df_stg_all.columns:
+        stg_chich_all = df_stg_all[df_stg_all["giai_doan"] == "Chích bắp"]
+        for _, s_row in df_seasons[df_seasons["base_lot_id"].notna()].iterrows():
+            s_blid = int(s_row["base_lot_id"])
+            s_vu = s_row["vu"]
+            s_start = pd.to_datetime(s_row["ngay_bat_dau"])
+            chich_batch = stg_chich_all[stg_chich_all["base_lot_id"] == s_blid]
+            if not chich_batch.empty and "ngay_thuc_hien" in chich_batch.columns:
+                chich_in = chich_batch[pd.to_datetime(chich_batch["ngay_thuc_hien"], errors="coerce") >= s_start]
+                if not chich_in.empty:
+                    _map_next_producing.add((s_blid, s_vu))
+    if not df_seasons.empty and "base_lot_id" in df_seasons.columns:
+        for blid, blid_grp in df_seasons[df_seasons["base_lot_id"].notna()].groupby("base_lot_id"):
+            sorted_s = blid_grp.sort_values("ngay_bat_dau").drop_duplicates("vu")
+            vu_list = sorted_s[["vu", "ngay_bat_dau"]].values.tolist()
+            for i, (vu_val, start_dt) in enumerate(vu_list):
+                if i + 1 < len(vu_list):
+                    next_vu = vu_list[i + 1][0]
+                    if (int(blid), next_vu) in _map_next_producing:
+                        _map_next_season[(int(blid), vu_val)] = pd.to_datetime(vu_list[i + 1][1])
+                    else:
+                        _map_next_season[(int(blid), vu_val)] = None
+                else:
+                    _map_next_season[(int(blid), vu_val)] = None
+
+    # ─── Shared batch_label_map ───
+    batch_label_map = {}
+    if not df_lots_trong_moi.empty and "id" in df_lots_trong_moi.columns and "lo" in df_lots_trong_moi.columns:
+        for lo_name_grp, grp_df in df_lots_trong_moi.groupby("lo"):
+            if len(grp_df) > 1:
+                sorted_grp = grp_df.sort_values("ngay_trong") if "ngay_trong" in grp_df.columns else grp_df
+                for i, (_, b_row) in enumerate(sorted_grp.iterrows(), 1):
+                    batch_label_map[b_row["id"]] = f"{lo_name_grp} (đợt {i})"
+            else:
+                for _, b_row in grp_df.iterrows():
+                    batch_label_map[b_row["id"]] = lo_name_grp
+
+    # ═══════════════════════════════════════════════════════════════════
     # 🗺️ BẢN ĐỒ TƯƠNG TÁC FARM 157
     # ═══════════════════════════════════════════════════════════════════
     POLYGON_JSON_PATH = os.path.join(os.path.dirname(__file__), "farm_157_polygons.json")
@@ -2244,7 +2451,7 @@ def render_global_data_tab(c_farm):
             polygon_data = json.load(f)
 
         # ── Query dim_lo.area_ha cho tất cả lô Farm 157 ──
-        _dim_lo_area_map = {}  # lo_code → area_ha
+        _dim_lo_area_map = {}
         try:
             _dim_lo_all = supabase.table("dim_lo").select("lo_code, area_ha, dim_farm!inner(farm_name)").eq("is_active", True).eq("dim_farm.farm_name", "Farm 157").execute()
             if _dim_lo_all.data:
@@ -2257,112 +2464,7 @@ def render_global_data_tab(c_farm):
             pass
 
         # ── Build lot info từ DB data (per-batch tracking) ──
-        lot_info_map = {}  # lo_name → {info dict with batches}
-
-        # ─── Shared: compute_batch_stats ───
-        # Hàm dùng chung cho Map & Table để đảm bảo đồng bộ logic xác định giai đoạn.
-        HARVEST_MIN_GROWTH_WEEKS = 18
-
-        def compute_batch_stats(lo_name, base_lot_id, vu="F0", season_start=None,
-                                season_end=None, next_season_start=None, next_vu_producing=False):
-            """Tính (giai_doan, so_chich, so_cat, so_thu) cho 1 batch/season.
-            Áp dụng đầy đủ business rules (business_logic.md):
-              1. Filter stage_logs/harvest theo season date range (start ≤ date)
-              2. Harvest Growth Buffer: F1+ chỉ tính harvest >= season_start + 18w
-              3. Harvest upper bound: next_season_start + 18w (nếu next vu đang sản xuất)
-              4. F1+ chưa có chích bắp → so_thu = 0
-            """
-            so_chich, so_cat, so_thu = 0, 0, 0
-            season_start_ts = pd.Timestamp(season_start) if season_start is not None else None
-
-            # ── Stage logs (chích bắp, cắt bắp) ──
-            if not df_stg_all.empty and "lo" in df_stg_all.columns and "base_lot_id" in df_stg_all.columns:
-                stg = df_stg_all[(df_stg_all["lo"] == lo_name) & (df_stg_all["base_lot_id"] == base_lot_id)]
-                # Filter theo season start date
-                if season_start_ts is not None and not stg.empty and "ngay_thuc_hien" in stg.columns:
-                    stg_dates = pd.to_datetime(stg["ngay_thuc_hien"], errors="coerce")
-                    stg = stg[stg_dates >= season_start_ts]
-                # Upper bound: nếu vụ kế đang sản xuất → stage_logs chỉ tính < next_season_start
-                if next_season_start is not None and next_vu_producing and not stg.empty and "ngay_thuc_hien" in stg.columns:
-                    stg_dates = pd.to_datetime(stg["ngay_thuc_hien"], errors="coerce")
-                    stg = stg[stg_dates < pd.Timestamp(next_season_start)]
-                if not stg.empty:
-                    c = stg[stg["giai_doan"] == "Chích bắp"]
-                    k = stg[stg["giai_doan"] == "Cắt bắp"]
-                    so_chich = int(c["so_luong"].sum()) if not c.empty else 0
-                    so_cat = int(k["so_luong"].sum()) if not k.empty else 0
-
-            # ── Harvest logs ──
-            if not df_har_all.empty and "lo" in df_har_all.columns and "base_lot_id" in df_har_all.columns:
-                har = df_har_all[(df_har_all["lo"] == lo_name) & (df_har_all["base_lot_id"] == base_lot_id)]
-                if not har.empty and "ngay_thu_hoach" in har.columns:
-                    har_dates = pd.to_datetime(har["ngay_thu_hoach"], errors="coerce")
-                    # Filter >= season start
-                    if season_start_ts is not None:
-                        har = har[har_dates >= season_start_ts]
-                        har_dates = pd.to_datetime(har["ngay_thu_hoach"], errors="coerce")
-                    # Harvest Growth Buffer: F1+ chỉ tính harvest >= season_start + 18w
-                    if vu != "F0" and season_start is not None:
-                        harvest_min = pd.Timestamp(season_start) + pd.Timedelta(weeks=HARVEST_MIN_GROWTH_WEEKS)
-                        har = har[har_dates >= harvest_min]
-                        har_dates = pd.to_datetime(har["ngay_thu_hoach"], errors="coerce")
-                    # Upper bound: next_season_start + 18w (nếu vụ kế đang sản xuất)
-                    if next_season_start is not None and next_vu_producing:
-                        harvest_upper = pd.Timestamp(next_season_start) + pd.Timedelta(weeks=HARVEST_MIN_GROWTH_WEEKS)
-                        har = har[har_dates < harvest_upper]
-                so_thu = int(har["so_luong"].sum()) if not har.empty else 0
-
-            # Safety: F1+ chưa có chích bắp → chắc chắn chưa thu hoạch
-            if vu != "F0" and so_chich == 0:
-                so_thu = 0
-
-            # Xác định giai đoạn
-            gd = "Đang sinh trưởng"
-            if so_thu > 0: gd = "Thu hoạch"
-            elif so_cat > 0: gd = "Cắt bắp"
-            elif so_chich > 0: gd = "Chích bắp"
-            return gd, so_chich, so_cat, so_thu
-
-        # ─── Build next_season_map cho Map (dùng chung logic với Table) ───
-        _map_next_season = {}  # (base_lot_id, vu) → next_season_start or None
-        _map_next_producing = set()  # (base_lot_id, vu) đã có chích bắp
-        if not df_seasons.empty and not df_stg_all.empty and "base_lot_id" in df_stg_all.columns:
-            stg_chich_all = df_stg_all[df_stg_all["giai_doan"] == "Chích bắp"]
-            for _, s_row in df_seasons[df_seasons["base_lot_id"].notna()].iterrows():
-                s_blid = int(s_row["base_lot_id"])
-                s_vu = s_row["vu"]
-                s_start = pd.to_datetime(s_row["ngay_bat_dau"])
-                chich_batch = stg_chich_all[stg_chich_all["base_lot_id"] == s_blid]
-                if not chich_batch.empty and "ngay_thuc_hien" in chich_batch.columns:
-                    chich_in = chich_batch[pd.to_datetime(chich_batch["ngay_thuc_hien"], errors="coerce") >= s_start]
-                    if not chich_in.empty:
-                        _map_next_producing.add((s_blid, s_vu))
-        if not df_seasons.empty and "base_lot_id" in df_seasons.columns:
-            for blid, blid_grp in df_seasons[df_seasons["base_lot_id"].notna()].groupby("base_lot_id"):
-                sorted_s = blid_grp.sort_values("ngay_bat_dau").drop_duplicates("vu")
-                vu_list = sorted_s[["vu", "ngay_bat_dau"]].values.tolist()
-                for i, (vu_val, start_dt) in enumerate(vu_list):
-                    if i + 1 < len(vu_list):
-                        next_vu = vu_list[i + 1][0]
-                        if (int(blid), next_vu) in _map_next_producing:
-                            _map_next_season[(int(blid), vu_val)] = pd.to_datetime(vu_list[i + 1][1])
-                        else:
-                            _map_next_season[(int(blid), vu_val)] = None
-                    else:
-                        _map_next_season[(int(blid), vu_val)] = None
-
-        # ─── Shared batch_label_map: "Tên lô (đợt N)" cho các lô nhiều đợt trồng ───
-        # Dùng chung cho Map tooltip VÀ Bảng chi tiết
-        batch_label_map = {}  # {base_lot_id: "Tên lô (đợt N)" hoặc "Tên lô"}
-        if not df_lots_trong_moi.empty and "id" in df_lots_trong_moi.columns and "lo" in df_lots_trong_moi.columns:
-            for lo_name_grp, grp_df in df_lots_trong_moi.groupby("lo"):
-                if len(grp_df) > 1:
-                    sorted_grp = grp_df.sort_values("ngay_trong") if "ngay_trong" in grp_df.columns else grp_df
-                    for i, (_, b_row) in enumerate(sorted_grp.iterrows(), 1):
-                        batch_label_map[b_row["id"]] = f"{lo_name_grp} (đợt {i})"
-                else:
-                    for _, b_row in grp_df.iterrows():
-                        batch_label_map[b_row["id"]] = lo_name_grp
+        lot_info_map = {}
 
         if not df_seasons.empty and not df_lots_trong_moi.empty:
             for lo_name in df_lots_trong_moi["lo"].dropna().unique():
@@ -2437,101 +2539,10 @@ def render_global_data_tab(c_farm):
                     "batches": batches,
                 }
 
-        # ── Màu theo giai đoạn ──
-        stage_colors = {
-            "Đang sinh trưởng": "#00b894",
-            "Chích bắp": "#fdcb6e",
-            "Cắt bắp": "#e17055",
-            "Thu hoạch": "#0984e3",
-        }
-        stage_colors_json = json.dumps(stage_colors, ensure_ascii=False)
-        default_color = "#636e72"
-
-        # ── Label placement: geometric centroid + fallback ──
-        def _point_in_polygon(px, py, pts):
-            """Ray casting algorithm."""
-            n = len(pts)
-            inside = False
-            j = n - 1
-            for i in range(n):
-                xi, yi = pts[i]
-                xj, yj = pts[j]
-                if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi) + xi):
-                    inside = not inside
-                j = i
-            return inside
-
-        def _geometric_centroid(pts):
-            """Shoelace-based area centroid — trọng tâm diện tích chính xác."""
-            n = len(pts)
-            if n < 3:
-                return sum(p[0] for p in pts)/n, sum(p[1] for p in pts)/n
-            signed_area = 0
-            cx = cy = 0
-            for i in range(n):
-                x0, y0 = pts[i]
-                x1, y1 = pts[(i + 1) % n]
-                cross = x0 * y1 - x1 * y0
-                signed_area += cross
-                cx += (x0 + x1) * cross
-                cy += (y0 + y1) * cross
-            area6 = 3 * signed_area  # 6A = 3 * 2A
-            if abs(area6) < 1e-6:
-                return sum(p[0] for p in pts)/n, sum(p[1] for p in pts)/n
-            return cx / area6, cy / area6
-
-        def _dist_to_edge(px, py, pts):
-            """Min distance from point to polygon edges."""
-            min_d = float('inf')
-            n = len(pts)
-            for i in range(n):
-                x1, y1 = pts[i]
-                x2, y2 = pts[(i + 1) % n]
-                dx, dy = x2 - x1, y2 - y1
-                if dx == 0 and dy == 0:
-                    d = ((px - x1)**2 + (py - y1)**2) ** 0.5
-                else:
-                    t = max(0, min(1, ((px - x1) * dx + (py - y1) * dy) / (dx*dx + dy*dy)))
-                    d = ((px - (x1 + t*dx))**2 + (py - (y1 + t*dy))**2) ** 0.5
-                min_d = min(min_d, d)
-            return min_d
-
-        def _pole_of_inaccessibility(pts):
-            """Fallback: tìm điểm xa biên nhất (cho polygon lõm nặng)."""
-            xs = [p[0] for p in pts]
-            ys = [p[1] for p in pts]
-            min_x, max_x = min(xs), max(xs)
-            min_y, max_y = min(ys), max(ys)
-            best_x = (min_x + max_x) / 2
-            best_y = (min_y + max_y) / 2
-            best_d = -1
-            step_x = (max_x - min_x) / 10
-            step_y = (max_y - min_y) / 10
-            for _ in range(5):
-                for ix in range(11):
-                    for iy in range(11):
-                        cx = min_x + ix * step_x
-                        cy = min_y + iy * step_y
-                        if _point_in_polygon(cx, cy, pts):
-                            d = _dist_to_edge(cx, cy, pts)
-                            if d > best_d:
-                                best_d = d
-                                best_x = cx
-                                best_y = cy
-                min_x = best_x - step_x
-                max_x = best_x + step_x
-                min_y = best_y - step_y
-                max_y = best_y + step_y
-                step_x /= 5
-                step_y /= 5
-            return best_x, best_y
-
-        def _best_label_pos(pts):
-            """Hybrid: geometric centroid nếu nằm trong polygon, else pole of inaccessibility."""
-            cx, cy = _geometric_centroid(pts)
-            if _point_in_polygon(cx, cy, pts):
-                return cx, cy
-            return _pole_of_inaccessibility(pts)
+        # ── Màu và helpers: dùng shared _MAP_* đã định nghĩa ở trên ──
+        stage_colors = _MAP_STAGE_COLORS
+        stage_colors_json = _MAP_STAGE_COLORS_JSON
+        default_color = _MAP_DEFAULT_COLOR
 
         # ── Build SVG polygons ──
         img_w = polygon_data.get("image_width", 4000)
@@ -2568,7 +2579,7 @@ def render_global_data_tab(c_farm):
 
             # Hybrid label placement: geometric centroid → fallback pole of inaccessibility
             poly_pts = [(p["x"], p["y"]) for p in lot["points"]]
-            cx, cy = _best_label_pos(poly_pts)
+            cx, cy = _map_best_label_pos(poly_pts)
 
             svg_polygons += f'''
             <polygon class="lot-poly" points="{points_str}" fill="{fill}"
@@ -2670,572 +2681,246 @@ def render_global_data_tab(c_farm):
         for _label, _value, _color in _info_rows:
             info_panel_html += f'<div class="info-row"><span class="info-label">{_label}</span><span class="info-value" style="color:{_color}">{_value}</span></div>'
 
-        html_content = f'''
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-        <style>
-            * {{ margin:0; padding:0; box-sizing:border-box; }}
-            html {{
-                background: transparent;
-                width: 100%;
-                max-width: 100%;
-                overflow-x: hidden;   /* prevent horizontal scroll on iOS */
-            }}
-            body {{
-                background: transparent;
-                width: 100%;
-                max-width: 100%;
-                overflow-x: hidden;
-                overflow-y: hidden;
-                height: auto;
-                -webkit-text-size-adjust: 100%;  /* prevent iOS text inflation */
-            }}
-            .farm-map-container {{
-                position: relative;
-                width: 100%;
-                max-width: 100%;
-                background: #1a1a2e;
-                border-radius: 12px;
-                overflow: hidden;
-                border: 1px solid #2d3460;
-            }}
-            .farm-map-container svg {{
-                display: block;
-                width: 100%;
-                height: auto;
-            }}
-            .lot-poly {{
-                fill-opacity: 0.45;
-                stroke: rgba(255,255,255,0.5);
-                stroke-width: 3;
-                cursor: pointer;
-                transition: fill-opacity 0.2s, stroke-width 0.2s;
-            }}
-            .lot-poly:hover {{
-                fill-opacity: 0.75;
-                stroke: #fff;
-                stroke-width: 5;
-            }}
-            .lot-poly.pinned {{
-                fill-opacity: 0.85;
-                stroke: #6366f1;
-                stroke-width: 6;
-            }}
-            .lot-label {{
-                font-family: 'Segoe UI', system-ui, sans-serif;
-                font-size: 47px;
-                font-weight: 700;
-                fill: #fff;
-                text-anchor: middle;
-                dominant-baseline: central;
-                pointer-events: none;
-                text-shadow: 0 2px 6px rgba(0,0,0,0.7);
-            }}
-            .map-tooltip {{
-                position: absolute;
-                display: none;
-                background: rgba(15, 23, 42, 0.96);
-                color: #e2e8f0;
-                border: 1px solid rgba(99,102,241,0.4);
-                border-radius: 10px;
-                padding: 14px 18px;
-                font-family: 'Segoe UI', system-ui, sans-serif;
-                font-size: 13px;
-                line-height: 1.65;
-                pointer-events: none;
-                z-index: 1000;
-                min-width: 240px;
-                max-width: 320px;
-                box-shadow: 0 8px 32px rgba(0,0,0,0.45);
-                backdrop-filter: blur(8px);
-            }}
-            .map-tooltip.pinned {{
-                pointer-events: auto;
-                max-height: 480px;
-                overflow-y: auto;
-                border-color: rgba(99,102,241,0.8);
-                box-shadow: 0 8px 32px rgba(99,102,241,0.25), 0 8px 32px rgba(0,0,0,0.45);
-            }}
-            .map-tooltip.pinned::-webkit-scrollbar {{ width: 4px; }}
-            .map-tooltip.pinned::-webkit-scrollbar-thumb {{ background: #4a5568; border-radius: 4px; }}
-            .map-tooltip .tt-title {{
-                font-size: 16px;
-                font-weight: 700;
-                color: #fff;
-                margin-bottom: 8px;
-                padding-bottom: 6px;
-                border-bottom: 1px solid rgba(255,255,255,0.15);
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-            }}
-            .map-tooltip .tt-pin {{
-                font-size: 12px;
-                opacity: 0.6;
-            }}
-            .map-tooltip .tt-row {{
-                display: flex;
-                justify-content: space-between;
-                gap: 16px;
-            }}
-            .map-tooltip .tt-label {{ color: #94a3b8; }}
-            .map-tooltip .tt-value {{ font-weight: 600; color: #fff; }}
-            .map-tooltip .tt-stage {{
-                display: inline-block;
-                padding: 2px 10px;
-                border-radius: 20px;
-                font-size: 12px;
-                font-weight: 600;
-            }}
-            .map-tooltip .tt-hint {{
-                font-size: 11px;
-                color: #64748b;
-                margin-top: 8px;
-                text-align: center;
-                border-top: 1px solid rgba(255,255,255,0.08);
-                padding-top: 6px;
-            }}
-            .legend-bar {{
-                display: flex;
-                justify-content: center;
-                flex-wrap: wrap;
-                gap: 16px;
-                padding: 10px 16px;
-                background: #16213e;
-                border-top: 1px solid #2d3460;
-            }}
-            .legend-item {{
-                display: flex;
-                align-items: center;
-                gap: 6px;
-                font-family: 'Segoe UI', system-ui, sans-serif;
-                font-size: 12px;
-                color: #94a3b8;
-            }}
-            .legend-dot {{
-                width: 12px; height: 12px;
-                border-radius: 3px;
-                flex-shrink: 0;
-            }}
-            .map-info-panel {{
-                position: absolute;
-                bottom: 44px; /* above legend bar */
-                left: 10px;
-                background: rgba(15, 23, 42, 0.88);
-                backdrop-filter: blur(10px);
-                border: 1px solid rgba(99,102,241,0.3);
-                border-radius: 10px;
-                padding: 10px 14px;
-                font-family: 'Segoe UI', system-ui, sans-serif;
-                font-size: 12px;
-                line-height: 1.6;
-                z-index: 500;
-                min-width: 170px;
-                box-shadow: 0 4px 20px rgba(0,0,0,0.4);
-            }}
-            .map-info-panel .info-title {{
-                font-size: 11px;
-                font-weight: 700;
-                color: #cbd5e1;
-                margin-bottom: 6px;
-                padding-bottom: 4px;
-                border-bottom: 1px solid rgba(255,255,255,0.1);
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-            }}
-            .map-info-panel .info-row {{
-                display: flex;
-                justify-content: space-between;
-                gap: 12px;
-                padding: 1px 0;
-            }}
-            .map-info-panel .info-label {{
-                color: #94a3b8;
-                white-space: nowrap;
-            }}
-            .map-info-panel .info-value {{
-                font-weight: 700;
-                white-space: nowrap;
-            }}
-            /* ═══════════════════════════════════════════════════
-               RESPONSIVE BREAKPOINTS
-               Mobile:       320–480px   (phones portrait)
-               Small tablet: 481–768px   (phones landscape, small tablets)
-               Tablet:       769–1024px  (iPad portrait, Android tablets)
-               Default:      1025–1199px (iPad landscape, small laptops)
-               Large:        1200–1799px (laptops, desktops)
-               XL:           1800px+     (large monitors, 4K)
-               ═══════════════════════════════════════════════════ */
-
-            /* ── Mobile: 320–480px ── */
-            @media (max-width: 480px) {{
-                .farm-map-container {{
-                    border-radius: 6px;
-                }}
-                .map-tooltip {{
-                    min-width: 140px;
-                    max-width: 190px;
-                    padding: 7px 9px;
-                    font-size: 10px;
-                    line-height: 1.4;
-                    border-radius: 7px;
-                }}
-                .map-tooltip .tt-title {{
-                    font-size: 12px;
-                    margin-bottom: 3px;
-                    padding-bottom: 3px;
-                }}
-                .map-tooltip .tt-pin {{ font-size: 9px; }}
-                .map-tooltip .tt-row {{ gap: 6px; }}
-                .map-tooltip .tt-stage {{
-                    padding: 1px 5px;
-                    font-size: 9px;
-                }}
-                .map-tooltip .tt-hint {{
-                    font-size: 8px;
-                    margin-top: 3px;
-                    padding-top: 3px;
-                }}
-                .map-tooltip.pinned {{
-                    max-height: 240px;
-                }}
-                .legend-bar {{
-                    gap: 6px;
-                    padding: 5px 6px;
-                }}
-                .legend-item {{ font-size: 9px; gap: 3px; }}
-                .legend-dot {{ width: 8px; height: 8px; border-radius: 2px; }}
-                .map-info-panel {{
-                    bottom: 30px;
-                    left: 4px;
-                    padding: 5px 7px;
-                    font-size: 9px;
-                    min-width: 110px;
-                    border-radius: 6px;
-                }}
-                .map-info-panel .info-title {{ font-size: 8px; margin-bottom: 2px; }}
-            }}
-
-            /* ── Small tablet / phone landscape: 481–768px ── */
-            @media (min-width: 481px) and (max-width: 768px) {{
-                .farm-map-container {{
-                    border-radius: 8px;
-                }}
-                .map-tooltip {{
-                    min-width: 160px;
-                    max-width: 220px;
-                    padding: 8px 11px;
-                    font-size: 11px;
-                    line-height: 1.45;
-                    border-radius: 8px;
-                }}
-                .map-tooltip .tt-title {{
-                    font-size: 13px;
-                    margin-bottom: 4px;
-                    padding-bottom: 4px;
-                }}
-                .map-tooltip .tt-pin {{ font-size: 10px; }}
-                .map-tooltip .tt-row {{ gap: 8px; }}
-                .map-tooltip .tt-stage {{
-                    padding: 1px 6px;
-                    font-size: 10px;
-                }}
-                .map-tooltip .tt-hint {{
-                    font-size: 9px;
-                    margin-top: 4px;
-                    padding-top: 4px;
-                }}
-                .map-tooltip.pinned {{
-                    max-height: 300px;
-                }}
-                .legend-bar {{
-                    gap: 8px;
-                    padding: 6px 10px;
-                }}
-                .legend-item {{ font-size: 10px; gap: 4px; }}
-                .legend-dot {{ width: 9px; height: 9px; }}
-                .map-info-panel {{
-                    bottom: 34px;
-                    left: 6px;
-                    padding: 6px 8px;
-                    font-size: 10px;
-                    min-width: 135px;
-                    border-radius: 7px;
-                }}
-                .map-info-panel .info-title {{ font-size: 9px; margin-bottom: 3px; }}
-            }}
-
-            /* ── Tablet / iPad portrait: 769–1024px ── */
-            @media (min-width: 769px) and (max-width: 1024px) {{
-                .farm-map-container {{
-                    border-radius: 10px;
-                }}
-                .map-tooltip {{
-                    min-width: 200px;
-                    max-width: 280px;
-                    padding: 10px 14px;
-                    font-size: 12px;
-                    line-height: 1.5;
-                    border-radius: 9px;
-                }}
-                .map-tooltip .tt-title {{ font-size: 15px; }}
-                .map-tooltip .tt-stage {{ font-size: 11px; padding: 2px 8px; }}
-                .map-tooltip .tt-hint {{ font-size: 10px; }}
-                .map-tooltip.pinned {{ max-height: 360px; }}
-                .legend-bar {{
-                    gap: 12px;
-                    padding: 8px 14px;
-                }}
-                .legend-item {{ font-size: 12px; gap: 5px; }}
-                .legend-dot {{ width: 11px; height: 11px; }}
-                .map-info-panel {{
-                    bottom: 40px;
-                    left: 8px;
-                    padding: 8px 11px;
-                    font-size: 11px;
-                    min-width: 160px;
-                    border-radius: 8px;
-                }}
-                .map-info-panel .info-title {{ font-size: 10px; }}
-            }}
-
-            /* ── Default: 1025–1199px (iPad landscape, small laptops) ── */
-            /* Base styles already cover this range */
-
-            /* ── Large: 1200–1799px (laptops, desktops) ── */
-            @media (min-width: 1200px) and (max-width: 1799px) {{
-                .map-tooltip {{
-                    min-width: 280px;
-                    max-width: 380px;
-                    padding: 16px 20px;
-                    font-size: 14px;
-                }}
-                .map-tooltip .tt-title {{ font-size: 18px; }}
-                .map-tooltip .tt-stage {{ font-size: 13px; padding: 3px 12px; }}
-                .map-tooltip .tt-hint {{ font-size: 12px; }}
-                .legend-bar {{ gap: 20px; padding: 12px 20px; }}
-                .legend-item {{ font-size: 14px; }}
-                .legend-dot {{ width: 14px; height: 14px; }}
-                .map-info-panel {{
-                    bottom: 50px;
-                    padding: 12px 16px;
-                    font-size: 13px;
-                    min-width: 200px;
-                }}
-                .map-info-panel .info-title {{ font-size: 12px; }}
-            }}
-
-            /* ── XL: 1800px+ (large monitors, 4K, ultrawide) ── */
-            @media (min-width: 1800px) {{
-                .map-tooltip {{
-                    min-width: 340px;
-                    max-width: 460px;
-                    padding: 20px 26px;
-                    font-size: 15px;
-                    line-height: 1.7;
-                }}
-                .map-tooltip .tt-title {{
-                    font-size: 20px;
-                    margin-bottom: 10px;
-                }}
-                .map-tooltip .tt-stage {{ font-size: 14px; padding: 4px 14px; }}
-                .map-tooltip .tt-hint {{ font-size: 13px; }}
-                .map-tooltip.pinned {{ max-height: 600px; }}
-                .legend-bar {{ gap: 24px; padding: 14px 24px; }}
-                .legend-item {{ font-size: 15px; gap: 8px; }}
-                .legend-dot {{ width: 16px; height: 16px; border-radius: 4px; }}
-                .map-info-panel {{
-                    bottom: 56px;
-                    padding: 14px 18px;
-                    font-size: 14px;
-                    min-width: 220px;
-                    border-radius: 12px;
-                }}
-                .map-info-panel .info-title {{ font-size: 13px; }}
-            }}
-        </style>
-
-        <div class="farm-map-container" id="farmMapContainer">
-            <svg viewBox="0 0 {img_w} {img_h}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
-                <rect width="{img_w}" height="{img_h}" fill="#1a1a2e"/>
-                {svg_polygons}
-            </svg>
-            <div class="map-tooltip" id="mapTooltip"></div>
-            <div class="map-info-panel">
-                <div class="info-title">Diện tích Farm</div>
-                {info_panel_html}
-            </div>
-            <div class="legend-bar">{legend_html}</div>
-        </div>
-
-        <script>
-        (function() {{
-            const container = document.getElementById('farmMapContainer');
-            const tooltip = document.getElementById('mapTooltip');
-            const polys = container.querySelectorAll('.lot-poly');
-            const stageColors = {stage_colors_json};
-            stageColors["Chưa có dữ liệu"] = "#636e72";
-
-            let pinned = false;
-            let pinnedPoly = null;
-
-            function buildHTML(d, showPin) {{
-                let batches = [];
-                try {{ batches = JSON.parse(d.batches || '[]'); }} catch(e) {{}}
-
-                let pinIcon = showPin ? '<span class="tt-pin">📌 Đã ghim</span>' : '<span class="tt-pin"></span>';
-                let html = '<div class="tt-title"><span>Lô ' + d.name + '</span>' + pinIcon + '</div>';
-                html += '<div class="tt-row"><span class="tt-label">Diện tích lô</span><span class="tt-value">' + d.areaHa + '</span></div>';
-                html += '<div class="tt-row"><span class="tt-label">Diện tích trồng</span><span class="tt-value">' + d.dtTrong + '</span></div>';
-                html += '<div class="tt-row"><span class="tt-label">Tổng số cây</span><span class="tt-value">' + parseInt(d.total||0).toLocaleString() + '</span></div>';
-
-                if (batches.length > 0) {{
-                    html += '<div style="border-top:1px solid rgba(255,255,255,0.1);margin:8px 0"></div>';
-                    for (var i = 0; i < batches.length; i++) {{
-                        var b = batches[i];
-                        var sc = stageColors[b.gd] || "#636e72";
-                        html += '<div style="margin-bottom:' + (i < batches.length-1 ? '8' : '0') + 'px;padding:6px 8px;background:rgba(255,255,255,0.04);border-radius:6px;border-left:3px solid ' + sc + '">';
-                        var batchTitle = (b.multi && b.dot) ? ('Đợt ' + b.dot + ' (' + b.vu + ')') : b.vu;
-                        html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px"><span style="font-weight:700;color:#fff">' + batchTitle + '</span><span class="tt-stage" style="background:' + sc + ';color:#fff">' + b.gd + '</span></div>';
-                        html += '<div class="tt-row"><span class="tt-label">Bắt đầu</span><span class="tt-value">' + b.ngay_bd + '</span></div>';
-                        html += '<div class="tt-row"><span class="tt-label">Số cây</span><span class="tt-value">' + b.so_cay.toLocaleString() + '</span></div>';
-                        html += '<div class="tt-row"><span class="tt-label">Chích bắp</span><span class="tt-value">' + b.chich.toLocaleString() + '</span></div>';
-                        html += '<div class="tt-row"><span class="tt-label">Cắt bắp</span><span class="tt-value">' + b.cat.toLocaleString() + '</span></div>';
-                        html += '<div class="tt-row"><span class="tt-label">Thu hoạch</span><span class="tt-value">' + b.thu.toLocaleString() + '</span></div>';
-                        html += '</div>';
-                    }}
-                }} else {{
-                    html += '<div style="color:#94a3b8;margin-top:6px">Chưa có dữ liệu</div>';
-                }}
-
-                if (!showPin) {{
-                    html += '<div class="tt-hint">💡 Click để ghim tooltip</div>';
-                }} else {{
-                    html += '<div class="tt-hint">Click lô khác hoặc vùng trống để bỏ ghim</div>';
-                }}
-                return html;
-            }}
-
-            function unpin() {{
-                pinned = false;
-                if (pinnedPoly) {{
-                    pinnedPoly.classList.remove('pinned');
-                    pinnedPoly = null;
-                }}
-                tooltip.classList.remove('pinned');
-                tooltip.style.display = 'none';
-            }}
-
-            polys.forEach(poly => {{
-                poly.addEventListener('mouseenter', function(e) {{
-                    if (pinned) return;
-                    tooltip.innerHTML = buildHTML(this.dataset, false);
-                    tooltip.style.display = 'block';
-                }});
-
-                poly.addEventListener('mousemove', function(e) {{
-                    if (pinned) return;
-                    const rect = container.getBoundingClientRect();
-                    const tw = tooltip.offsetWidth;
-                    const th = tooltip.offsetHeight;
-                    let x = e.clientX - rect.left + 12;
-                    let y = e.clientY - rect.top + 12;
-                    if (x + tw > rect.width) x = Math.max(4, e.clientX - rect.left - tw - 8);
-                    if (y + th > rect.height) y = Math.max(4, rect.height - th - 4);
-                    tooltip.style.left = x + 'px';
-                    tooltip.style.top = y + 'px';
-                }});
-
-                poly.addEventListener('mouseleave', function() {{
-                    if (pinned) return;
-                    tooltip.style.display = 'none';
-                }});
-
-                poly.addEventListener('click', function(e) {{
-                    e.stopPropagation();
-                    if (pinned && pinnedPoly === this) {{
-                        unpin();
-                        return;
-                    }}
-                    if (pinnedPoly) pinnedPoly.classList.remove('pinned');
-
-                    pinned = true;
-                    pinnedPoly = this;
-                    this.classList.add('pinned');
-                    tooltip.innerHTML = buildHTML(this.dataset, true);
-                    tooltip.classList.add('pinned');
-                    tooltip.style.display = 'block';
-                    tooltip.scrollTop = 0;
-
-                    const rect = container.getBoundingClientRect();
-                    const tw = tooltip.offsetWidth;
-                    const th = Math.min(tooltip.offsetHeight, rect.height - 8);
-                    let x = e.clientX - rect.left + 12;
-                    let y = e.clientY - rect.top + 12;
-                    if (x + tw > rect.width) x = Math.max(4, rect.width - tw - 4);
-                    if (y + th > rect.height) y = Math.max(4, rect.height - th - 4);
-                    tooltip.style.left = x + 'px';
-                    tooltip.style.top = y + 'px';
-                    tooltip.style.maxHeight = (rect.height - y - 4) + 'px';
-                }});
-            }});
-
-            container.addEventListener('click', function(e) {{
-                if (e.target.closest('.lot-poly') || e.target.closest('.map-tooltip')) return;
-                if (pinned) unpin();
-            }});
-
-            tooltip.addEventListener('click', function(e) {{
-                e.stopPropagation();
-            }});
-
-            // ── Auto-fit iframe height to content (robust, bidirectional) ──
-            (function() {{
-                var lastH = 0;
-                function fitHeight() {{
-                    var c = document.querySelector('.farm-map-container');
-                    if (!c) return;
-                    var h = c.getBoundingClientRect().height;
-                    if (h < 50) return;
-                    h = Math.ceil(h) + 2;
-                    if (h === lastH) return;  // skip if no change
-                    lastH = h;
-                    try {{
-                        var frame = window.frameElement;
-                        frame.style.height = h + 'px';
-                        // Also resize Streamlit's wrapper div (parent of iframe)
-                        // This div can have its own fixed height that causes the gap
-                        var wrapper = frame.parentElement;
-                        if (wrapper) {{
-                            wrapper.style.height = h + 'px';
-                        }}
-                    }} catch(e) {{
-                        document.body.style.height = h + 'px';
-                    }}
-                }}
-                // ResizeObserver: reacts to container size changes (e.g. SVG re-layout)
-                if ('ResizeObserver' in window) {{
-                    new ResizeObserver(fitHeight).observe(document.querySelector('.farm-map-container'));
-                }}
-                // Window resize: reacts to viewport changes (wider/narrower screens)
-                window.addEventListener('resize', fitHeight);
-                window.addEventListener('load', fitHeight);
-                // Aggressive polling for the first 3 seconds to catch late renders
-                var polls = [50, 150, 300, 500, 800, 1200, 2000, 3000];
-                polls.forEach(function(ms) {{ setTimeout(fitHeight, ms); }});
-            }})();
-        }})();
-        </script>
-        '''
+        from map_template import build_farm_map_html
+        html_content = build_farm_map_html(
+            svg_polygons=svg_polygons,
+            legend_html=legend_html,
+            info_panel_html=info_panel_html,
+            img_w=img_w,
+            img_h=img_h,
+            stage_colors_json=stage_colors_json,
+        )
 
         import streamlit.components.v1 as components
-        # Use aspect ratio to estimate height, assume 1600px wide viewport.
-        # JS ResizeObserver will correct to exact pixel height on any screen.
-        # Overshooting causes visible whitespace gap; undershooting causes
-        # a brief flash before JS grows the iframe. We lean slightly under
-        # to guarantee zero overlap on wide monitors.
         _aspect = img_h / img_w if img_w else 0.5625
         _map_fallback_h = int(_aspect * 1600) + 30
         components.html(html_content, height=max(500, _map_fallback_h), scrolling=False)
+
+    # ═══════════════════════════════════════════════════════════════════
+    # 🗺️ BẢN ĐỒ TƯƠNG TÁC FARM 195
+    # ═══════════════════════════════════════════════════════════════════
+    POLYGON_195_PATH = os.path.join(os.path.dirname(__file__), "farm_195_polygons.json")
+    if os.path.exists(POLYGON_195_PATH) and c_farm in ["Farm 195", "Admin", "Phòng Kinh doanh"]:
+        st.markdown("#### 🗺️ Bản đồ Farm 195")
+        st.caption("Di chuột vào từng lô để xem thông tin chi tiết. Màu sắc thể hiện giai đoạn hiện tại.")
+
+        with open(POLYGON_195_PATH, "r", encoding="utf-8") as f:
+            polygon_data_195 = json.load(f)
+
+        # ── Query dim_lo.area_ha cho tất cả lô Farm 195 ──
+        _dim_lo_area_map_195 = {}
+        try:
+            _dim_lo_195 = supabase.table("dim_lo").select("lo_code, area_ha, dim_farm!inner(farm_name)").eq("is_active", True).eq("dim_farm.farm_name", "Farm 195").execute()
+            if _dim_lo_195.data:
+                for _dl in _dim_lo_195.data:
+                    _lc = _dl.get("lo_code")
+                    _ah = _dl.get("area_ha")
+                    if _lc and _ah is not None:
+                        _dim_lo_area_map_195[_lc] = float(_ah)
+        except Exception:
+            pass
+
+        # ── Build lot info từ DB data (per-batch tracking) ──
+        lot_info_map_195 = {}
+
+        if not df_seasons.empty and not df_lots_trong_moi.empty:
+            for lo_name_195 in df_lots_trong_moi[df_lots_trong_moi["lo"].isin(
+                [lot["name"] for lot in polygon_data_195.get("lots", [])]
+            )]["lo"].dropna().unique():
+                lo_lots_195 = df_lots_trong_moi[df_lots_trong_moi["lo"] == lo_name_195]
+                lo_seasons_195 = df_seasons[
+                    (df_seasons["lo"] == lo_name_195) & (df_seasons["loai_trong"] != "Trồng dặm")
+                ].sort_values("ngay_bat_dau", ascending=False)
+                if lo_seasons_195.empty:
+                    continue
+
+                batches_195 = []
+                total_batches_195 = len(lo_seasons_195)
+                for _, s_row in lo_seasons_195.iterrows():
+                    vu = s_row.get("vu", "?")
+                    ngay_bd_raw = s_row.get("ngay_bat_dau")
+                    ngay_bd = str(ngay_bd_raw)[:10] if ngay_bd_raw is not None else ""
+                    blid = s_row.get("base_lot_id")
+                    season_start = None
+                    if ngay_bd_raw is not None:
+                        try:
+                            season_start = pd.Timestamp(ngay_bd_raw).date() if not isinstance(ngay_bd_raw, date) else ngay_bd_raw
+                        except Exception:
+                            pass
+                    if blid and not df_lots_trong_moi.empty and "id" in df_lots_trong_moi.columns:
+                        batch_lot = df_lots_trong_moi[df_lots_trong_moi["id"] == blid]
+                        so_cay = int(batch_lot["so_luong"].sum()) if not batch_lot.empty else 0
+                    else:
+                        so_cay = 0
+                    if blid:
+                        next_s = _map_next_season.get((int(blid), vu))
+                        next_prod = (int(blid), vu) in _map_next_producing if next_s else False
+                        next_s_date = next_s.date() if next_s is not None else None
+                        gd, chich, cat, thu = compute_batch_stats(
+                            lo_name_195, blid, vu=vu, season_start=season_start,
+                            next_season_start=next_s_date, next_vu_producing=next_prod
+                        )
+                    else:
+                        gd, chich, cat, thu = "Đang sinh trưởng", 0, 0, 0
+                    display_label = batch_label_map.get(blid, lo_name_195) if blid else lo_name_195
+                    is_multi = total_batches_195 > 1
+                    dot_num = 0
+                    if is_multi and "đợt " in display_label:
+                        _n = display_label.split("đợt ")[-1].rstrip(")")
+                        dot_num = int(_n) if _n.isdigit() else 0
+                    batches_195.append({"vu": vu, "ngay_bd": ngay_bd, "so_cay": so_cay, "gd": gd, "chich": chich, "cat": cat, "thu": thu, "dot": dot_num, "multi": is_multi})
+
+                dominant = max(batches_195, key=lambda b: b["so_cay"]) if batches_195 else batches_195[0]
+                _dt_trong_total_195 = 0.0
+                if not df_lots_trong_moi.empty and "dien_tich_trong" in df_lots_trong_moi.columns:
+                    _lo_batches_f0 = df_lots_trong_moi[
+                        (df_lots_trong_moi["lo"] == lo_name_195) & (df_lots_trong_moi["loai_trong"] != "Trồng dặm")
+                    ]
+                    _dt_vals = _lo_batches_f0["dien_tich_trong"].dropna()
+                    if not _dt_vals.empty:
+                        _dt_trong_total_195 = float(_dt_vals.sum())
+                lot_info_map_195[lo_name_195] = {
+                    "dominant_gd": dominant["gd"],
+                    "area_ha": _dim_lo_area_map_195.get(lo_name_195),
+                    "dien_tich_trong": _dt_trong_total_195,
+                    "total_cay": sum(b["so_cay"] for b in batches_195 if b["vu"] == "F0"),
+                    "batches": batches_195,
+                }
+
+        # ── Màu và helpers ──
+        stage_colors_195 = _MAP_STAGE_COLORS
+        stage_colors_json_195 = _MAP_STAGE_COLORS_JSON
+        default_color_195 = _MAP_DEFAULT_COLOR
+
+        # ── Build SVG polygons ──
+        img_w_195 = polygon_data_195.get("image_width", 1683)
+        img_h_195 = polygon_data_195.get("image_height", 1190)
+
+        for lot in polygon_data_195.get("lots", []):
+            name = lot["name"]
+            if name not in lot_info_map_195 and name in _dim_lo_area_map_195:
+                lot_info_map_195[name] = {
+                    "dominant_gd": "Chưa có dữ liệu",
+                    "area_ha": _dim_lo_area_map_195.get(name),
+                    "dien_tich_trong": 0.0,
+                    "total_cay": 0,
+                    "batches": [],
+                }
+
+        svg_polygons_195 = ""
+        for lot in polygon_data_195.get("lots", []):
+            name = lot["name"]
+            points_str = " ".join(f'{p["x"]},{p["y"]}' for p in lot["points"])
+            info = lot_info_map_195.get(name, {})
+            giai_doan = info.get("dominant_gd", "Chưa có dữ liệu")
+            fill = stage_colors_195.get(giai_doan, default_color_195)
+            area_ha = info.get("area_ha")
+            area_ha_str = f'{area_ha:.2f} ha' if area_ha else "—"
+            dt_trong = info.get("dien_tich_trong", 0)
+            dt_trong_str = f'{dt_trong:.2f} ha' if dt_trong > 0 else "—"
+            total_cay = info.get("total_cay", 0)
+            batches_json = json.dumps(info.get("batches", []), ensure_ascii=False).replace('"', '&quot;')
+            poly_pts = [(p["x"], p["y"]) for p in lot["points"]]
+            cx, cy = _map_best_label_pos(poly_pts)
+            svg_polygons_195 += f'''
+            <polygon class="lot-poly" points="{points_str}" fill="{fill}"
+                data-name="{name}" data-area-ha="{area_ha_str}" data-dt-trong="{dt_trong_str}" data-total="{total_cay}"
+                data-gd="{giai_doan}" data-batches="{batches_json}" />
+            <text x="{cx:.0f}" y="{cy:.0f}" class="lot-label">{name}</text>
+            '''
+
+        # ── Legend ──
+        legend_html_195 = ""
+        for stage, color in stage_colors_195.items():
+            legend_html_195 += f'<span class="legend-item"><span class="legend-dot" style="background:{color}"></span>{stage}</span>'
+        legend_html_195 += f'<span class="legend-item"><span class="legend-dot" style="background:{default_color_195}"></span>Chưa có dữ liệu</span>'
+
+        # ── Tính diện tích theo giai đoạn ──
+        _all_lo_names_195 = [entry.get("name") for entry in polygon_data_195.get("lots", []) if entry.get("name")]
+        _total_farm_area_195 = 0.0
+        try:
+            _dim_lo_res_195 = supabase.table("dim_lo").select("area_ha, dim_farm!inner(farm_name)").eq("is_active", True).eq("dim_farm.farm_name", "Farm 195").execute()
+            if _dim_lo_res_195.data:
+                for _dl_row in _dim_lo_res_195.data:
+                    _ah = _dl_row.get("area_ha")
+                    if _ah is not None:
+                        _total_farm_area_195 += float(_ah)
+        except Exception:
+            pass
+
+        _dt_trong_map_195 = {}
+        if not df_lots_trong_moi.empty and "id" in df_lots_trong_moi.columns:
+            for _, _r in df_lots_trong_moi.iterrows():
+                _blid = _r["id"]
+                _dt_val = _r.get("dien_tich_trong")
+                if pd.notna(_dt_val):
+                    _dt_trong_map_195[_blid] = float(_dt_val)
+
+        _blid_stats_map_195 = {}
+        if not df_seasons.empty and "base_lot_id" in df_seasons.columns:
+            for lo_name_s in lot_info_map_195:
+                info_s = lot_info_map_195[lo_name_s]
+                lo_seasons_s = df_seasons[
+                    (df_seasons["lo"] == lo_name_s) & (df_seasons["loai_trong"] != "Trồng dặm")
+                ].sort_values("ngay_bat_dau", ascending=False)
+                for batch_info, (_, s_row) in zip(info_s["batches"], lo_seasons_s.iterrows()):
+                    blid_s = s_row.get("base_lot_id")
+                    if blid_s and pd.notna(blid_s):
+                        _blid_stats_map_195[int(blid_s)] = {
+                            "gd": batch_info["gd"],
+                            "chich": batch_info.get("chich", 0),
+                            "cat": batch_info.get("cat", 0),
+                            "thu": batch_info.get("thu", 0),
+                            "so_cay": batch_info.get("so_cay", 0),
+                        }
+
+        _area_planted_195 = 0.0
+        _area_growing_195 = 0.0
+        _area_chich_195 = 0.0
+        _area_cat_195 = 0.0
+        _area_harvest_195 = 0.0
+        for _blid, _stats in _blid_stats_map_195.items():
+            _dt = _dt_trong_map_195.get(_blid, 0)
+            _area_planted_195 += _dt
+            _total_cay = _stats["so_cay"]
+            if _total_cay <= 0 or _dt <= 0:
+                continue
+            _n_thu = max(_stats["thu"], 0)
+            _n_cat = max(_stats["cat"] - _n_thu, 0)
+            _n_chich = max(_stats["chich"] - _stats["cat"], 0)
+            _n_grow = max(_total_cay - _stats["chich"], 0)
+            _ratio = _dt / _total_cay
+            _area_harvest_195 += _n_thu * _ratio
+            _area_cat_195 += _n_cat * _ratio
+            _area_chich_195 += _n_chich * _ratio
+            _area_growing_195 += _n_grow * _ratio
+
+        _info_rows_195 = [
+            ("Tổng DT lô", f"{_total_farm_area_195:.2f} ha", "#94a3b8"),
+            ("Đã trồng", f"{_area_planted_195:.2f} ha", "#a8e6cf"),
+            ("Sinh trưởng", f"{_area_growing_195:.2f} ha", "#00b894"),
+            ("Chích bắp", f"{_area_chich_195:.2f} ha", "#fdcb6e"),
+            ("Cắt bắp", f"{_area_cat_195:.2f} ha", "#e17055"),
+            ("Thu hoạch", f"{_area_harvest_195:.2f} ha", "#0984e3"),
+        ]
+        info_panel_html_195 = ""
+        for _label, _value, _color in _info_rows_195:
+            info_panel_html_195 += f'<div class="info-row"><span class="info-label">{_label}</span><span class="info-value" style="color:{_color}">{_value}</span></div>'
+
+        from map_template import build_farm_map_html
+        html_content_195 = build_farm_map_html(
+            svg_polygons=svg_polygons_195,
+            legend_html=legend_html_195,
+            info_panel_html=info_panel_html_195,
+            img_w=img_w_195,
+            img_h=img_h_195,
+            stage_colors_json=stage_colors_json_195,
+        )
+
+        import streamlit.components.v1 as components
+        _aspect_195 = img_h_195 / img_w_195 if img_w_195 else 0.5625
+        _map_fallback_h_195 = int(_aspect_195 * 1600) + 30
+        components.html(html_content_195, height=max(500, _map_fallback_h_195), scrolling=False)
 
     st.divider()
 
