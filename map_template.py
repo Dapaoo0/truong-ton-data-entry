@@ -26,6 +26,9 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
     str
         Complete HTML document string (for st.components.html).
     """
+    # Scale font size relative to image width. Farm 157 (img_w=4000) used 47px.
+    label_font_size = max(10, int(img_w * 47 / 4000))
+
     return f'''
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
@@ -78,7 +81,7 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
         }}
         .lot-label {{
             font-family: 'Segoe UI', system-ui, sans-serif;
-            font-size: 47px;
+            font-size: {label_font_size}px;
             font-weight: 700;
             fill: #fff;
             text-anchor: middle;
