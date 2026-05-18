@@ -2466,12 +2466,15 @@ def render_global_data_tab(c_farm):
         # ── Build lot info từ DB data (per-batch tracking) ──
         lot_info_map = {}
 
-        if not df_seasons.empty and not df_lots_trong_moi.empty:
-            for lo_name in df_lots_trong_moi["lo"].dropna().unique():
-                lo_lots = df_lots_trong_moi[df_lots_trong_moi["lo"] == lo_name]
+        df_lots_trong_moi_157 = df_lots_trong_moi[df_lots_trong_moi["farm"] == "Farm 157"] if not df_lots_trong_moi.empty and "farm" in df_lots_trong_moi.columns else df_lots_trong_moi
+        df_seasons_157 = df_seasons[df_seasons["farm"] == "Farm 157"] if not df_seasons.empty and "farm" in df_seasons.columns else df_seasons
+
+        if not df_seasons_157.empty and not df_lots_trong_moi_157.empty:
+            for lo_name in df_lots_trong_moi_157["lo"].dropna().unique():
+                lo_lots = df_lots_trong_moi_157[df_lots_trong_moi_157["lo"] == lo_name]
                 dien_tich = lo_lots["dien_tich"].iloc[0] if "dien_tich" in lo_lots.columns and not lo_lots["dien_tich"].isna().all() else None
-                lo_seasons = df_seasons[
-                    (df_seasons["lo"] == lo_name) & (df_seasons["loai_trong"] != "Trồng dặm")
+                lo_seasons = df_seasons_157[
+                    (df_seasons_157["lo"] == lo_name) & (df_seasons_157["loai_trong"] != "Trồng dặm")
                 ].sort_values("ngay_bat_dau", ascending=False)
                 if lo_seasons.empty:
                     continue
@@ -2492,8 +2495,8 @@ def render_global_data_tab(c_farm):
                         except Exception:
                             pass
                     # Số cây của đợt trồng này
-                    if blid and not df_lots_trong_moi.empty and "id" in df_lots_trong_moi.columns:
-                        batch_lot = df_lots_trong_moi[df_lots_trong_moi["id"] == blid]
+                    if blid and not df_lots_trong_moi_157.empty and "id" in df_lots_trong_moi_157.columns:
+                        batch_lot = df_lots_trong_moi_157[df_lots_trong_moi_157["id"] == blid]
                         so_cay = int(batch_lot["so_luong"].sum()) if not batch_lot.empty else 0
                     else:
                         so_cay = 0
@@ -2523,9 +2526,9 @@ def render_global_data_tab(c_farm):
                 dominant = max(batches, key=lambda b: b["so_cay"]) if batches else batches[0]
                 # Diện tích trồng = tổng dien_tich_trong của các batch F0 (tránh trùng F1/F2)
                 _dt_trong_total = 0.0
-                if not df_lots_trong_moi.empty and "dien_tich_trong" in df_lots_trong_moi.columns:
-                    _lo_batches_f0 = df_lots_trong_moi[
-                        (df_lots_trong_moi["lo"] == lo_name) & (df_lots_trong_moi["loai_trong"] != "Trồng dặm")
+                if not df_lots_trong_moi_157.empty and "dien_tich_trong" in df_lots_trong_moi_157.columns:
+                    _lo_batches_f0 = df_lots_trong_moi_157[
+                        (df_lots_trong_moi_157["lo"] == lo_name) & (df_lots_trong_moi_157["loai_trong"] != "Trồng dặm")
                     ]
                     _dt_vals = _lo_batches_f0["dien_tich_trong"].dropna()
                     if not _dt_vals.empty:
@@ -2615,10 +2618,10 @@ def render_global_data_tab(c_farm):
                         _total_farm_area += float(_v)
 
         # 2. Diện tích theo giai đoạn: dùng lot_info_map (đã tính gd per batch)
-        #    + dien_tich_trong per batch từ df_lots_trong_moi
+        #    + dien_tich_trong per batch từ df_lots_trong_moi_157
         _dt_trong_map = {}  # base_lot_id → dien_tich_trong
-        if not df_lots_trong_moi.empty and "id" in df_lots_trong_moi.columns:
-            for _, _r in df_lots_trong_moi.iterrows():
+        if not df_lots_trong_moi_157.empty and "id" in df_lots_trong_moi_157.columns:
+            for _, _r in df_lots_trong_moi_157.iterrows():
                 _blid = _r["id"]
                 _dt_val = _r.get("dien_tich_trong")
                 if pd.notna(_dt_val):
@@ -2626,12 +2629,12 @@ def render_global_data_tab(c_farm):
 
         # Map base_lot_id → {gd, chich, cat, thu} from seasons/lot_info
         _blid_stats_map = {}  # base_lot_id → {gd, chich, cat, thu}
-        if not df_seasons.empty and "base_lot_id" in df_seasons.columns:
+        if not df_seasons_157.empty and "base_lot_id" in df_seasons_157.columns:
             for lo_name_s in lot_info_map:
                 info_s = lot_info_map[lo_name_s]
-                lo_lots_s = df_lots_trong_moi[df_lots_trong_moi["lo"] == lo_name_s] if not df_lots_trong_moi.empty else pd.DataFrame()
-                lo_seasons_s = df_seasons[
-                    (df_seasons["lo"] == lo_name_s) & (df_seasons["loai_trong"] != "Trồng dặm")
+                lo_lots_s = df_lots_trong_moi_157[df_lots_trong_moi_157["lo"] == lo_name_s] if not df_lots_trong_moi_157.empty else pd.DataFrame()
+                lo_seasons_s = df_seasons_157[
+                    (df_seasons_157["lo"] == lo_name_s) & (df_seasons_157["loai_trong"] != "Trồng dặm")
                 ].sort_values("ngay_bat_dau", ascending=False)
                 for batch_info, (_, s_row) in zip(info_s["batches"], lo_seasons_s.iterrows()):
                     blid_s = s_row.get("base_lot_id")
@@ -2723,13 +2726,16 @@ def render_global_data_tab(c_farm):
         # ── Build lot info từ DB data (per-batch tracking) ──
         lot_info_map_195 = {}
 
-        if not df_seasons.empty and not df_lots_trong_moi.empty:
-            for lo_name_195 in df_lots_trong_moi[df_lots_trong_moi["lo"].isin(
+        df_lots_trong_moi_195 = df_lots_trong_moi[df_lots_trong_moi["farm"] == "Farm 195"] if not df_lots_trong_moi.empty and "farm" in df_lots_trong_moi.columns else df_lots_trong_moi
+        df_seasons_195 = df_seasons[df_seasons["farm"] == "Farm 195"] if not df_seasons.empty and "farm" in df_seasons.columns else df_seasons
+
+        if not df_seasons_195.empty and not df_lots_trong_moi_195.empty:
+            for lo_name_195 in df_lots_trong_moi_195[df_lots_trong_moi_195["lo"].isin(
                 [lot["name"] for lot in polygon_data_195.get("lots", [])]
             )]["lo"].dropna().unique():
-                lo_lots_195 = df_lots_trong_moi[df_lots_trong_moi["lo"] == lo_name_195]
-                lo_seasons_195 = df_seasons[
-                    (df_seasons["lo"] == lo_name_195) & (df_seasons["loai_trong"] != "Trồng dặm")
+                lo_lots_195 = df_lots_trong_moi_195[df_lots_trong_moi_195["lo"] == lo_name_195]
+                lo_seasons_195 = df_seasons_195[
+                    (df_seasons_195["lo"] == lo_name_195) & (df_seasons_195["loai_trong"] != "Trồng dặm")
                 ].sort_values("ngay_bat_dau", ascending=False)
                 if lo_seasons_195.empty:
                     continue
@@ -2747,8 +2753,8 @@ def render_global_data_tab(c_farm):
                             season_start = pd.Timestamp(ngay_bd_raw).date() if not isinstance(ngay_bd_raw, date) else ngay_bd_raw
                         except Exception:
                             pass
-                    if blid and not df_lots_trong_moi.empty and "id" in df_lots_trong_moi.columns:
-                        batch_lot = df_lots_trong_moi[df_lots_trong_moi["id"] == blid]
+                    if blid and not df_lots_trong_moi_195.empty and "id" in df_lots_trong_moi_195.columns:
+                        batch_lot = df_lots_trong_moi_195[df_lots_trong_moi_195["id"] == blid]
                         so_cay = int(batch_lot["so_luong"].sum()) if not batch_lot.empty else 0
                     else:
                         so_cay = 0
@@ -2772,9 +2778,9 @@ def render_global_data_tab(c_farm):
 
                 dominant = max(batches_195, key=lambda b: b["so_cay"]) if batches_195 else batches_195[0]
                 _dt_trong_total_195 = 0.0
-                if not df_lots_trong_moi.empty and "dien_tich_trong" in df_lots_trong_moi.columns:
-                    _lo_batches_f0 = df_lots_trong_moi[
-                        (df_lots_trong_moi["lo"] == lo_name_195) & (df_lots_trong_moi["loai_trong"] != "Trồng dặm")
+                if not df_lots_trong_moi_195.empty and "dien_tich_trong" in df_lots_trong_moi_195.columns:
+                    _lo_batches_f0 = df_lots_trong_moi_195[
+                        (df_lots_trong_moi_195["lo"] == lo_name_195) & (df_lots_trong_moi_195["loai_trong"] != "Trồng dặm")
                     ]
                     _dt_vals = _lo_batches_f0["dien_tich_trong"].dropna()
                     if not _dt_vals.empty:
@@ -2849,19 +2855,19 @@ def render_global_data_tab(c_farm):
             pass
 
         _dt_trong_map_195 = {}
-        if not df_lots_trong_moi.empty and "id" in df_lots_trong_moi.columns:
-            for _, _r in df_lots_trong_moi.iterrows():
+        if not df_lots_trong_moi_195.empty and "id" in df_lots_trong_moi_195.columns:
+            for _, _r in df_lots_trong_moi_195.iterrows():
                 _blid = _r["id"]
                 _dt_val = _r.get("dien_tich_trong")
                 if pd.notna(_dt_val):
                     _dt_trong_map_195[_blid] = float(_dt_val)
 
         _blid_stats_map_195 = {}
-        if not df_seasons.empty and "base_lot_id" in df_seasons.columns:
+        if not df_seasons_195.empty and "base_lot_id" in df_seasons_195.columns:
             for lo_name_s in lot_info_map_195:
                 info_s = lot_info_map_195[lo_name_s]
-                lo_seasons_s = df_seasons[
-                    (df_seasons["lo"] == lo_name_s) & (df_seasons["loai_trong"] != "Trồng dặm")
+                lo_seasons_s = df_seasons_195[
+                    (df_seasons_195["lo"] == lo_name_s) & (df_seasons_195["loai_trong"] != "Trồng dặm")
                 ].sort_values("ngay_bat_dau", ascending=False)
                 for batch_info, (_, s_row) in zip(info_s["batches"], lo_seasons_s.iterrows()):
                     blid_s = s_row.get("base_lot_id")
