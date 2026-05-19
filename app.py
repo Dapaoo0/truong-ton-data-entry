@@ -4815,11 +4815,6 @@ def render_container_allocation_calculator():
         current_df = pd.DataFrame(_default_container_sku_editor_rows())
     sku_df = current_df.reindex(columns=clean_order_columns)
     known_skus = list(CONTAINER_SKU_DEFINITIONS.keys())
-    market_options = _unique_keep_order(
-        sku_df.get("Thị trường", pd.Series(dtype=str)).dropna().tolist() + ["Nhật", "Hàn"]
-    )
-    if not market_options:
-        market_options = ["Nhật", "Hàn"]
 
     edited_df = st.data_editor(
         sku_df,
@@ -4829,7 +4824,7 @@ def render_container_allocation_calculator():
         key="container_sku_editor",
         column_order=clean_order_columns,
         column_config={
-            "Thị trường": st.column_config.SelectboxColumn("Thị trường", options=market_options, required=True),
+            "Thị trường": st.column_config.TextColumn("Thị trường", required=True),
             "Mã hàng": st.column_config.SelectboxColumn("Mã hàng", options=known_skus, required=True),
             "Đơn vị": st.column_config.SelectboxColumn("Đơn vị", options=["Thùng", "Cont"], required=True),
             "Nhu cầu": st.column_config.NumberColumn(min_value=0, step=1),
