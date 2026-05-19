@@ -19,7 +19,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 import json
-from container_allocation import DEFAULT_SKU_ROWS, allocate_bunches_by_hands
+from container_allocation import DEFAULT_SKU_ROWS, OPTIMIZER_SKU_RULES, allocate_bunches_optimized
 
 if hasattr(st, "dialog"):
     dialog_decorator = st.dialog
@@ -4667,10 +4667,7 @@ def build_weekly_cat_forecast(df_stg: pd.DataFrame) -> pd.DataFrame:
     return weekly[["farm", "year", "week", "forecast_bunches"]].sort_values(["year", "week", "farm"])
 
 
-CONTAINER_SKU_DEFINITIONS = {
-    "27CP": {"hand_from": 1, "hand_to": 4},
-    "6H": {"hand_from": 5, "hand_to": 7},
-}
+CONTAINER_SKU_DEFINITIONS = OPTIMIZER_SKU_RULES
 
 
 def _default_container_sku_editor_rows() -> list:
@@ -4727,7 +4724,7 @@ def _prepare_container_rows_for_allocation(order_rows: list, market_order: list,
 
     for row_index, row in enumerate(order_rows):
         market = _container_clean_text(row.get("Thị trường"))
-        sku = _container_clean_text(row.get("Mã hàng"))
+        sku = _container_clean_text(row.get("Mã hàng")).upper()
         sku_def = CONTAINER_SKU_DEFINITIONS.get(sku)
         if not market or not sku_def:
             continue
@@ -4743,8 +4740,6 @@ def _prepare_container_rows_for_allocation(order_rows: list, market_order: list,
             "market": market,
             "sku_priority": sku_priority.get(sku, 999),
             "sku": sku,
-            "hand_from": sku_def["hand_from"],
-            "hand_to": sku_def["hand_to"],
             "demand": row.get("Nhu cầu", 0),
             "unit": row.get("Đơn vị", "Thùng"),
             "_row_index": row_index,
@@ -4819,24 +4814,35 @@ def render_container_allocation_calculator():
         st.markdown("##### Cấu hình đơn hàng")
     with help_col:
         with st.popover("?"):
+            sku_range_rows = []
+            for sku, sku_def in CONTAINER_SKU_DEFINITIONS.items():
+                ranges = ", ".join(f"{hand_from}-{hand_to}" for hand_from, hand_to in sku_def["ranges"])
+                sku_range_rows.append({
+                    "Mã hàng": sku,
+                    "Nhóm": sku_def["group"],
+                    "Dải nải có thể dùng": ranges,
+                })
             st.dataframe(
-                pd.DataFrame([
-                    {"Mã hàng": sku, "Nải áp dụng": f"{cfg['hand_from']}-{cfg['hand_to']}"}
-                    for sku, cfg in CONTAINER_SKU_DEFINITIONS.items()
-                ]),
+                pd.DataFrame(sku_range_rows),
                 use_container_width=True,
                 hide_index=True,
             )
 
     known_skus = list(CONTAINER_SKU_DEFINITIONS.keys())
     current_rows = st.session_state["container_calc_sku_rows"] or _default_container_sku_editor_rows()
-    current_rows = [{
-        "_row_id": row.get("_row_id") or f"default_{idx}",
-        "Thị trường": _container_clean_text(row.get("Thị trường")),
-        "Mã hàng": _container_clean_text(row.get("Mã hàng"), known_skus[0]),
-        "Nhu cầu": _container_clean_int(row.get("Nhu cầu")),
-        "Đơn vị": _container_clean_text(row.get("Đơn vị"), "Thùng"),
-    } for idx, row in enumerate(current_rows)]
+    normalized_current_rows = []
+    for idx, row in enumerate(current_rows):
+        sku = _container_clean_text(row.get("Mã hàng"), known_skus[0]).upper()
+        if sku not in known_skus:
+            sku = known_skus[0]
+        normalized_current_rows.append({
+            "_row_id": row.get("_row_id") or f"default_{idx}",
+            "Thị trường": _container_clean_text(row.get("Thị trường")),
+            "Mã hàng": sku,
+            "Nhu cầu": _container_clean_int(row.get("Nhu cầu")),
+            "Đơn vị": _container_clean_text(row.get("Đơn vị"), "Thùng"),
+        })
+    current_rows = normalized_current_rows
 
     order_rows = []
     delete_row_index = None
@@ -4963,7 +4969,7 @@ def render_container_allocation_calculator():
 
     allocation_rows = _prepare_container_rows_for_allocation(order_rows, market_order, sku_orders_by_market)
 
-    result = allocate_bunches_by_hands(
+    result = allocate_bunches_optimized(
         source_bunches,
         kg_per_bunch,
         hands_per_bunch,
@@ -4990,17 +4996,19 @@ def render_container_allocation_calculator():
         result_df = pd.DataFrame(result["rows"])
         display_df = result_df[[
             "processing_order", "market_priority", "market", "sku_priority", "sku",
-            "requested_boxes", "bunches_needed",
+            "range_label", "requested_boxes", "bunches_needed",
             "bunches_allocated", "boxes_fulfilled", "containers_fulfilled",
             "short_boxes", "short_containers", "extra_kg_from_rounding"
         ]].copy()
         display_df.columns = [
             "Thứ tự", "Ưu tiên TT", "Thị trường", "Ưu tiên hàng", "Mã hàng",
-            "Thùng yêu cầu", "Buồng cần",
+            "Nải chọn", "Thùng yêu cầu", "Buồng cần",
             "Buồng phân bổ", "Thùng đáp ứng", "Cont đáp ứng",
             "Thiếu thùng", "Thiếu cont", "Kg dư làm tròn"
         ]
         st.dataframe(display_df, use_container_width=True, hide_index=True)
+        with st.expander("Chi tiết tối ưu", expanded=False):
+            st.json(result.get("loss", {}))
     else:
         st.info("Nhập số buồng và ít nhất một dòng mã hàng hợp lệ để xem kết quả.")
 
