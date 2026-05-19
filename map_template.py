@@ -4,6 +4,12 @@ Used by app.py for both Farm 157 and Farm 195.
 """
 
 
+MAP_STROKE_REFERENCE_WIDTH = 4000
+MAP_STROKE_WIDTH = 3
+MAP_STROKE_HOVER_WIDTH = 5
+MAP_STROKE_PINNED_WIDTH = 6
+
+
 def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
                         img_w, img_h, stage_colors_json):
     """Build self-contained HTML for an interactive farm map.
@@ -28,6 +34,10 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
     """
     # Scale font size relative to image width. Farm 157 (img_w=4000) used 47px.
     label_font_size = max(10, int(img_w * 47 / 4000))
+    stroke_scale = (img_w / MAP_STROKE_REFERENCE_WIDTH) if img_w else 1
+    polygon_stroke_width = round(MAP_STROKE_WIDTH * stroke_scale, 2)
+    polygon_hover_stroke_width = round(MAP_STROKE_HOVER_WIDTH * stroke_scale, 2)
+    polygon_pinned_stroke_width = round(MAP_STROKE_PINNED_WIDTH * stroke_scale, 2)
 
     return f'''
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
@@ -65,19 +75,19 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
         .lot-poly {{
             fill-opacity: 0.45;
             stroke: rgba(255,255,255,0.5);
-            stroke-width: 3;
+            stroke-width: {polygon_stroke_width};
             cursor: pointer;
             transition: fill-opacity 0.2s, stroke-width 0.2s;
         }}
         .lot-poly:hover {{
             fill-opacity: 0.75;
             stroke: #fff;
-            stroke-width: 5;
+            stroke-width: {polygon_hover_stroke_width};
         }}
         .lot-poly.pinned {{
             fill-opacity: 0.85;
             stroke: #6366f1;
-            stroke-width: 6;
+            stroke-width: {polygon_pinned_stroke_width};
         }}
         .lot-label {{
             font-family: 'Segoe UI', system-ui, sans-serif;
