@@ -4842,18 +4842,25 @@ def render_container_allocation_calculator():
             year_options = sorted(df_week_opts["year"].dropna().astype(int).unique().tolist())
             default_year_idx = year_options.index(date.today().year) if date.today().year in year_options else 0
             with y_col:
-                selected_year = st.selectbox("Năm", options=year_options, index=default_year_idx, key="container_forecast_year")
+                selected_year = st.selectbox("Năm thu hoạch dự báo", options=year_options, index=default_year_idx, key="container_forecast_year")
             df_week_opts = df_week_opts[df_week_opts["year"] == int(selected_year)]
             week_options = sorted(df_week_opts["week"].dropna().astype(int).unique().tolist())
             default_week = date.today().isocalendar().week
             default_week_idx = week_options.index(default_week) if default_week in week_options else 0
             with w_col:
-                selected_week = st.selectbox("Tuần ISO", options=week_options, index=default_week_idx, key="container_forecast_week")
+                week_key = f"container_forecast_harvest_week_{selected_farm}_{selected_year}"
+                selected_week = st.selectbox(
+                    "Tuần thu hoạch dự báo",
+                    options=week_options,
+                    index=default_week_idx,
+                    key=week_key,
+                )
 
             df_selected = df_week_opts[df_week_opts["week"] == int(selected_week)]
             source_bunches = int(df_selected["forecast_bunches"].sum())
-            source_label = f"{selected_farm} · Tuần {selected_week}/{selected_year}"
-            st.metric("Số buồng dự báo từ cắt bắp", f"{source_bunches:,} buồng", source_label)
+            source_label = f"{selected_farm} · Tuần thu hoạch dự báo {selected_week}/{selected_year}"
+            st.metric("Số buồng dự báo thu hoạch từ cắt bắp", f"{source_bunches:,} buồng", source_label)
+            st.caption("Tuần này là tuần thu hoạch dự báo sau khi dịch dữ liệu cắt bắp khoảng 70 ngày, không phải tuần cắt bắp nguồn.")
     else:
         source_bunches = int(st.number_input("Số buồng thu hoạch / dự kiến", min_value=0, value=0, step=100, key="container_manual_bunches"))
         source_label = "Nhập tay"
