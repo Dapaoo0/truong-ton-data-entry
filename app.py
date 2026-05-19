@@ -5208,6 +5208,19 @@ def render_container_allocation_calculator():
 
     st.session_state["container_calc_sku_rows"] = order_rows
 
+    order_totals_by_market = {}
+    for row in order_rows:
+        market = _container_clean_text(row.get("Thị trường"))
+        demand = _container_clean_int(row.get("Nhu cầu"))
+        if market and demand > 0:
+            order_totals_by_market[market] = order_totals_by_market.get(market, 0) + demand
+    for market, requested_boxes in order_totals_by_market.items():
+        if 0 < requested_boxes < BOXES_PER_CONTAINER:
+            st.warning(
+                f"Đơn hàng {market} đang có {requested_boxes:,} thùng, chưa đủ 1 cont "
+                f"({BOXES_PER_CONTAINER:,} thùng). Có thể đáp ứng đủ số thùng này nhưng chưa chốt được cont nguyên."
+            )
+
     active_markets = _unique_keep_order([row.get("Thị trường") for row in order_rows])
     market_order = _render_container_market_priority_controls("container_market_priority")
 
@@ -5289,17 +5302,6 @@ def render_container_allocation_calculator():
                 conclusion_parts.append(f"{market_name}: {full_containers} cont")
         if conclusion_parts:
             st.success("Kết luận theo thị trường: " + " · ".join(conclusion_parts))
-
-        small_fulfilled_orders = market_summary[
-            (market_summary["requested_boxes"] > 0)
-            & (market_summary["requested_boxes"] < BOXES_PER_CONTAINER)
-            & (market_summary["short_boxes"] == 0)
-        ]
-        for _, row in small_fulfilled_orders.iterrows():
-            st.warning(
-                f"Đơn hàng {row['market']} quá ít: đáp ứng đủ {int(row['boxes_fulfilled']):,} thùng "
-                f"nhưng chưa đủ 1 cont ({BOXES_PER_CONTAINER:,} thùng)."
-            )
 
         market_lookup = market_summary.set_index("market").to_dict("index")
         compact_rows = []
