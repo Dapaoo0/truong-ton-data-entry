@@ -4682,7 +4682,6 @@ def _default_container_sku_editor_rows() -> list:
 
 def render_container_allocation_calculator():
     st.markdown("#### Máy tính phân bổ container theo nải")
-    st.caption("Dùng cho Kinh doanh tính nhanh khả năng đáp ứng đơn hàng theo vị trí nải, ưu tiên thị trường và ưu tiên loại hàng.")
 
     if "container_calc_sku_rows" not in st.session_state:
         st.session_state["container_calc_sku_rows"] = _default_container_sku_editor_rows()
@@ -4741,7 +4740,6 @@ def render_container_allocation_calculator():
     with cfg3:
         hands_per_bunch = 12
         st.metric("Số nải/buồng", "12 nải")
-        st.caption("Cố định theo cẩm nang 12 nải/buồng.")
 
     st.markdown("##### Cấu hình đơn hàng")
     sku_df = pd.DataFrame(st.session_state["container_calc_sku_rows"])
