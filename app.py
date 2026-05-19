@@ -2531,8 +2531,10 @@ def render_global_data_tab(c_farm):
                     if blid and not df_lots_trong_moi_157.empty and "id" in df_lots_trong_moi_157.columns:
                         batch_lot = df_lots_trong_moi_157[df_lots_trong_moi_157["id"] == blid]
                         so_cay = int(batch_lot["so_luong"].sum()) if not batch_lot.empty else 0
+                        dt_trong = float(batch_lot["dien_tich_trong"].dropna().iloc[0]) if not batch_lot.empty and "dien_tich_trong" in batch_lot.columns and not batch_lot["dien_tich_trong"].dropna().empty else 0.0
                     else:
                         so_cay = 0
+                        dt_trong = 0.0
                     # Dùng shared compute_batch_stats
                     if blid:
                         next_s = _map_next_season.get((int(blid), vu))
@@ -2553,7 +2555,7 @@ def render_global_data_tab(c_farm):
                     if is_multi and "đợt " in display_label:
                         _n = display_label.split("đợt ")[-1].rstrip(")")
                         dot_num = int(_n) if _n.isdigit() else 0
-                    batches.append({"vu": vu, "ngay_bd": ngay_bd, "so_cay": so_cay, "gd": gd, "chich": chich, "cat": cat, "thu": thu, "dot": dot_num, "multi": is_multi})
+                    batches.append({"base_lot_id": int(blid) if blid and pd.notna(blid) else None, "vu": vu, "ngay_bd": ngay_bd, "so_cay": so_cay, "dien_tich_trong": dt_trong, "gd": gd, "chich": chich, "cat": cat, "thu": thu, "dot": dot_num, "multi": is_multi})
 
                 # Dominant batch = nhiều cây nhất → quyết định màu polygon
                 dominant = max(batches, key=lambda b: b["so_cay"]) if batches else batches[0]
@@ -2566,9 +2568,17 @@ def render_global_data_tab(c_farm):
                     _dt_vals = _lo_batches_f0["dien_tich_trong"].dropna()
                     if not _dt_vals.empty:
                         _dt_trong_total = float(_dt_vals.sum())
+                _area_ha = _dim_lo_area_map.get(lo_name)
+                if _area_ha is not None and _dt_trong_total > 0:
+                    _dt_trong_total = min(_dt_trong_total, float(_area_ha))
+                    _batch_dt_sum = sum(float(b.get("dien_tich_trong") or 0) for b in batches if b.get("base_lot_id") is not None)
+                    if _batch_dt_sum > float(_area_ha):
+                        _area_scale = float(_area_ha) / _batch_dt_sum
+                        for _b in batches:
+                            _b["dien_tich_trong"] = float(_b.get("dien_tich_trong") or 0) * _area_scale
                 lot_info_map[lo_name] = {
                     "dominant_gd": dominant["gd"],
-                    "area_ha": _dim_lo_area_map.get(lo_name),
+                    "area_ha": _area_ha,
                     "dien_tich_trong": _dt_trong_total,
                     # Chỉ cộng F0: F1/F2 mọc từ cùng gốc F0 → không tính trùng
                     "total_cay": sum(b["so_cay"] for b in batches if b["vu"] == "F0"),
@@ -2650,59 +2660,41 @@ def render_global_data_tab(c_farm):
                     if pd.notna(_v):
                         _total_farm_area += float(_v)
 
-        # 2. Diện tích theo giai đoạn: dùng lot_info_map (đã tính gd per batch)
-        #    + dien_tich_trong per batch từ df_lots_trong_moi_157
-        _dt_trong_map = {}  # base_lot_id → dien_tich_trong
-        if not df_lots_trong_moi_157.empty and "id" in df_lots_trong_moi_157.columns:
-            for _, _r in df_lots_trong_moi_157.iterrows():
-                _blid = _r["id"]
-                _dt_val = _r.get("dien_tich_trong")
-                if pd.notna(_dt_val):
-                    _dt_trong_map[_blid] = float(_dt_val)
-
-        # Map base_lot_id → {gd, chich, cat, thu} from seasons/lot_info
-        _blid_stats_map = {}  # base_lot_id → {gd, chich, cat, thu}
-        if not df_seasons_157.empty and "base_lot_id" in df_seasons_157.columns:
-            for lo_name_s in lot_info_map:
-                info_s = lot_info_map[lo_name_s]
-                lo_lots_s = df_lots_trong_moi_157[df_lots_trong_moi_157["lo"] == lo_name_s] if not df_lots_trong_moi_157.empty else pd.DataFrame()
-                lo_seasons_s = df_seasons_157[
-                    (df_seasons_157["lo"] == lo_name_s) & (df_seasons_157["loai_trong"] != "Trồng dặm")
-                ].sort_values("ngay_bat_dau", ascending=False)
-                for batch_info, (_, s_row) in zip(info_s["batches"], lo_seasons_s.iterrows()):
-                    blid_s = s_row.get("base_lot_id")
-                    if blid_s and pd.notna(blid_s):
-                        _blid_stats_map[int(blid_s)] = {
-                            "gd": batch_info["gd"],
-                            "chich": batch_info.get("chich", 0),
-                            "cat": batch_info.get("cat", 0),
-                            "thu": batch_info.get("thu", 0),
-                            "so_cay": batch_info.get("so_cay", 0),
-                        }
-
-        # ── Tính diện tích theo tỷ lệ cây thực tế ──
-        # VD: 500 cây / 5 ha → chích 200 cây = 200/500 * 5 = 2 ha
+        # 2. Diện tích theo giai đoạn: phân bổ theo tỉ lệ cây trong từng đợt.
+        #    Mỗi base_lot chỉ được tính một lần (season hiện tại/mới nhất),
+        #    và các trạng thái bị cap để tổng không vượt diện tích trồng.
         _area_planted = 0.0      # Tổng DT đã trồng
         _area_growing = 0.0      # Đang sinh trưởng
         _area_chich = 0.0        # Chích bắp
         _area_cat = 0.0          # Cắt bắp
         _area_harvest = 0.0      # Thu hoạch
-        for _blid, _stats in _blid_stats_map.items():
-            _dt = _dt_trong_map.get(_blid, 0)
-            _area_planted += _dt
-            _total_cay = _stats["so_cay"]
-            if _total_cay <= 0 or _dt <= 0:
-                continue
-            # Tính số cây ở mỗi giai đoạn (proportional)
-            _n_thu = max(_stats["thu"], 0)
-            _n_cat = max(_stats["cat"] - _n_thu, 0)   # đã cắt nhưng chưa thu
-            _n_chich = max(_stats["chich"] - _stats["cat"], 0)  # đã chích nhưng chưa cắt
-            _n_grow = max(_total_cay - _stats["chich"], 0)  # chưa chích
-            _ratio = _dt / _total_cay
-            _area_harvest += _n_thu * _ratio
-            _area_cat += _n_cat * _ratio
-            _area_chich += _n_chich * _ratio
-            _area_growing += _n_grow * _ratio
+        _counted_blids = set()
+        for _info in lot_info_map.values():
+            for _batch in _info.get("batches", []):
+                _blid = _batch.get("base_lot_id")
+                if _blid is None or _blid in _counted_blids:
+                    continue
+                _counted_blids.add(_blid)
+                _dt = float(_batch.get("dien_tich_trong") or 0)
+                _total_cay = int(_batch.get("so_cay") or 0)
+                if _dt <= 0 or _total_cay <= 0:
+                    continue
+                _area_planted += _dt
+
+                _remaining = _total_cay
+                _n_thu = min(max(int(_batch.get("thu") or 0), 0), _remaining)
+                _remaining -= _n_thu
+                _n_cat = min(max(int(_batch.get("cat") or 0) - int(_batch.get("thu") or 0), 0), _remaining)
+                _remaining -= _n_cat
+                _n_chich = min(max(int(_batch.get("chich") or 0) - int(_batch.get("cat") or 0), 0), _remaining)
+                _remaining -= _n_chich
+                _n_grow = max(_remaining, 0)
+
+                _ratio = _dt / _total_cay
+                _area_harvest += _n_thu * _ratio
+                _area_cat += _n_cat * _ratio
+                _area_chich += _n_chich * _ratio
+                _area_growing += _n_grow * _ratio
 
         # Build info panel HTML
         _info_rows = [
@@ -2789,8 +2781,10 @@ def render_global_data_tab(c_farm):
                     if blid and not df_lots_trong_moi_195.empty and "id" in df_lots_trong_moi_195.columns:
                         batch_lot = df_lots_trong_moi_195[df_lots_trong_moi_195["id"] == blid]
                         so_cay = int(batch_lot["so_luong"].sum()) if not batch_lot.empty else 0
+                        dt_trong = float(batch_lot["dien_tich_trong"].dropna().iloc[0]) if not batch_lot.empty and "dien_tich_trong" in batch_lot.columns and not batch_lot["dien_tich_trong"].dropna().empty else 0.0
                     else:
                         so_cay = 0
+                        dt_trong = 0.0
                     if blid:
                         next_s = _map_next_season.get((int(blid), vu))
                         next_prod = (int(blid), vu) in _map_next_producing if next_s else False
@@ -2807,7 +2801,7 @@ def render_global_data_tab(c_farm):
                     if is_multi and "đợt " in display_label:
                         _n = display_label.split("đợt ")[-1].rstrip(")")
                         dot_num = int(_n) if _n.isdigit() else 0
-                    batches_195.append({"vu": vu, "ngay_bd": ngay_bd, "so_cay": so_cay, "gd": gd, "chich": chich, "cat": cat, "thu": thu, "dot": dot_num, "multi": is_multi})
+                    batches_195.append({"base_lot_id": int(blid) if blid and pd.notna(blid) else None, "vu": vu, "ngay_bd": ngay_bd, "so_cay": so_cay, "dien_tich_trong": dt_trong, "gd": gd, "chich": chich, "cat": cat, "thu": thu, "dot": dot_num, "multi": is_multi})
 
                 dominant = max(batches_195, key=lambda b: b["so_cay"]) if batches_195 else batches_195[0]
                 _dt_trong_total_195 = 0.0
@@ -2818,9 +2812,17 @@ def render_global_data_tab(c_farm):
                     _dt_vals = _lo_batches_f0["dien_tich_trong"].dropna()
                     if not _dt_vals.empty:
                         _dt_trong_total_195 = float(_dt_vals.sum())
+                _area_ha_195 = _dim_lo_area_map_195.get(lo_name_195)
+                if _area_ha_195 is not None and _dt_trong_total_195 > 0:
+                    _dt_trong_total_195 = min(_dt_trong_total_195, float(_area_ha_195))
+                    _batch_dt_sum_195 = sum(float(b.get("dien_tich_trong") or 0) for b in batches_195 if b.get("base_lot_id") is not None)
+                    if _batch_dt_sum_195 > float(_area_ha_195):
+                        _area_scale_195 = float(_area_ha_195) / _batch_dt_sum_195
+                        for _b in batches_195:
+                            _b["dien_tich_trong"] = float(_b.get("dien_tich_trong") or 0) * _area_scale_195
                 lot_info_map_195[lo_name_195] = {
                     "dominant_gd": dominant["gd"],
-                    "area_ha": _dim_lo_area_map_195.get(lo_name_195),
+                    "area_ha": _area_ha_195,
                     "dien_tich_trong": _dt_trong_total_195,
                     "total_cay": sum(b["so_cay"] for b in batches_195 if b["vu"] == "F0"),
                     "batches": batches_195,
@@ -2887,52 +2889,38 @@ def render_global_data_tab(c_farm):
         except Exception:
             pass
 
-        _dt_trong_map_195 = {}
-        if not df_lots_trong_moi_195.empty and "id" in df_lots_trong_moi_195.columns:
-            for _, _r in df_lots_trong_moi_195.iterrows():
-                _blid = _r["id"]
-                _dt_val = _r.get("dien_tich_trong")
-                if pd.notna(_dt_val):
-                    _dt_trong_map_195[_blid] = float(_dt_val)
-
-        _blid_stats_map_195 = {}
-        if not df_seasons_195.empty and "base_lot_id" in df_seasons_195.columns:
-            for lo_name_s in lot_info_map_195:
-                info_s = lot_info_map_195[lo_name_s]
-                lo_seasons_s = df_seasons_195[
-                    (df_seasons_195["lo"] == lo_name_s) & (df_seasons_195["loai_trong"] != "Trồng dặm")
-                ].sort_values("ngay_bat_dau", ascending=False)
-                for batch_info, (_, s_row) in zip(info_s["batches"], lo_seasons_s.iterrows()):
-                    blid_s = s_row.get("base_lot_id")
-                    if blid_s and pd.notna(blid_s):
-                        _blid_stats_map_195[int(blid_s)] = {
-                            "gd": batch_info["gd"],
-                            "chich": batch_info.get("chich", 0),
-                            "cat": batch_info.get("cat", 0),
-                            "thu": batch_info.get("thu", 0),
-                            "so_cay": batch_info.get("so_cay", 0),
-                        }
-
         _area_planted_195 = 0.0
         _area_growing_195 = 0.0
         _area_chich_195 = 0.0
         _area_cat_195 = 0.0
         _area_harvest_195 = 0.0
-        for _blid, _stats in _blid_stats_map_195.items():
-            _dt = _dt_trong_map_195.get(_blid, 0)
-            _area_planted_195 += _dt
-            _total_cay = _stats["so_cay"]
-            if _total_cay <= 0 or _dt <= 0:
-                continue
-            _n_thu = max(_stats["thu"], 0)
-            _n_cat = max(_stats["cat"] - _n_thu, 0)
-            _n_chich = max(_stats["chich"] - _stats["cat"], 0)
-            _n_grow = max(_total_cay - _stats["chich"], 0)
-            _ratio = _dt / _total_cay
-            _area_harvest_195 += _n_thu * _ratio
-            _area_cat_195 += _n_cat * _ratio
-            _area_chich_195 += _n_chich * _ratio
-            _area_growing_195 += _n_grow * _ratio
+        _counted_blids_195 = set()
+        for _info in lot_info_map_195.values():
+            for _batch in _info.get("batches", []):
+                _blid = _batch.get("base_lot_id")
+                if _blid is None or _blid in _counted_blids_195:
+                    continue
+                _counted_blids_195.add(_blid)
+                _dt = float(_batch.get("dien_tich_trong") or 0)
+                _total_cay = int(_batch.get("so_cay") or 0)
+                if _dt <= 0 or _total_cay <= 0:
+                    continue
+                _area_planted_195 += _dt
+
+                _remaining = _total_cay
+                _n_thu = min(max(int(_batch.get("thu") or 0), 0), _remaining)
+                _remaining -= _n_thu
+                _n_cat = min(max(int(_batch.get("cat") or 0) - int(_batch.get("thu") or 0), 0), _remaining)
+                _remaining -= _n_cat
+                _n_chich = min(max(int(_batch.get("chich") or 0) - int(_batch.get("cat") or 0), 0), _remaining)
+                _remaining -= _n_chich
+                _n_grow = max(_remaining, 0)
+
+                _ratio = _dt / _total_cay
+                _area_harvest_195 += _n_thu * _ratio
+                _area_cat_195 += _n_cat * _ratio
+                _area_chich_195 += _n_chich * _ratio
+                _area_growing_195 += _n_grow * _ratio
 
         _info_rows_195 = [
             ("Tổng DT lô", f"{_total_farm_area_195:.2f} ha", "#94a3b8"),
