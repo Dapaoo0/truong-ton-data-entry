@@ -19,6 +19,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 import json
+from container_allocation import DEFAULT_SKU_ROWS, allocate_bunches_by_hands
 
 if hasattr(st, "dialog"):
     dialog_decorator = st.dialog
@@ -4610,6 +4611,222 @@ def render_global_data_tab(c_farm):
         st.info("Chưa có dữ liệu Kiểm kê cây trên farm này.")
 
 # =====================================================
+# MÁY TÍNH PHÂN BỔ CONTAINER (KINH DOANH)
+# =====================================================
+def build_weekly_cat_forecast(df_stg: pd.DataFrame) -> pd.DataFrame:
+    """Gom dự báo thu hoạch từ cắt bắp theo ISO year/week."""
+    if df_stg is None or df_stg.empty or "giai_doan" not in df_stg.columns:
+        return pd.DataFrame(columns=["farm", "year", "week", "forecast_bunches"])
+
+    df_cat = df_stg[df_stg["giai_doan"] == "Cắt bắp"].copy()
+    if df_cat.empty:
+        return pd.DataFrame(columns=["farm", "year", "week", "forecast_bunches"])
+
+    micro_offsets = list(range(-MICRO_WINDOW_HALF, MICRO_WINDOW_HALF + 1))
+    raw_weights = [pow(2.718281828459045, -0.5 * pow(offset / MICRO_SIGMA, 2)) for offset in micro_offsets]
+    total_weight = sum(raw_weights) or 1
+    micro_weights = [w / total_weight for w in raw_weights]
+
+    rows = []
+    for _, row in df_cat.iterrows():
+        ngay_cat = pd.to_datetime(row.get("ngay_thuc_hien"), errors="coerce")
+        if pd.isna(ngay_cat):
+            continue
+        try:
+            qty = int(row.get("so_luong", 0) or 0)
+        except (TypeError, ValueError):
+            qty = 0
+        if qty <= 0:
+            continue
+
+        farm_name = row.get("farm") or "Không rõ farm"
+        midpoint = ngay_cat + timedelta(days=DAYS_CAT_TO_THU)
+        for offset, weight in zip(micro_offsets, micro_weights):
+            harvest_day = midpoint + timedelta(days=offset)
+            iso = harvest_day.isocalendar()
+            rows.append({
+                "farm": farm_name,
+                "year": int(iso.year),
+                "week": int(iso.week),
+                "_qty_float": qty * weight,
+            })
+
+    if not rows:
+        return pd.DataFrame(columns=["farm", "year", "week", "forecast_bunches"])
+
+    weekly = pd.DataFrame(rows).groupby(["farm", "year", "week"], as_index=False)["_qty_float"].sum()
+    total_target = int(round(weekly["_qty_float"].sum()))
+    weekly["_floor"] = weekly["_qty_float"].apply(lambda x: int(x))
+    weekly["_remainder"] = weekly["_qty_float"] - weekly["_floor"]
+    deficit = total_target - int(weekly["_floor"].sum())
+    weekly["forecast_bunches"] = weekly["_floor"]
+    if deficit > 0:
+        idx = weekly.sort_values("_remainder", ascending=False).head(deficit).index
+        weekly.loc[idx, "forecast_bunches"] += 1
+
+    return weekly[["farm", "year", "week", "forecast_bunches"]].sort_values(["year", "week", "farm"])
+
+
+def _default_container_sku_editor_rows() -> list:
+    return [{
+        "Ưu tiên thị trường": r["market_priority"],
+        "Thị trường": r["market"],
+        "Ưu tiên loại hàng": r["sku_priority"],
+        "Mã hàng": r["sku"],
+        "Nải từ": r["hand_from"],
+        "Nải đến": r["hand_to"],
+        "Nhu cầu": r["demand"],
+        "Đơn vị": r["unit"],
+    } for r in DEFAULT_SKU_ROWS]
+
+
+def render_container_allocation_calculator():
+    st.markdown("#### Máy tính phân bổ container theo nải")
+    st.caption("Dùng cho Kinh doanh tính nhanh khả năng đáp ứng đơn hàng theo vị trí nải, ưu tiên thị trường và ưu tiên loại hàng.")
+
+    if "container_calc_sku_rows" not in st.session_state:
+        st.session_state["container_calc_sku_rows"] = _default_container_sku_editor_rows()
+
+    source_mode = st.radio(
+        "Nguồn số buồng",
+        ["Dự báo từ cắt bắp", "Nhập tay"],
+        horizontal=True,
+        key="container_source_mode",
+    )
+
+    source_bunches = 0
+    source_label = "Chưa chọn nguồn"
+    if source_mode == "Dự báo từ cắt bắp":
+        df_stg_all = fetch_table_data("stage_logs", "Phòng Kinh doanh")
+        weekly_forecast = build_weekly_cat_forecast(df_stg_all)
+        if weekly_forecast.empty:
+            st.warning("Chưa có dữ liệu cắt bắp để dự báo theo tuần.")
+        else:
+            f_col, y_col, w_col = st.columns(3)
+            with f_col:
+                farm_options = ["Tất cả"] + sorted(weekly_forecast["farm"].dropna().unique().tolist())
+                selected_farm = st.selectbox("Farm", options=farm_options, key="container_forecast_farm")
+            df_week_opts = weekly_forecast.copy()
+            if selected_farm != "Tất cả":
+                df_week_opts = df_week_opts[df_week_opts["farm"] == selected_farm]
+            year_options = sorted(df_week_opts["year"].dropna().astype(int).unique().tolist())
+            default_year_idx = year_options.index(date.today().year) if date.today().year in year_options else 0
+            with y_col:
+                selected_year = st.selectbox("Năm", options=year_options, index=default_year_idx, key="container_forecast_year")
+            df_week_opts = df_week_opts[df_week_opts["year"] == int(selected_year)]
+            week_options = sorted(df_week_opts["week"].dropna().astype(int).unique().tolist())
+            default_week = date.today().isocalendar().week
+            default_week_idx = week_options.index(default_week) if default_week in week_options else 0
+            with w_col:
+                selected_week = st.selectbox("Tuần ISO", options=week_options, index=default_week_idx, key="container_forecast_week")
+
+            df_selected = df_week_opts[df_week_opts["week"] == int(selected_week)]
+            source_bunches = int(df_selected["forecast_bunches"].sum())
+            source_label = f"{selected_farm} · Tuần {selected_week}/{selected_year}"
+            st.metric("Số buồng dự báo từ cắt bắp", f"{source_bunches:,} buồng", source_label)
+    else:
+        source_bunches = int(st.number_input("Số buồng thu hoạch / dự kiến", min_value=0, value=0, step=100, key="container_manual_bunches"))
+        source_label = "Nhập tay"
+
+    st.divider()
+    cfg1, cfg2, cfg3 = st.columns(3)
+    with cfg1:
+        kg_mode = st.radio("Kịch bản kg/buồng", ["18 kg", "20 kg", "Tùy chỉnh"], horizontal=True, key="container_kg_mode")
+    with cfg2:
+        if kg_mode == "Tùy chỉnh":
+            kg_per_bunch = float(st.number_input("Kg/buồng", min_value=0.1, value=18.0, step=0.5, format="%.2f", key="container_custom_kg"))
+        else:
+            kg_per_bunch = 18.0 if kg_mode == "18 kg" else 20.0
+            st.metric("Kg/buồng", f"{kg_per_bunch:g} kg")
+    with cfg3:
+        hands_per_bunch = int(st.number_input("Số nải/buồng", min_value=1, max_value=30, value=12, step=1, key="container_hands_per_bunch"))
+
+    st.markdown("##### Cấu hình đơn hàng")
+    sku_df = pd.DataFrame(st.session_state["container_calc_sku_rows"])
+    edited_df = st.data_editor(
+        sku_df,
+        num_rows="dynamic",
+        hide_index=True,
+        use_container_width=True,
+        key="container_sku_editor",
+        column_config={
+            "Đơn vị": st.column_config.SelectboxColumn("Đơn vị", options=["Thùng", "Cont"], required=True),
+            "Ưu tiên thị trường": st.column_config.NumberColumn(min_value=1, step=1, format="%d"),
+            "Ưu tiên loại hàng": st.column_config.NumberColumn(min_value=1, step=1, format="%d"),
+            "Nải từ": st.column_config.NumberColumn(min_value=1, step=1, format="%d"),
+            "Nải đến": st.column_config.NumberColumn(min_value=1, step=1, format="%d"),
+            "Nhu cầu": st.column_config.NumberColumn(min_value=0, step=1),
+        },
+    )
+    st.session_state["container_calc_sku_rows"] = edited_df.to_dict("records")
+
+    result = allocate_bunches_by_hands(
+        source_bunches,
+        kg_per_bunch,
+        hands_per_bunch,
+        edited_df.to_dict("records"),
+        kg_per_box=KG_PER_BOX,
+        boxes_per_container=BOXES_PER_CONTAINER,
+    )
+    summary = result["summary"]
+
+    st.markdown("##### Kết quả tổng")
+    m1, m2, m3, m4, m5 = st.columns(5)
+    with m1:
+        st.metric("Nguồn buồng", f"{summary['total_bunches']:,}")
+    with m2:
+        st.metric("Kg nguồn", f"{summary['source_kg']:,.0f}")
+    with m3:
+        st.metric("Kg/nải", f"{summary['kg_per_hand']:.2f}")
+    with m4:
+        st.metric("Cont lý thuyết", f"{summary['source_cont_capacity']:,.2f}")
+    with m5:
+        st.metric("Cont đáp ứng", f"{summary['fulfilled_containers']:,.2f}", f"Thiếu {summary['short_containers']:,.2f}")
+
+    if result["rows"]:
+        result_df = pd.DataFrame(result["rows"])
+        display_df = result_df[[
+            "processing_order", "market_priority", "market", "sku_priority", "sku",
+            "hand_from", "hand_to", "requested_boxes", "bunches_needed",
+            "bunches_allocated", "boxes_fulfilled", "containers_fulfilled",
+            "short_boxes", "short_containers", "extra_kg_from_rounding"
+        ]].copy()
+        display_df.columns = [
+            "Thứ tự", "Ưu tiên TT", "Thị trường", "Ưu tiên hàng", "Mã hàng",
+            "Nải từ", "Nải đến", "Thùng yêu cầu", "Buồng cần",
+            "Buồng phân bổ", "Thùng đáp ứng", "Cont đáp ứng",
+            "Thiếu thùng", "Thiếu cont", "Kg dư làm tròn"
+        ]
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("Nhập số buồng và ít nhất một dòng mã hàng hợp lệ để xem kết quả.")
+
+    remaining_df = pd.DataFrame([
+        {"Nải": hand, "Buồng còn lại": qty}
+        for hand, qty in result["remaining_hands"].items()
+    ])
+    if not remaining_df.empty:
+        with st.expander("Tồn nải còn lại sau phân bổ", expanded=False):
+            st.dataframe(remaining_df, use_container_width=True, hide_index=True)
+
+    if st.button("Lưu phương án trong phiên", use_container_width=True, type="secondary", key="container_save_session"):
+        st.session_state["container_calc_saved_plan"] = {
+            "source": source_label,
+            "source_bunches": source_bunches,
+            "kg_per_bunch": kg_per_bunch,
+            "hands_per_bunch": hands_per_bunch,
+            "sku_rows": edited_df.to_dict("records"),
+            "result": result,
+            "saved_at": datetime.now().isoformat(),
+        }
+        st.success("Đã lưu phương án tạm trong phiên hiện tại.")
+
+    saved_plan = st.session_state.get("container_calc_saved_plan")
+    if saved_plan:
+        st.caption(f"Phương án đã lưu gần nhất: {saved_plan.get('source')} · {saved_plan.get('source_bunches', 0):,} buồng")
+
+
+# =====================================================
 # GIAO DIỆN CHÍNH (MAIN APP) - ROLE BASED 
 # =====================================================
 def render_main_app():
@@ -4725,7 +4942,14 @@ def render_main_app():
     # MODULE KINH DOANH
     # =================================================
     if c_farm == "Phòng Kinh doanh" and c_team == "Kinh doanh":
-        render_global_data_tab("Phòng Kinh doanh")
+        tab_opts = ["🌐 Dữ liệu toàn cục", "📦 Máy tính phân bổ cont"]
+        active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_sales_menu", default=tab_opts[0])
+        if active_tab is None:
+            active_tab = tab_opts[0]
+        if active_tab == tab_opts[1]:
+            render_container_allocation_calculator()
+        else:
+            render_global_data_tab("Phòng Kinh doanh")
         return
 
     # =================================================
