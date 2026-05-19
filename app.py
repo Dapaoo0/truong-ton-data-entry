@@ -4953,11 +4953,14 @@ def render_container_allocation_calculator():
         row_cols = st.columns([2, 1.4, 1.4, 0.7])
         with row_cols[0]:
             market_index = CONTAINER_MARKET_OPTIONS.index(row["Thị trường"]) if row["Thị trường"] in CONTAINER_MARKET_OPTIONS else 0
+            market_key = f"container_order_market_{row_id}"
+            if st.session_state.get(market_key) not in CONTAINER_MARKET_OPTIONS:
+                st.session_state[market_key] = row["Thị trường"] if row["Thị trường"] in CONTAINER_MARKET_OPTIONS else CONTAINER_MARKET_OPTIONS[0]
             market = st.selectbox(
                 "Thị trường",
                 options=CONTAINER_MARKET_OPTIONS,
                 index=market_index,
-                key=f"container_order_market_{row_id}",
+                key=market_key,
                 label_visibility="collapsed",
             )
         with row_cols[1]:
@@ -5013,7 +5016,7 @@ def render_container_allocation_calculator():
     st.session_state["container_calc_sku_rows"] = order_rows
 
     active_markets = _unique_keep_order([row.get("Thị trường") for row in order_rows])
-    priority_market_options = ["Không chọn"] + active_markets
+    priority_market_options = ["Không chọn"] + CONTAINER_MARKET_OPTIONS
     p_cols = st.columns(2)
     market_order = []
     for idx, col in enumerate(p_cols, start=1):
