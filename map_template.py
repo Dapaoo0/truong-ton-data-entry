@@ -8,6 +8,7 @@ MAP_STROKE_REFERENCE_WIDTH = 4000
 MAP_STROKE_WIDTH = 3
 MAP_STROKE_HOVER_WIDTH = 5
 MAP_STROKE_PINNED_WIDTH = 6
+MAP_STROKE_SMALL_MAP_MULTIPLIER = 0.65
 
 
 def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
@@ -35,6 +36,8 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
     # Scale font size relative to image width. Farm 157 (img_w=4000) used 47px.
     label_font_size = max(10, int(img_w * 47 / 4000))
     stroke_scale = (img_w / MAP_STROKE_REFERENCE_WIDTH) if img_w else 1
+    if img_w and img_w < MAP_STROKE_REFERENCE_WIDTH:
+        stroke_scale *= MAP_STROKE_SMALL_MAP_MULTIPLIER
     polygon_stroke_width = round(MAP_STROKE_WIDTH * stroke_scale, 2)
     polygon_hover_stroke_width = round(MAP_STROKE_HOVER_WIDTH * stroke_scale, 2)
     polygon_pinned_stroke_width = round(MAP_STROKE_PINNED_WIDTH * stroke_scale, 2)
