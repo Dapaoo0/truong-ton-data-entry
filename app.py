@@ -5060,10 +5060,45 @@ def render_container_allocation_calculator():
     with m4:
         st.metric("Cont lý thuyết", f"{summary['source_cont_capacity']:,.2f}")
     with m5:
-        st.metric("Cont đáp ứng", f"{summary['fulfilled_containers']:,.2f}", f"Thiếu {summary['short_containers']:,.2f}")
+        st.metric("Cont quy đổi đáp ứng", f"{summary['fulfilled_containers']:,.2f}", f"Thiếu {summary['short_containers']:,.2f}")
 
     if result["rows"]:
         result_df = pd.DataFrame(result["rows"])
+        market_summary = (
+            result_df.groupby("market", as_index=False)
+            .agg(
+                market_priority=("market_priority", "min"),
+                requested_boxes=("requested_boxes", "sum"),
+                boxes_fulfilled=("boxes_fulfilled", "sum"),
+                short_boxes=("short_boxes", "sum"),
+            )
+            .sort_values(["market_priority", "market"])
+        )
+        market_summary["full_containers"] = market_summary["boxes_fulfilled"] // BOXES_PER_CONTAINER
+        market_summary["remaining_boxes"] = market_summary["boxes_fulfilled"] % BOXES_PER_CONTAINER
+        market_summary["container_equivalent"] = market_summary["boxes_fulfilled"] / BOXES_PER_CONTAINER
+        conclusion_parts = []
+        for _, row in market_summary.iterrows():
+            market_name = row["market"]
+            full_containers = int(row["full_containers"])
+            remaining_boxes = int(row["remaining_boxes"])
+            if remaining_boxes > 0:
+                conclusion_parts.append(f"{market_name}: {full_containers} cont + {remaining_boxes:,} thùng lẻ")
+            else:
+                conclusion_parts.append(f"{market_name}: {full_containers} cont")
+        if conclusion_parts:
+            st.success("Kết luận theo thị trường: " + " · ".join(conclusion_parts))
+
+        market_display_df = market_summary[[
+            "market", "market_priority", "requested_boxes", "boxes_fulfilled", "full_containers",
+            "remaining_boxes", "container_equivalent", "short_boxes"
+        ]].copy()
+        market_display_df.columns = [
+            "Thị trường", "Ưu tiên TT", "Thùng yêu cầu", "Thùng đáp ứng", "Cont đủ",
+            "Thùng lẻ", "Cont quy đổi", "Thiếu thùng"
+        ]
+        st.dataframe(market_display_df, use_container_width=True, hide_index=True)
+
         display_df = result_df[[
             "processing_order", "market_priority", "market", "sku_priority", "sku",
             "range_label", "requested_boxes", "bunches_needed",
@@ -5073,7 +5108,7 @@ def render_container_allocation_calculator():
         display_df.columns = [
             "Thứ tự", "Ưu tiên TT", "Thị trường", "Ưu tiên hàng", "Mã hàng",
             "Nải chọn", "Thùng yêu cầu", "Buồng cần",
-            "Buồng phân bổ", "Thùng đáp ứng", "Cont đáp ứng",
+            "Buồng phân bổ", "Thùng đáp ứng", "Cont quy đổi",
             "Thiếu thùng", "Thiếu cont", "Kg dư làm tròn"
         ]
         st.dataframe(display_df, use_container_width=True, hide_index=True)
