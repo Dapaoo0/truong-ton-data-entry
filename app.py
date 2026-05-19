@@ -4739,7 +4739,9 @@ def render_container_allocation_calculator():
             kg_per_bunch = 18.0 if kg_mode == "18 kg" else 20.0
             st.metric("Kg/buồng", f"{kg_per_bunch:g} kg")
     with cfg3:
-        hands_per_bunch = int(st.number_input("Số nải/buồng", min_value=1, max_value=30, value=12, step=1, key="container_hands_per_bunch"))
+        hands_per_bunch = 12
+        st.metric("Số nải/buồng", "12 nải")
+        st.caption("Cố định theo cẩm nang 12 nải/buồng.")
 
     st.markdown("##### Cấu hình đơn hàng")
     sku_df = pd.DataFrame(st.session_state["container_calc_sku_rows"])
@@ -4751,10 +4753,10 @@ def render_container_allocation_calculator():
         key="container_sku_editor",
         column_config={
             "Đơn vị": st.column_config.SelectboxColumn("Đơn vị", options=["Thùng", "Cont"], required=True),
-            "Ưu tiên thị trường": st.column_config.NumberColumn(min_value=1, step=1, format="%d"),
-            "Ưu tiên loại hàng": st.column_config.NumberColumn(min_value=1, step=1, format="%d"),
-            "Nải từ": st.column_config.NumberColumn(min_value=1, step=1, format="%d"),
-            "Nải đến": st.column_config.NumberColumn(min_value=1, step=1, format="%d"),
+            "Ưu tiên thị trường": st.column_config.SelectboxColumn("Ưu tiên thị trường", options=list(range(1, 21)), required=True),
+            "Ưu tiên loại hàng": st.column_config.SelectboxColumn("Ưu tiên loại hàng", options=list(range(1, 21)), required=True),
+            "Nải từ": st.column_config.NumberColumn(min_value=1, max_value=12, step=1, format="%d"),
+            "Nải đến": st.column_config.NumberColumn(min_value=1, max_value=12, step=1, format="%d"),
             "Nhu cầu": st.column_config.NumberColumn(min_value=0, step=1),
         },
     )
