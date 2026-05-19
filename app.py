@@ -5006,26 +5006,33 @@ def render_container_allocation_calculator():
             if conclusion_parts:
                 st.success("Kết luận tối đa: " + " · ".join(conclusion_parts))
 
-            market_display_df = max_market_df[[
-                "market", "market_priority", "capacity_boxes", "capacity_containers",
-                "full_containers", "boxes_allocated", "remaining_boxes_potential", "bundles_used"
-            ]].copy()
-            market_display_df.columns = [
-                "Thị trường", "Ưu tiên TT", "Công suất tối đa (thùng)", "Công suất tối đa (cont)",
-                "Cont đủ chốt", "Thùng đã chốt", "Thùng lẻ tiềm năng", "Buồng quy đổi dùng"
-            ]
-            st.dataframe(market_display_df, use_container_width=True, hide_index=True)
-
+            compact_max_rows = []
             detail_df = pd.DataFrame(max_result.get("detail_rows", []))
-            if not detail_df.empty:
-                detail_display_df = detail_df[[
-                    "market", "sku", "range_label", "bundles_used", "kg_allocated", "boxes_equivalent"
-                ]].copy()
-                detail_display_df.columns = [
-                    "Thị trường", "Mã hàng", "Nải dùng", "Buồng quy đổi dùng",
-                    "Kg phân bổ", "Thùng quy đổi"
-                ]
-                st.dataframe(detail_display_df, use_container_width=True, hide_index=True)
+            for _, market_row in max_market_df.iterrows():
+                market_name = market_row["market"]
+                compact_max_rows.append({
+                    "Thị trường": market_name,
+                    "Mã hàng": "Tổng",
+                    "Nải dùng": "",
+                    "Cont đủ": int(market_row["full_containers"]),
+                    "Thùng chốt": int(market_row["boxes_allocated"]),
+                    "Thùng lẻ": int(market_row["remaining_boxes_potential"]),
+                    "Buồng dùng": int(market_row["bundles_used"]),
+                    "Kg phân bổ": f"{market_row['kg_allocated']:,.0f}",
+                })
+                if not detail_df.empty:
+                    for _, detail_row in detail_df[detail_df["market"] == market_name].iterrows():
+                        compact_max_rows.append({
+                            "Thị trường": market_name,
+                            "Mã hàng": detail_row["sku"],
+                            "Nải dùng": detail_row["range_label"],
+                            "Cont đủ": "",
+                            "Thùng chốt": int(detail_row["boxes_equivalent"]),
+                            "Thùng lẻ": "",
+                            "Buồng dùng": int(detail_row["bundles_used"]),
+                            "Kg phân bổ": f"{detail_row['kg_allocated']:,.0f}",
+                        })
+            st.dataframe(pd.DataFrame(compact_max_rows), use_container_width=True, hide_index=True)
         else:
             st.info("Chọn nguồn buồng hợp lệ để tính tối đa cont theo thị trường.")
 
@@ -5220,7 +5227,7 @@ def render_container_allocation_calculator():
     with m4:
         st.metric("Cont lý thuyết", f"{summary['source_cont_capacity']:,.2f}")
     with m5:
-        st.metric("Cont quy đổi đáp ứng", f"{summary['fulfilled_containers']:,.2f}", f"Thiếu {summary['short_containers']:,.2f}")
+        st.metric("Thùng đáp ứng", f"{summary['fulfilled_boxes']:,}", f"Thiếu {summary['short_boxes']:,} thùng")
 
     if result["rows"]:
         result_df = pd.DataFrame(result["rows"])
@@ -5236,7 +5243,6 @@ def render_container_allocation_calculator():
         )
         market_summary["full_containers"] = market_summary["boxes_fulfilled"] // BOXES_PER_CONTAINER
         market_summary["remaining_boxes"] = market_summary["boxes_fulfilled"] % BOXES_PER_CONTAINER
-        market_summary["container_equivalent"] = market_summary["boxes_fulfilled"] / BOXES_PER_CONTAINER
         conclusion_parts = []
         for _, row in market_summary.iterrows():
             market_name = row["market"]
@@ -5260,29 +5266,36 @@ def render_container_allocation_calculator():
                 f"nhưng chưa đủ 1 cont ({BOXES_PER_CONTAINER:,} thùng)."
             )
 
-        market_display_df = market_summary[[
-            "market", "market_priority", "requested_boxes", "boxes_fulfilled", "full_containers",
-            "remaining_boxes", "container_equivalent", "short_boxes"
-        ]].copy()
-        market_display_df.columns = [
-            "Thị trường", "Ưu tiên TT", "Thùng yêu cầu", "Thùng đáp ứng", "Cont đủ",
-            "Thùng lẻ", "Cont quy đổi", "Thiếu thùng"
-        ]
-        st.dataframe(market_display_df, use_container_width=True, hide_index=True)
+        market_lookup = market_summary.set_index("market").to_dict("index")
+        compact_rows = []
+        sorted_result_df = result_df.sort_values(["market_priority", "sku_priority", "processing_order"])
+        for market_name, market_rows_df in sorted_result_df.groupby("market", sort=False):
+            market_info = market_lookup.get(market_name, {})
+            compact_rows.append({
+                "Thị trường": market_name,
+                "Mã hàng": "Tổng",
+                "Thùng yêu cầu": int(market_info.get("requested_boxes", 0)),
+                "Thùng đáp ứng": int(market_info.get("boxes_fulfilled", 0)),
+                "Thiếu thùng": int(market_info.get("short_boxes", 0)),
+                "Cont đủ": int(market_info.get("full_containers", 0)),
+                "Thùng lẻ": int(market_info.get("remaining_boxes", 0)),
+                "Buồng cần": "",
+                "Buồng phân bổ": "",
+            })
+            for _, sku_row in market_rows_df.iterrows():
+                compact_rows.append({
+                    "Thị trường": market_name,
+                    "Mã hàng": sku_row["sku"],
+                    "Thùng yêu cầu": int(sku_row["requested_boxes"]),
+                    "Thùng đáp ứng": int(sku_row["boxes_fulfilled"]),
+                    "Thiếu thùng": int(sku_row["short_boxes"]),
+                    "Cont đủ": "",
+                    "Thùng lẻ": "",
+                    "Buồng cần": int(sku_row["bunches_needed"]),
+                    "Buồng phân bổ": int(sku_row["bunches_allocated"]),
+                })
 
-        display_df = result_df[[
-            "processing_order", "market_priority", "market", "sku_priority", "sku",
-            "range_label", "requested_boxes", "bunches_needed",
-            "bunches_allocated", "boxes_fulfilled", "containers_fulfilled",
-            "short_boxes", "short_containers", "extra_kg_from_rounding"
-        ]].copy()
-        display_df.columns = [
-            "Thứ tự", "Ưu tiên TT", "Thị trường", "Ưu tiên hàng", "Mã hàng",
-            "Nải chọn", "Thùng yêu cầu", "Buồng cần",
-            "Buồng phân bổ", "Thùng đáp ứng", "Cont quy đổi",
-            "Thiếu thùng", "Thiếu cont", "Kg dư làm tròn"
-        ]
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(compact_rows), use_container_width=True, hide_index=True)
         with st.expander("Chi tiết tối ưu", expanded=False):
             st.json(result.get("loss", {}))
     else:
