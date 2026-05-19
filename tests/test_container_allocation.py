@@ -1,4 +1,8 @@
-from container_allocation import allocate_bunches_by_hands, allocate_bunches_optimized
+from container_allocation import (
+    allocate_bunches_by_hands,
+    allocate_bunches_optimized,
+    calculate_max_containers_by_market,
+)
 
 
 def _row(market_priority, sku_priority, sku, hand_from, hand_to, demand, unit="Thùng", market="Nhật"):
@@ -176,3 +180,20 @@ def test_optimizer_does_not_allocate_sku_to_wrong_market():
     ])
 
     assert result["rows"] == []
+
+
+def test_max_container_mode_allocates_week_28_example_by_market_priority():
+    result = calculate_max_containers_by_market(3342, 18, 12, ["Nhật", "Hàn"])
+    by_market = {row["market"]: row for row in result["rows"]}
+
+    assert by_market["Nhật"]["full_containers"] == 2
+    assert by_market["Hàn"]["full_containers"] == 1
+    assert result["summary"]["fulfilled_containers"] == 3
+
+
+def test_max_container_mode_matches_15kg_4000_bunch_scenario():
+    result = calculate_max_containers_by_market(4000, 15, 12, ["Nhật", "Hàn"])
+    by_market = {row["market"]: row for row in result["rows"]}
+
+    assert by_market["Nhật"]["full_containers"] == 2
+    assert by_market["Hàn"]["full_containers"] == 1

@@ -21,7 +21,12 @@ from openpyxl.utils import get_column_letter
 import json
 
 try:
-    from container_allocation import DEFAULT_SKU_ROWS, OPTIMIZER_SKU_RULES, allocate_bunches_optimized
+    from container_allocation import (
+        DEFAULT_SKU_ROWS,
+        OPTIMIZER_SKU_RULES,
+        allocate_bunches_optimized,
+        calculate_max_containers_by_market,
+    )
 except ImportError:
     from container_allocation import DEFAULT_SKU_ROWS, allocate_bunches_by_hands
 
@@ -100,6 +105,31 @@ except ImportError:
         for row in result.get("rows", []):
             row.setdefault("range_label", f"{row.get('hand_from')}-{row.get('hand_to')}")
         return result
+
+    def calculate_max_containers_by_market(
+        total_bunches,
+        kg_per_bunch,
+        hands_per_bunch,
+        market_order,
+        kg_per_box=13,
+        boxes_per_container=1320,
+    ):
+        source_kg = max(0, total_bunches) * max(0, kg_per_bunch)
+        kg_per_hand = kg_per_bunch / hands_per_bunch if hands_per_bunch else 0
+        return {
+            "rows": [],
+            "detail_rows": [],
+            "remaining_hands": {},
+            "summary": {
+                "total_bunches": max(0, total_bunches),
+                "source_kg": source_kg,
+                "kg_per_hand": kg_per_hand,
+                "source_boxes_capacity": int(source_kg // kg_per_box) if kg_per_box else 0,
+                "source_cont_capacity": (int(source_kg // kg_per_box) / boxes_per_container) if boxes_per_container else 0,
+                "fulfilled_boxes": 0,
+                "fulfilled_containers": 0,
+            },
+        }
 
 if hasattr(st, "dialog"):
     dialog_decorator = st.dialog
@@ -4836,6 +4866,34 @@ def _prepare_container_rows_for_allocation(order_rows: list, market_order: list,
     return allocation_rows
 
 
+def _render_container_market_priority_controls(key_prefix: str, default_all_markets: bool = True) -> list:
+    priority_market_options = ["Không chọn"] + CONTAINER_MARKET_OPTIONS
+    p_cols = st.columns(2)
+    market_order = []
+    for idx, col in enumerate(p_cols, start=1):
+        with col:
+            market_key = f"{key_prefix}_{idx}"
+            if st.session_state.get(market_key) not in priority_market_options:
+                st.session_state[market_key] = (
+                    priority_market_options[idx]
+                    if default_all_markets and idx < len(priority_market_options)
+                    else "Không chọn"
+                )
+            selected_market = st.selectbox(
+                f"Thị trường ưu tiên {idx}",
+                options=priority_market_options,
+                key=market_key,
+            )
+            if selected_market != "Không chọn" and selected_market not in market_order:
+                market_order.append(selected_market)
+
+    if default_all_markets:
+        for market in CONTAINER_MARKET_OPTIONS:
+            if market not in market_order:
+                market_order.append(market)
+    return market_order
+
+
 def render_container_allocation_calculator():
     st.markdown("#### Máy tính phân bổ container theo nải")
 
@@ -4903,6 +4961,99 @@ def render_container_allocation_calculator():
     with cfg3:
         hands_per_bunch = 12
         st.metric("Số nải/buồng", "12 nải")
+
+    calc_mode = st.segmented_control(
+        "Chế độ tính",
+        ["Theo đơn hàng", "Tối đa cont theo thị trường"],
+        default="Theo đơn hàng",
+        key="container_calculation_mode",
+    )
+    if calc_mode is None:
+        calc_mode = "Theo đơn hàng"
+
+    if calc_mode == "Tối đa cont theo thị trường":
+        st.markdown("##### Ưu tiên thị trường")
+        market_order = _render_container_market_priority_controls("container_max_market_priority")
+        max_result = calculate_max_containers_by_market(
+            source_bunches,
+            kg_per_bunch,
+            hands_per_bunch,
+            market_order,
+            kg_per_box=KG_PER_BOX,
+            boxes_per_container=BOXES_PER_CONTAINER,
+        )
+        summary = max_result["summary"]
+
+        st.markdown("##### Kết quả tổng")
+        m1, m2, m3, m4, m5 = st.columns(5)
+        with m1:
+            st.metric("Nguồn buồng", f"{summary['total_bunches']:,}")
+        with m2:
+            st.metric("Kg nguồn", f"{summary['source_kg']:,.0f}")
+        with m3:
+            st.metric("Kg/nải", f"{summary['kg_per_hand']:.2f}")
+        with m4:
+            st.metric("Cont lý thuyết", f"{summary['source_cont_capacity']:,.2f}")
+        with m5:
+            st.metric("Cont đủ tối đa", f"{summary['fulfilled_containers']:,}")
+
+        if max_result["rows"]:
+            max_market_df = pd.DataFrame(max_result["rows"])
+            conclusion_parts = [
+                f"{row['market']}: {int(row['full_containers'])} cont"
+                for _, row in max_market_df.iterrows()
+            ]
+            if conclusion_parts:
+                st.success("Kết luận tối đa: " + " · ".join(conclusion_parts))
+
+            market_display_df = max_market_df[[
+                "market", "market_priority", "capacity_boxes", "capacity_containers",
+                "full_containers", "boxes_allocated", "remaining_boxes_potential", "bundles_used"
+            ]].copy()
+            market_display_df.columns = [
+                "Thị trường", "Ưu tiên TT", "Công suất tối đa (thùng)", "Công suất tối đa (cont)",
+                "Cont đủ chốt", "Thùng đã chốt", "Thùng lẻ tiềm năng", "Buồng quy đổi dùng"
+            ]
+            st.dataframe(market_display_df, use_container_width=True, hide_index=True)
+
+            detail_df = pd.DataFrame(max_result.get("detail_rows", []))
+            if not detail_df.empty:
+                detail_display_df = detail_df[[
+                    "market", "sku", "range_label", "bundles_used", "kg_allocated", "boxes_equivalent"
+                ]].copy()
+                detail_display_df.columns = [
+                    "Thị trường", "Mã hàng", "Nải dùng", "Buồng quy đổi dùng",
+                    "Kg phân bổ", "Thùng quy đổi"
+                ]
+                st.dataframe(detail_display_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("Chọn nguồn buồng hợp lệ để tính tối đa cont theo thị trường.")
+
+        remaining_df = pd.DataFrame([
+            {"Nải": hand, "Buồng còn lại": qty}
+            for hand, qty in max_result["remaining_hands"].items()
+        ])
+        if not remaining_df.empty:
+            with st.expander("Tồn nải còn lại sau phân bổ", expanded=False):
+                st.dataframe(remaining_df, use_container_width=True, hide_index=True)
+
+        if st.button("Lưu phương án trong phiên", use_container_width=True, type="secondary", key="container_save_max_session"):
+            st.session_state["container_calc_saved_plan"] = {
+                "mode": calc_mode,
+                "source": source_label,
+                "source_bunches": source_bunches,
+                "kg_per_bunch": kg_per_bunch,
+                "hands_per_bunch": hands_per_bunch,
+                "market_order": market_order,
+                "result": max_result,
+                "saved_at": datetime.now().isoformat(),
+            }
+            st.success("Đã lưu phương án tạm trong phiên hiện tại.")
+
+        saved_plan = st.session_state.get("container_calc_saved_plan")
+        if saved_plan:
+            st.caption(f"Phương án đã lưu gần nhất: {saved_plan.get('source')} · {saved_plan.get('source_bunches', 0):,} buồng")
+        return
 
     title_col, help_col = st.columns([10, 1])
     with title_col:
@@ -5016,22 +5167,7 @@ def render_container_allocation_calculator():
     st.session_state["container_calc_sku_rows"] = order_rows
 
     active_markets = _unique_keep_order([row.get("Thị trường") for row in order_rows])
-    priority_market_options = ["Không chọn"] + CONTAINER_MARKET_OPTIONS
-    p_cols = st.columns(2)
-    market_order = []
-    for idx, col in enumerate(p_cols, start=1):
-        with col:
-            market_key = f"container_market_priority_{idx}"
-            if st.session_state.get(market_key) not in priority_market_options:
-                st.session_state[market_key] = "Không chọn"
-            selected_market = st.selectbox(
-                f"Thị trường ưu tiên {idx}",
-                options=priority_market_options,
-                index=idx if idx < len(priority_market_options) else 0,
-                key=market_key,
-            )
-            if selected_market != "Không chọn":
-                market_order.append(selected_market)
+    market_order = _render_container_market_priority_controls("container_market_priority")
 
     sku_orders_by_market = {}
     for market in active_markets:
@@ -5112,6 +5248,17 @@ def render_container_allocation_calculator():
                 conclusion_parts.append(f"{market_name}: {full_containers} cont")
         if conclusion_parts:
             st.success("Kết luận theo thị trường: " + " · ".join(conclusion_parts))
+
+        small_fulfilled_orders = market_summary[
+            (market_summary["requested_boxes"] > 0)
+            & (market_summary["requested_boxes"] < BOXES_PER_CONTAINER)
+            & (market_summary["short_boxes"] == 0)
+        ]
+        for _, row in small_fulfilled_orders.iterrows():
+            st.warning(
+                f"Đơn hàng {row['market']} quá ít: đáp ứng đủ {int(row['boxes_fulfilled']):,} thùng "
+                f"nhưng chưa đủ 1 cont ({BOXES_PER_CONTAINER:,} thùng)."
+            )
 
         market_display_df = market_summary[[
             "market", "market_priority", "requested_boxes", "boxes_fulfilled", "full_containers",

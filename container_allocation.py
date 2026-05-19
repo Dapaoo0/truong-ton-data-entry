@@ -75,6 +75,19 @@ OPTIMIZER_SKU_RULES = {
     },
 }
 
+MARKET_MAX_CONTAINER_RECIPES = {
+    "Nhật": [
+        {"sku": "27CP", "hand_from": 1, "hand_to": 4},
+        {"sku": "6H", "hand_from": 5, "hand_to": 7},
+        {"sku": "5H", "hand_from": 8, "hand_to": 10},
+    ],
+    "Hàn": [
+        {"sku": "8H", "hand_from": 1, "hand_to": 4},
+        {"sku": "5/6H", "hand_from": 5, "hand_to": 10},
+        {"sku": "15CP", "hand_from": 11, "hand_to": 12},
+    ],
+}
+
 BEAM_WIDTH = 250
 
 
@@ -374,6 +387,134 @@ def allocate_bunches_optimized(
         "remaining_hands": best_state["remaining_hands"],
         "summary": summary,
         "loss": loss,
+    }
+
+
+def _recipe_hand_positions(recipe: list[dict[str, Any]], hands_per_bunch: int) -> list[int]:
+    positions = []
+    for component in recipe:
+        hand_from = _to_int(component.get("hand_from"))
+        hand_to = _to_int(component.get("hand_to"))
+        for hand in range(hand_from, hand_to + 1):
+            if 1 <= hand <= hands_per_bunch and hand not in positions:
+                positions.append(hand)
+    return positions
+
+
+def calculate_max_containers_by_market(
+    total_bunches: int,
+    kg_per_bunch: float,
+    hands_per_bunch: int,
+    market_order: list[str],
+    kg_per_box: float = 13,
+    boxes_per_container: int = 1320,
+) -> dict[str, Any]:
+    """Calculate full containers by market using fixed market packing recipes."""
+    total_bunches = max(0, _to_int(total_bunches))
+    kg_per_bunch = max(0.0, _to_float(kg_per_bunch))
+    hands_per_bunch = max(0, _to_int(hands_per_bunch))
+    kg_per_box = max(0.0, _to_float(kg_per_box))
+    boxes_per_container = max(1, _to_int(boxes_per_container, 1))
+
+    ordered_markets = []
+    for market in market_order or []:
+        if market in MARKET_MAX_CONTAINER_RECIPES and market not in ordered_markets:
+            ordered_markets.append(market)
+    if not ordered_markets:
+        ordered_markets = list(MARKET_MAX_CONTAINER_RECIPES.keys())
+
+    empty_summary = {
+        "total_bunches": total_bunches,
+        "source_kg": 0.0,
+        "kg_per_hand": 0.0,
+        "source_boxes_capacity": 0,
+        "source_cont_capacity": 0.0,
+        "fulfilled_boxes": 0,
+        "fulfilled_containers": 0,
+    }
+    if total_bunches <= 0 or kg_per_bunch <= 0 or hands_per_bunch <= 0 or kg_per_box <= 0:
+        return {"rows": [], "detail_rows": [], "remaining_hands": {}, "summary": empty_summary}
+
+    kg_per_hand = kg_per_bunch / hands_per_bunch
+    source_kg = total_bunches * kg_per_bunch
+    remaining_hands = {hand: total_bunches for hand in range(1, hands_per_bunch + 1)}
+    market_rows = []
+    detail_rows = []
+
+    for market_priority, market in enumerate(ordered_markets, start=1):
+        recipe = MARKET_MAX_CONTAINER_RECIPES.get(market, [])
+        recipe_hands = _recipe_hand_positions(recipe, hands_per_bunch)
+        if not recipe_hands:
+            continue
+
+        available_bundles = min(remaining_hands.get(hand, 0) for hand in recipe_hands)
+        hands_per_recipe = len(recipe_hands)
+        kg_per_recipe_bundle = hands_per_recipe * kg_per_hand
+        capacity_kg = available_bundles * kg_per_recipe_bundle
+        capacity_boxes = int(math.floor(capacity_kg / kg_per_box)) if kg_per_box > 0 else 0
+        full_containers = capacity_boxes // boxes_per_container
+        boxes_allocated = full_containers * boxes_per_container
+        bundles_used = (
+            int(math.ceil((boxes_allocated * kg_per_box) / kg_per_recipe_bundle))
+            if boxes_allocated > 0 and kg_per_recipe_bundle > 0
+            else 0
+        )
+        bundles_used = min(bundles_used, available_bundles)
+        kg_allocated = bundles_used * kg_per_recipe_bundle
+
+        if bundles_used > 0:
+            for hand in recipe_hands:
+                remaining_hands[hand] -= bundles_used
+
+        market_rows.append({
+            "market": market,
+            "market_priority": market_priority,
+            "available_bundles": available_bundles,
+            "hands_per_recipe": hands_per_recipe,
+            "capacity_kg": capacity_kg,
+            "capacity_boxes": capacity_boxes,
+            "capacity_containers": capacity_boxes / boxes_per_container,
+            "full_containers": full_containers,
+            "boxes_allocated": boxes_allocated,
+            "remaining_boxes_potential": max(0, capacity_boxes - boxes_allocated),
+            "bundles_used": bundles_used,
+            "kg_allocated": kg_allocated,
+        })
+
+        if bundles_used > 0:
+            for component in recipe:
+                hand_from = _to_int(component.get("hand_from"))
+                hand_to = _to_int(component.get("hand_to"))
+                if hand_from < 1 or hand_to < hand_from or hand_to > hands_per_bunch:
+                    continue
+                hand_count = hand_to - hand_from + 1
+                component_kg = bundles_used * hand_count * kg_per_hand
+                detail_rows.append({
+                    "market": market,
+                    "market_priority": market_priority,
+                    "sku": str(component.get("sku", "")).upper(),
+                    "range_label": f"{hand_from}-{hand_to}",
+                    "hand_count": hand_count,
+                    "bundles_used": bundles_used,
+                    "kg_allocated": component_kg,
+                    "boxes_equivalent": component_kg / kg_per_box if kg_per_box > 0 else 0.0,
+                })
+
+    fulfilled_boxes = sum(row["boxes_allocated"] for row in market_rows)
+    summary = {
+        "total_bunches": total_bunches,
+        "source_kg": source_kg,
+        "kg_per_hand": kg_per_hand,
+        "source_boxes_capacity": int(math.floor(source_kg / kg_per_box)),
+        "source_cont_capacity": int(math.floor(source_kg / kg_per_box)) / boxes_per_container,
+        "fulfilled_boxes": fulfilled_boxes,
+        "fulfilled_containers": sum(row["full_containers"] for row in market_rows),
+    }
+    return {
+        "rows": market_rows,
+        "detail_rows": detail_rows,
+        "remaining_hands": remaining_hands,
+        "summary": summary,
     }
 
 
