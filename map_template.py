@@ -8,7 +8,8 @@ MAP_STROKE_REFERENCE_WIDTH = 4000
 MAP_STROKE_WIDTH = 3
 MAP_STROKE_HOVER_WIDTH = 5
 MAP_STROKE_PINNED_WIDTH = 6
-MAP_STROKE_SMALL_MAP_MULTIPLIER = 0.65
+MAP_STROKE_SMALL_MAP_MULTIPLIER = 0.3
+MAP_SMALL_MAP_ZOOM = 1.1
 
 
 def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
@@ -41,6 +42,11 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
     polygon_stroke_width = round(MAP_STROKE_WIDTH * stroke_scale, 2)
     polygon_hover_stroke_width = round(MAP_STROKE_HOVER_WIDTH * stroke_scale, 2)
     polygon_pinned_stroke_width = round(MAP_STROKE_PINNED_WIDTH * stroke_scale, 2)
+    map_zoom = MAP_SMALL_MAP_ZOOM if img_w and img_w < MAP_STROKE_REFERENCE_WIDTH else 1
+    viewbox_w = img_w / map_zoom
+    viewbox_h = img_h / map_zoom
+    viewbox_x = (img_w - viewbox_w) / 2
+    viewbox_y = (img_h - viewbox_h) / 2
 
     return f'''
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
@@ -345,7 +351,7 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
     </style>
 
     <div class="farm-map-container" id="farmMapContainer">
-        <svg viewBox="0 0 {img_w} {img_h}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+        <svg viewBox="{viewbox_x:.2f} {viewbox_y:.2f} {viewbox_w:.2f} {viewbox_h:.2f}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
             <rect width="{img_w}" height="{img_h}" fill="#1a1a2e"/>
             {svg_polygons}
         </svg>
