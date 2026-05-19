@@ -511,36 +511,60 @@ def insert_to_db(table_name: str, data: dict) -> bool:
             st.error(f"❌ Lỗi khi lưu vào {table_name}: {e}")
         return False
 
+def get_current_season_used(bid: int, log_type: str, giai_doan: str = None, exclude_id: int = None) -> int:
+    """Lấy tổng số lượng đã sử dụng trong vụ MỞ hiện tại của một base_lot."""
+    season_res = supabase.table("seasons").select("ngay_bat_dau") \
+        .eq("base_lot_id", bid).eq("is_deleted", False).is_("ngay_ket_thuc_thuc_te", "null") \
+        .order("ngay_bat_dau", desc=True).limit(1).execute()
+    if not season_res.data:
+        return 0
+    start_date = season_res.data[0]["ngay_bat_dau"]
+    
+    if log_type == "stage":
+        q = supabase.table("stage_logs").select("id, so_luong").eq("base_lot_id", bid).eq("is_deleted", False).gte("ngay_thuc_hien", start_date)
+        if giai_doan:
+            q = q.eq("giai_doan", giai_doan)
+    elif log_type == "harvest":
+        q = supabase.table("harvest_logs").select("id, so_luong").eq("base_lot_id", bid).eq("is_deleted", False).gte("ngay_thu_hoach", start_date)
+    elif log_type == "destruction":
+        q = supabase.table("destruction_logs").select("id, so_luong").eq("base_lot_id", bid).eq("is_deleted", False).gte("ngay_xuat_huy", start_date)
+        if giai_doan:
+            q = q.eq("giai_doan", giai_doan)
+    else:
+        return 0
+        
+    res = q.execute()
+    return sum(int(r["so_luong"]) for r in res.data if r["id"] != exclude_id) if res.data else 0
+
 def get_available_capacity_for_lot(farm_name, lot_id_str, log_type, giai_doan=None, exclude_id=None):
     dim_id = get_dim_lo_id(farm_name, lot_id_str)
     if not dim_id: return 0, 0
     
-    res_lot = supabase.table("base_lots").select("id, so_luong").eq("dim_lo_id", dim_id).eq("is_deleted", False).execute()
+    res_lot = supabase.table("base_lots").select("id, so_luong").eq("dim_lo_id", dim_id).eq("is_deleted", False).eq("loai_trong", "Trồng mới").execute()
     if not res_lot.data: return 0, 0
+    
+    # Chỉ lấy các base_lot đang có vụ MỞ
+    active_bids = []
+    for row in res_lot.data:
+        s_res = supabase.table("seasons").select("id").eq("base_lot_id", row["id"]).eq("is_deleted", False).is_("ngay_ket_thuc_thuc_te", "null").execute()
+        if s_res.data:
+            active_bids.append(row)
+            
+    if not active_bids: return 0, 0
+
     total_planted = sum(
         max(0, int(row.get("so_luong", 0)) - get_current_season_destruction(row["id"], "Trước chích bắp"))
-        for row in res_lot.data
+        for row in active_bids
     )
 
-    max_allowed = total_planted
-
     if log_type == "stage" and giai_doan == "Cắt bắp":
-        res_cb = supabase.table("stage_logs").select("so_luong").eq("dim_lo_id", dim_id).eq("giai_doan", "Chích bắp").eq("is_deleted", False).execute()
-        max_allowed = sum(int(r["so_luong"]) for r in res_cb.data)
+        max_allowed = sum(get_current_season_used(row["id"], "stage", "Chích bắp") for row in active_bids)
     elif log_type == "harvest":
-        res_cut = supabase.table("stage_logs").select("so_luong").eq("dim_lo_id", dim_id).eq("giai_doan", "Cắt bắp").eq("is_deleted", False).execute()
-        max_allowed = sum(int(r["so_luong"]) for r in res_cut.data)
+        max_allowed = sum(get_current_season_used(row["id"], "stage", "Cắt bắp") for row in active_bids)
+    else:
+        max_allowed = total_planted
 
-    total_used = 0
-    if log_type == "stage":
-        res = supabase.table("stage_logs").select("id, so_luong").eq("dim_lo_id", dim_id).eq("giai_doan", giai_doan).eq("is_deleted", False).execute()
-        total_used = sum(int(r["so_luong"]) for r in res.data if r["id"] != exclude_id)
-    elif log_type == "harvest":
-        res = supabase.table("harvest_logs").select("id, so_luong").eq("dim_lo_id", dim_id).eq("is_deleted", False).execute()
-        total_used = sum(int(r["so_luong"]) for r in res.data if r["id"] != exclude_id)
-    elif log_type == "destruction":
-        res = supabase.table("destruction_logs").select("id, so_luong").eq("dim_lo_id", dim_id).eq("is_deleted", False).execute()
-        total_used = sum(int(r["so_luong"]) for r in res.data if r["id"] != exclude_id)
+    total_used = sum(get_current_season_used(row["id"], log_type, giai_doan, exclude_id) for row in active_bids)
         
     return max_allowed, total_used
 
@@ -572,40 +596,37 @@ def allocate_fifo_quantity(farm_name, lo_name, new_sl, log_type, target_date, ac
     if not res_bl.data:
         return False, f"❌ Lô {lo_name} chưa có đợt trồng nào.", []
 
+    # Lọc base_lots đang có vụ MỞ
+    active_bids = []
+    for batch in res_bl.data:
+        s_res = supabase.table("seasons").select("id").eq("base_lot_id", batch["id"]).eq("is_deleted", False).is_("ngay_ket_thuc_thuc_te", "null").execute()
+        if s_res.data:
+            active_bids.append(batch)
+
+    if not active_bids:
+        return False, f"❌ Lô {lo_name} không có vụ (season) nào đang mở để nhận dữ liệu.", []
+
     quantity_left = int(new_sl)
     allocations = []
 
-    for batch in res_bl.data:
+    for batch in active_bids:
         if quantity_left <= 0:
             break
         bid = batch["id"]
         planted = int(batch.get("so_luong", 0)) - get_current_season_destruction(bid, "Trước chích bắp")
 
         if log_type == "stage" and giai_doan == "Chích bắp":
-            # Capacity = số cây trồng - chích bắp đã ghi cho đợt này
-            used_res = supabase.table("stage_logs").select("so_luong") \
-                .eq("base_lot_id", bid).eq("giai_doan", "Chích bắp").eq("is_deleted", False).execute()
-            used = sum(int(r["so_luong"]) for r in used_res.data) if used_res.data else 0
+            used = get_current_season_used(bid, "stage", "Chích bắp")
             cap = planted - used
 
         elif log_type == "stage" and giai_doan == "Cắt bắp":
-            # Capacity = chích bắp đợt này - cắt bắp đã ghi cho đợt này
-            chich_res = supabase.table("stage_logs").select("so_luong") \
-                .eq("base_lot_id", bid).eq("giai_doan", "Chích bắp").eq("is_deleted", False).execute()
-            cat_res = supabase.table("stage_logs").select("so_luong") \
-                .eq("base_lot_id", bid).eq("giai_doan", "Cắt bắp").eq("is_deleted", False).execute()
-            total_chich = sum(int(r["so_luong"]) for r in chich_res.data) if chich_res.data else 0
-            total_cat = sum(int(r["so_luong"]) for r in cat_res.data) if cat_res.data else 0
+            total_chich = get_current_season_used(bid, "stage", "Chích bắp")
+            total_cat = get_current_season_used(bid, "stage", "Cắt bắp")
             cap = total_chich - total_cat
 
         elif log_type == "harvest":
-            # Capacity = cắt bắp đợt này - thu hoạch đã ghi
-            cat_res = supabase.table("stage_logs").select("so_luong") \
-                .eq("base_lot_id", bid).eq("giai_doan", "Cắt bắp").eq("is_deleted", False).execute()
-            har_res = supabase.table("harvest_logs").select("so_luong") \
-                .eq("base_lot_id", bid).eq("is_deleted", False).execute()
-            total_cat = sum(int(r["so_luong"]) for r in cat_res.data) if cat_res.data else 0
-            total_har = sum(int(r["so_luong"]) for r in har_res.data) if har_res.data else 0
+            total_cat = get_current_season_used(bid, "stage", "Cắt bắp")
+            total_har = get_current_season_used(bid, "harvest")
             cap = total_cat - total_har
 
         else:
