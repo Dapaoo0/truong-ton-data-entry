@@ -5033,6 +5033,41 @@ def render_container_allocation_calculator():
                             "Kg phân bổ": f"{detail_row['kg_allocated']:,.0f}",
                         })
             st.dataframe(pd.DataFrame(compact_max_rows), use_container_width=True, hide_index=True)
+            process_rows = []
+            for _, market_row in max_market_df.iterrows():
+                market_name = market_row["market"]
+                process_rows.append({
+                    "Bước": int(market_row["market_priority"]),
+                    "Thị trường": market_name,
+                    "Mã hàng": "Tổng",
+                    "Nải chọn": "Theo bộ quy cách",
+                    "Cách tính": (
+                        f"{int(market_row['available_bundles']):,} buồng khả dụng x "
+                        f"{int(market_row['hands_per_recipe'])} nải x {summary['kg_per_hand']:.2f} kg/nải "
+                        f"/ {KG_PER_BOX} kg"
+                    ),
+                    "Kết quả": (
+                        f"{int(market_row['capacity_boxes']):,} thùng khả dụng, "
+                        f"chốt {int(market_row['full_containers'])} cont"
+                    ),
+                })
+                if not detail_df.empty:
+                    for _, detail_row in detail_df[detail_df["market"] == market_name].iterrows():
+                        process_rows.append({
+                            "Bước": "",
+                            "Thị trường": market_name,
+                            "Mã hàng": detail_row["sku"],
+                            "Nải chọn": detail_row["range_label"],
+                            "Cách tính": (
+                                f"{int(detail_row['bundles_used']):,} buồng x "
+                                f"{int(detail_row['hand_count'])} nải x {summary['kg_per_hand']:.2f} kg/nải "
+                                f"/ {KG_PER_BOX} kg"
+                            ),
+                            "Kết quả": f"{int(detail_row['boxes_equivalent']):,} thùng quy đổi",
+                        })
+            if process_rows:
+                with st.expander("Quá trình chọn nải chi tiết", expanded=False):
+                    st.dataframe(pd.DataFrame(process_rows), use_container_width=True, hide_index=True)
         else:
             st.info("Chọn nguồn buồng hợp lệ để tính tối đa cont theo thị trường.")
 
@@ -5296,8 +5331,33 @@ def render_container_allocation_calculator():
                 })
 
         st.dataframe(pd.DataFrame(compact_rows), use_container_width=True, hide_index=True)
-        with st.expander("Chi tiết tối ưu", expanded=False):
-            st.json(result.get("loss", {}))
+        process_rows = []
+        for _, sku_row in sorted_result_df.iterrows():
+            process_rows.append({
+                "Bước": int(sku_row["processing_order"]),
+                "Thị trường": sku_row["market"],
+                "Mã hàng": sku_row["sku"],
+                "Nải chọn": sku_row["range_label"],
+                "Cách tính": (
+                    f"{int(sku_row['hand_count'])} nải x {summary['kg_per_hand']:.2f} kg/nải "
+                    f"= {sku_row['kg_per_bunch_for_sku']:.2f} kg/buồng; "
+                    f"{int(sku_row['requested_boxes']):,} thùng x {KG_PER_BOX} kg "
+                    f"/ {sku_row['kg_per_bunch_for_sku']:.2f}"
+                ),
+                "Kết quả": (
+                    f"cần {int(sku_row['bunches_needed']):,} buồng, "
+                    f"phân bổ {int(sku_row['bunches_allocated']):,} buồng, "
+                    f"đáp ứng {int(sku_row['boxes_fulfilled']):,} thùng"
+                    + (
+                        f", thiếu {int(sku_row['short_boxes']):,} thùng"
+                        if int(sku_row["short_boxes"]) > 0
+                        else ""
+                    )
+                ),
+            })
+        if process_rows:
+            with st.expander("Quá trình chọn nải chi tiết", expanded=False):
+                st.dataframe(pd.DataFrame(process_rows), use_container_width=True, hide_index=True)
     else:
         st.info("Nhập số buồng và ít nhất một dòng mã hàng hợp lệ để xem kết quả.")
 
