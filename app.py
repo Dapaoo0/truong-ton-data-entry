@@ -176,10 +176,11 @@ def get_current_season_destruction(bid: int, giai_doan: str = None) -> int:
     return sum(int(r["so_luong"]) for r in dest_res.data) if dest_res.data else 0
 
 
-def resolve_base_lot_id(dim_lo_id, action_date, giai_doan):
+def resolve_base_lot_id(dim_lo_id, action_date, giai_doan, quantity=None, exclude_id=None):
     """
     Tự động suy luận base_lot_id dựa trên FIFO capacity.
     Đợt trồng cũ nhất (ngay_trong ascending) có remaining capacity > 0 được ưu tiên.
+    Nếu có quantity, chỉ chọn batch còn đủ capacity cho toàn bộ record.
     Fallback: closest-match nếu tất cả đợt đều full hoặc không xác định được capacity.
     """
     res = supabase.table("base_lots") \
@@ -193,6 +194,11 @@ def resolve_base_lot_id(dim_lo_id, action_date, giai_doan):
         return None  # Lô chưa có đợt trồng nào
 
     effective_giai_doan = _DESTRUCTION_STAGE_MAP.get(giai_doan, giai_doan)
+    requested_qty = None
+    try:
+        requested_qty = int(quantity) if quantity is not None else None
+    except Exception:
+        requested_qty = None
 
     # ── FIFO: đợt cũ nhất có remaining capacity > 0 ──
     for batch in res.data:
@@ -200,30 +206,29 @@ def resolve_base_lot_id(dim_lo_id, action_date, giai_doan):
         planted = int(batch.get("so_luong", 0)) - get_current_season_destruction(bid, "Trước chích bắp")
 
         if effective_giai_doan == "Chích bắp":
-            used_res = supabase.table("stage_logs").select("so_luong") \
-                .eq("base_lot_id", bid).eq("giai_doan", "Chích bắp").eq("is_deleted", False).execute()
-            used = sum(int(r["so_luong"]) for r in used_res.data) if used_res.data else 0
+            used = get_current_season_used(bid, "stage", "Chích bắp", exclude_id=exclude_id)
             cap = planted - used
         elif effective_giai_doan == "Cắt bắp":
-            chich_res = supabase.table("stage_logs").select("so_luong") \
-                .eq("base_lot_id", bid).eq("giai_doan", "Chích bắp").eq("is_deleted", False).execute()
-            cat_res = supabase.table("stage_logs").select("so_luong") \
-                .eq("base_lot_id", bid).eq("giai_doan", "Cắt bắp").eq("is_deleted", False).execute()
-            cap = (sum(int(r["so_luong"]) for r in chich_res.data) if chich_res.data else 0) \
-                - (sum(int(r["so_luong"]) for r in cat_res.data) if cat_res.data else 0)
+            total_chich = get_current_season_used(bid, "stage", "Chích bắp")
+            total_cat = get_current_season_used(bid, "stage", "Cắt bắp", exclude_id=exclude_id)
+            cap = total_chich - total_cat
         elif effective_giai_doan == "Thu hoạch":
-            cat_res = supabase.table("stage_logs").select("so_luong") \
-                .eq("base_lot_id", bid).eq("giai_doan", "Cắt bắp").eq("is_deleted", False).execute()
-            har_res = supabase.table("harvest_logs").select("so_luong") \
-                .eq("base_lot_id", bid).eq("is_deleted", False).execute()
-            cap = (sum(int(r["so_luong"]) for r in cat_res.data) if cat_res.data else 0) \
-                - (sum(int(r["so_luong"]) for r in har_res.data) if har_res.data else 0)
+            total_cat = get_current_season_used(bid, "stage", "Cắt bắp")
+            total_har = get_current_season_used(bid, "harvest", exclude_id=exclude_id)
+            cap = total_cat - total_har
         else:
             # Giai đoạn không xác định (destruction, etc.) → dùng planted
             cap = planted
 
-        if cap > 0:
+        if requested_qty is not None and effective_giai_doan in ["Chích bắp", "Cắt bắp", "Thu hoạch"]:
+            if cap >= requested_qty:
+                return bid
+        elif cap > 0:
             return bid
+
+    # Với các stage có kiểm soát capacity, không fallback sang batch đã đầy.
+    if requested_qty is not None and effective_giai_doan in ["Chích bắp", "Cắt bắp", "Thu hoạch"]:
+        return None
 
     # Fallback: tất cả đợt đều full → chọn đợt trồng gần nhất trước ngày hành động
     action_dt = pd.to_datetime(action_date)
@@ -491,7 +496,8 @@ def insert_to_db(table_name: str, data: dict) -> bool:
                 action_date = data.get(date_col_map.get(table_name, ""))
                 giai_doan = giai_doan_map.get(table_name, "")
                 if action_date and data.get("dim_lo_id"):
-                    resolved_id = resolve_base_lot_id(data["dim_lo_id"], action_date, giai_doan)
+                    resolve_qty = data.get("so_luong") if table_name in ["stage_logs", "harvest_logs"] else None
+                    resolved_id = resolve_base_lot_id(data["dim_lo_id"], action_date, giai_doan, quantity=resolve_qty)
                     if resolved_id:
                         data["base_lot_id"] = resolved_id
 
@@ -1112,7 +1118,10 @@ def edit_stage_log_dialog(editing_row, available_lots, c_team):
                 is_valid, msg = check_quantity_limit(editing_row["farm"], lot_id, sl, "stage", giai_doan=giai_doan, exclude_id=editing_row["id"])
                 if not is_valid: st.error(msg)
                 else:
-                    resolved_blid = resolve_base_lot_id(editing_row["dim_lo_id"], ngay_th.isoformat(), giai_doan)
+                    resolved_blid = resolve_base_lot_id(editing_row["dim_lo_id"], ngay_th.isoformat(), giai_doan, quantity=sl, exclude_id=editing_row["id"])
+                    if not resolved_blid:
+                        st.error("❌ Không còn đợt trồng nào đủ capacity cho số lượng này. Vui lòng giảm số lượng hoặc nhập lại qua form thêm mới để hệ thống tự tách FIFO.")
+                        st.stop()
                     data = {
                         "giai_doan": giai_doan, 
                         "ngay_thuc_hien": ngay_th.isoformat(), "so_luong": sl,
@@ -1231,7 +1240,10 @@ def edit_harvest_log_dialog(editing_row, available_lots):
                 is_valid, msg = check_quantity_limit(editing_row["farm"], lot_id, sl, "harvest", exclude_id=editing_row["id"])
                 if not is_valid: st.error(msg)
                 else:
-                    resolved_blid = resolve_base_lot_id(editing_row["dim_lo_id"], ngay.isoformat(), "Thu hoạch")
+                    resolved_blid = resolve_base_lot_id(editing_row["dim_lo_id"], ngay.isoformat(), "Thu hoạch", quantity=sl, exclude_id=editing_row["id"])
+                    if not resolved_blid:
+                        st.error("❌ Không còn đợt trồng nào đủ capacity để ghi nhận thu hoạch này. Vui lòng giảm số lượng hoặc nhập lại qua form thêm mới để hệ thống tự tách FIFO.")
+                        st.stop()
                     data = {
                         "ngay_thu_hoach": ngay.isoformat(), "so_luong": sl, 
                         "hinh_thuc_thu_hoach": hinh_thuc_thu_hoach, "tuan": ngay.isocalendar()[1],
@@ -5561,4 +5573,3 @@ if __name__ == "__main__":
         render_login()
     else:
         render_main_app()
-
