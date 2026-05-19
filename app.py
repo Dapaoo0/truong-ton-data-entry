@@ -4667,17 +4667,70 @@ def build_weekly_cat_forecast(df_stg: pd.DataFrame) -> pd.DataFrame:
     return weekly[["farm", "year", "week", "forecast_bunches"]].sort_values(["year", "week", "farm"])
 
 
+CONTAINER_SKU_DEFINITIONS = {
+    "27CP": {"hand_from": 1, "hand_to": 4},
+    "6H": {"hand_from": 5, "hand_to": 7},
+}
+
+
 def _default_container_sku_editor_rows() -> list:
     return [{
-        "Ưu tiên thị trường": r["market_priority"],
         "Thị trường": r["market"],
-        "Ưu tiên loại hàng": r["sku_priority"],
         "Mã hàng": r["sku"],
-        "Nải từ": r["hand_from"],
-        "Nải đến": r["hand_to"],
         "Nhu cầu": r["demand"],
         "Đơn vị": r["unit"],
     } for r in DEFAULT_SKU_ROWS]
+
+
+def _unique_keep_order(values: list) -> list:
+    result = []
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return result
+
+
+def _container_priority_map(values: list, fallback_values: list) -> dict:
+    ordered = _unique_keep_order(values)
+    for value in fallback_values:
+        text = str(value or "").strip()
+        if text and text not in ordered:
+            ordered.append(text)
+    return {value: index + 1 for index, value in enumerate(ordered)}
+
+
+def _prepare_container_rows_for_allocation(order_rows: list, market_order: list, sku_orders_by_market: dict) -> list:
+    all_markets = [row.get("Thị trường") for row in order_rows]
+    market_priority = _container_priority_map(market_order, all_markets)
+    allocation_rows = []
+
+    for row_index, row in enumerate(order_rows):
+        market = str(row.get("Thị trường") or "").strip()
+        sku = str(row.get("Mã hàng") or "").strip()
+        sku_def = CONTAINER_SKU_DEFINITIONS.get(sku)
+        if not market or not sku_def:
+            continue
+
+        market_skus = [
+            item.get("Mã hàng")
+            for item in order_rows
+            if str(item.get("Thị trường") or "").strip() == market
+        ]
+        sku_priority = _container_priority_map(sku_orders_by_market.get(market, []), market_skus)
+        allocation_rows.append({
+            "market_priority": market_priority.get(market, 999),
+            "market": market,
+            "sku_priority": sku_priority.get(sku, 999),
+            "sku": sku,
+            "hand_from": sku_def["hand_from"],
+            "hand_to": sku_def["hand_to"],
+            "demand": row.get("Nhu cầu", 0),
+            "unit": row.get("Đơn vị", "Thùng"),
+            "_row_index": row_index,
+        })
+
+    return allocation_rows
 
 
 def render_container_allocation_calculator():
@@ -4741,30 +4794,97 @@ def render_container_allocation_calculator():
         hands_per_bunch = 12
         st.metric("Số nải/buồng", "12 nải")
 
-    st.markdown("##### Cấu hình đơn hàng")
-    sku_df = pd.DataFrame(st.session_state["container_calc_sku_rows"])
+    title_col, help_col = st.columns([10, 1])
+    with title_col:
+        st.markdown("##### Cấu hình đơn hàng")
+    with help_col:
+        with st.popover("?"):
+            st.dataframe(
+                pd.DataFrame([
+                    {"Mã hàng": sku, "Nải áp dụng": f"{cfg['hand_from']}-{cfg['hand_to']}"}
+                    for sku, cfg in CONTAINER_SKU_DEFINITIONS.items()
+                ]),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    clean_order_columns = ["Thị trường", "Mã hàng", "Nhu cầu", "Đơn vị"]
+    current_rows = st.session_state["container_calc_sku_rows"]
+    current_df = pd.DataFrame(current_rows)
+    if current_df.empty:
+        current_df = pd.DataFrame(_default_container_sku_editor_rows())
+    sku_df = current_df.reindex(columns=clean_order_columns)
+    known_skus = list(CONTAINER_SKU_DEFINITIONS.keys())
+    market_options = _unique_keep_order(
+        sku_df.get("Thị trường", pd.Series(dtype=str)).dropna().tolist() + ["Nhật", "Hàn"]
+    )
+    if not market_options:
+        market_options = ["Nhật", "Hàn"]
+
     edited_df = st.data_editor(
         sku_df,
         num_rows="dynamic",
         hide_index=True,
         use_container_width=True,
         key="container_sku_editor",
+        column_order=clean_order_columns,
         column_config={
+            "Thị trường": st.column_config.SelectboxColumn("Thị trường", options=market_options, required=True),
+            "Mã hàng": st.column_config.SelectboxColumn("Mã hàng", options=known_skus, required=True),
             "Đơn vị": st.column_config.SelectboxColumn("Đơn vị", options=["Thùng", "Cont"], required=True),
-            "Ưu tiên thị trường": st.column_config.SelectboxColumn("Ưu tiên thị trường", options=list(range(1, 21)), required=True),
-            "Ưu tiên loại hàng": st.column_config.SelectboxColumn("Ưu tiên loại hàng", options=list(range(1, 21)), required=True),
-            "Nải từ": st.column_config.NumberColumn(min_value=1, max_value=12, step=1, format="%d"),
-            "Nải đến": st.column_config.NumberColumn(min_value=1, max_value=12, step=1, format="%d"),
             "Nhu cầu": st.column_config.NumberColumn(min_value=0, step=1),
         },
     )
     st.session_state["container_calc_sku_rows"] = edited_df.to_dict("records")
 
+    order_rows = edited_df.to_dict("records")
+    active_markets = _unique_keep_order([row.get("Thị trường") for row in order_rows])
+    priority_market_options = ["Không chọn"] + active_markets
+    p_cols = st.columns(3)
+    market_order = []
+    for idx, col in enumerate(p_cols, start=1):
+        with col:
+            selected_market = st.selectbox(
+                f"Thị trường ưu tiên {idx}",
+                options=priority_market_options,
+                index=idx if idx < len(priority_market_options) else 0,
+                key=f"container_market_priority_{idx}",
+            )
+            if selected_market != "Không chọn":
+                market_order.append(selected_market)
+
+    sku_orders_by_market = {}
+    for market in active_markets:
+        market_skus = _unique_keep_order([
+            row.get("Mã hàng")
+            for row in order_rows
+            if str(row.get("Thị trường") or "").strip() == market
+        ])
+        if not market_skus:
+            continue
+        sku_options = ["Không chọn"] + market_skus
+        st.markdown(f"###### Ưu tiên loại hàng - {market}")
+        sku_cols = st.columns(min(3, max(1, len(market_skus))))
+        selected_skus = []
+        for idx, col in enumerate(sku_cols, start=1):
+            with col:
+                selected_sku = st.selectbox(
+                    f"Loại hàng ưu tiên {idx}",
+                    options=sku_options,
+                    index=idx if idx < len(sku_options) else 0,
+                    key=f"container_sku_priority_{market}_{idx}",
+                )
+                if selected_sku != "Không chọn":
+                    selected_skus.append(selected_sku)
+        sku_orders_by_market[market] = selected_skus
+
+    allocation_rows = _prepare_container_rows_for_allocation(order_rows, market_order, sku_orders_by_market)
+
     result = allocate_bunches_by_hands(
         source_bunches,
         kg_per_bunch,
         hands_per_bunch,
-        edited_df.to_dict("records"),
+        allocation_rows,
         kg_per_box=KG_PER_BOX,
         boxes_per_container=BOXES_PER_CONTAINER,
     )
@@ -4787,13 +4907,13 @@ def render_container_allocation_calculator():
         result_df = pd.DataFrame(result["rows"])
         display_df = result_df[[
             "processing_order", "market_priority", "market", "sku_priority", "sku",
-            "hand_from", "hand_to", "requested_boxes", "bunches_needed",
+            "requested_boxes", "bunches_needed",
             "bunches_allocated", "boxes_fulfilled", "containers_fulfilled",
             "short_boxes", "short_containers", "extra_kg_from_rounding"
         ]].copy()
         display_df.columns = [
             "Thứ tự", "Ưu tiên TT", "Thị trường", "Ưu tiên hàng", "Mã hàng",
-            "Nải từ", "Nải đến", "Thùng yêu cầu", "Buồng cần",
+            "Thùng yêu cầu", "Buồng cần",
             "Buồng phân bổ", "Thùng đáp ứng", "Cont đáp ứng",
             "Thiếu thùng", "Thiếu cont", "Kg dư làm tròn"
         ]
