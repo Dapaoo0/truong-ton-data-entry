@@ -399,6 +399,42 @@ def logout():
     st.session_state["current_team"] = None
     st.query_params.clear()
 
+
+def _query_param_value(key: str, default=None):
+    value = st.query_params.get(key, default)
+    if isinstance(value, list):
+        return value[0] if value else default
+    return value
+
+
+def _persisted_segmented_control(
+    label: str,
+    options: list,
+    key: str,
+    query_key: str,
+    slugs: dict,
+    default,
+    label_visibility: str = "collapsed",
+):
+    slug_to_option = {slug: option for option, slug in slugs.items()}
+    query_value = _query_param_value(query_key)
+    default_option = slug_to_option.get(query_value, default)
+    active_option = st.segmented_control(
+        label,
+        options,
+        label_visibility=label_visibility,
+        key=key,
+        default=default_option,
+    )
+    if active_option is None:
+        active_option = default_option
+
+    active_slug = slugs.get(active_option)
+    if active_slug and _query_param_value(query_key) != active_slug:
+        st.query_params[query_key] = active_slug
+    return active_option
+
+
 def insert_access_log(farm: str, team: str, action: str):
     try:
         supabase.table("access_logs").insert({"farm": farm, "team": team, "action": action}).execute()
@@ -4962,14 +4998,19 @@ def render_container_allocation_calculator():
         hands_per_bunch = 12
         st.metric("Số nải/buồng", "12 nải")
 
-    calc_mode = st.segmented_control(
+    calc_mode_options = ["Theo đơn hàng", "Tối đa cont theo thị trường"]
+    calc_mode = _persisted_segmented_control(
         "Chế độ tính",
-        ["Theo đơn hàng", "Tối đa cont theo thị trường"],
-        default="Theo đơn hàng",
+        calc_mode_options,
         key="container_calculation_mode",
+        query_key="container_calc_mode",
+        slugs={
+            calc_mode_options[0]: "orders",
+            calc_mode_options[1]: "max_by_market",
+        },
+        default=calc_mode_options[0],
+        label_visibility="visible",
     )
-    if calc_mode is None:
-        calc_mode = "Theo đơn hàng"
 
     if calc_mode == "Tối đa cont theo thị trường":
         st.markdown("##### Ưu tiên thị trường")
@@ -5505,9 +5546,17 @@ def render_main_app():
     # =================================================
     if c_farm == "Phòng Kinh doanh" and c_team == "Kinh doanh":
         tab_opts = ["🌐 Dữ liệu toàn cục", "📦 Máy tính phân bổ cont"]
-        active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_sales_menu", default=tab_opts[0])
-        if active_tab is None:
-            active_tab = tab_opts[0]
+        active_tab = _persisted_segmented_control(
+            "Chức năng",
+            tab_opts,
+            key="tab_sales_menu",
+            query_key="sales_tab",
+            slugs={
+                tab_opts[0]: "global",
+                tab_opts[1]: "container_allocation",
+            },
+            default=tab_opts[0],
+        )
         if active_tab == tab_opts[1]:
             render_container_allocation_calculator()
         else:
