@@ -4731,6 +4731,7 @@ def build_weekly_cat_forecast(df_stg: pd.DataFrame) -> pd.DataFrame:
 
 
 CONTAINER_SKU_DEFINITIONS = OPTIMIZER_SKU_RULES
+CONTAINER_MARKET_OPTIONS = ["Nhật", "Hàn"]
 
 
 def _default_container_sku_editor_rows() -> list:
@@ -4738,7 +4739,6 @@ def _default_container_sku_editor_rows() -> list:
         "Thị trường": r["market"],
         "Mã hàng": r["sku"],
         "Nhu cầu": r["demand"],
-        "Đơn vị": r["unit"],
     } for r in DEFAULT_SKU_ROWS]
 
 
@@ -4804,7 +4804,7 @@ def _prepare_container_rows_for_allocation(order_rows: list, market_order: list,
             "sku_priority": sku_priority.get(sku, 999),
             "sku": sku,
             "demand": row.get("Nhu cầu", 0),
-            "unit": row.get("Đơn vị", "Thùng"),
+            "unit": "Thùng",
             "_row_index": row_index,
         })
 
@@ -4905,29 +4905,32 @@ def render_container_allocation_calculator():
         sku = _container_clean_text(row.get("Mã hàng"), known_skus[0]).upper()
         if sku not in known_skus:
             sku = known_skus[0]
+        market = _container_clean_text(row.get("Thị trường"), CONTAINER_MARKET_OPTIONS[0])
+        if market not in CONTAINER_MARKET_OPTIONS:
+            market = CONTAINER_MARKET_OPTIONS[0]
         normalized_current_rows.append({
             "_row_id": row.get("_row_id") or f"default_{idx}",
-            "Thị trường": _container_clean_text(row.get("Thị trường")),
+            "Thị trường": market,
             "Mã hàng": sku,
             "Nhu cầu": _container_clean_int(row.get("Nhu cầu")),
-            "Đơn vị": _container_clean_text(row.get("Đơn vị"), "Thùng"),
         })
     current_rows = normalized_current_rows
 
     order_rows = []
     delete_row_index = None
-    header_cols = st.columns([2, 1.4, 1.3, 1.1, 0.7])
+    header_cols = st.columns([2, 1.4, 1.4, 0.7])
     header_cols[0].caption("Thị trường")
     header_cols[1].caption("Mã hàng")
-    header_cols[2].caption("Nhu cầu")
-    header_cols[3].caption("Đơn vị")
+    header_cols[2].caption("Nhu cầu (thùng)")
     for idx, row in enumerate(current_rows):
         row_id = row["_row_id"]
-        row_cols = st.columns([2, 1.4, 1.3, 1.1, 0.7])
+        row_cols = st.columns([2, 1.4, 1.4, 0.7])
         with row_cols[0]:
-            market = st.text_input(
+            market_index = CONTAINER_MARKET_OPTIONS.index(row["Thị trường"]) if row["Thị trường"] in CONTAINER_MARKET_OPTIONS else 0
+            market = st.selectbox(
                 "Thị trường",
-                value=row["Thị trường"],
+                options=CONTAINER_MARKET_OPTIONS,
+                index=market_index,
                 key=f"container_order_market_{row_id}",
                 label_visibility="collapsed",
             )
@@ -4942,7 +4945,7 @@ def render_container_allocation_calculator():
             )
         with row_cols[2]:
             demand = st.number_input(
-                "Nhu cầu",
+                "Nhu cầu (thùng)",
                 min_value=0,
                 value=_container_clean_int(row.get("Nhu cầu")),
                 step=1,
@@ -4950,16 +4953,6 @@ def render_container_allocation_calculator():
                 label_visibility="collapsed",
             )
         with row_cols[3]:
-            unit_options = ["Thùng", "Cont"]
-            unit_index = unit_options.index(row["Đơn vị"]) if row["Đơn vị"] in unit_options else 0
-            unit = st.selectbox(
-                "Đơn vị",
-                options=unit_options,
-                index=unit_index,
-                key=f"container_order_unit_{row_id}",
-                label_visibility="collapsed",
-            )
-        with row_cols[4]:
             if st.button("Xóa", key=f"container_order_delete_{row_id}", disabled=len(current_rows) <= 1):
                 delete_row_index = idx
 
@@ -4968,7 +4961,6 @@ def render_container_allocation_calculator():
             "Thị trường": market,
             "Mã hàng": sku,
             "Nhu cầu": demand,
-            "Đơn vị": unit,
         })
 
     action_cols = st.columns([1, 5])
@@ -4976,10 +4968,9 @@ def render_container_allocation_calculator():
         if st.button("Thêm dòng", key="container_order_add"):
             st.session_state["container_calc_sku_rows"] = order_rows + [{
                 "_row_id": f"new_{datetime.now().timestamp()}",
-                "Thị trường": "",
+                "Thị trường": CONTAINER_MARKET_OPTIONS[0],
                 "Mã hàng": known_skus[0],
                 "Nhu cầu": 0,
-                "Đơn vị": "Thùng",
             }]
             st.rerun()
 
@@ -4993,7 +4984,7 @@ def render_container_allocation_calculator():
 
     active_markets = _unique_keep_order([row.get("Thị trường") for row in order_rows])
     priority_market_options = ["Không chọn"] + active_markets
-    p_cols = st.columns(3)
+    p_cols = st.columns(2)
     market_order = []
     for idx, col in enumerate(p_cols, start=1):
         with col:
