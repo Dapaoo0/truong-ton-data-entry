@@ -19,7 +19,70 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 import json
-from container_allocation import DEFAULT_SKU_ROWS, OPTIMIZER_SKU_RULES, allocate_bunches_optimized
+
+try:
+    from container_allocation import DEFAULT_SKU_ROWS, OPTIMIZER_SKU_RULES, allocate_bunches_optimized
+except ImportError:
+    from container_allocation import DEFAULT_SKU_ROWS, allocate_bunches_by_hands
+
+    OPTIMIZER_SKU_RULES = {
+        "27CP": {
+            "group": "Linh hoạt dải rộng",
+            "description": "Quả to, có thể lấy từ phần ngọn đến giữa buồng.",
+            "ranges": [(1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9)],
+        },
+        "30CP": {
+            "group": "Linh hoạt dải rộng",
+            "description": "Quả trung bình lớn, ưu tiên phần giữa sau ngọn.",
+            "ranges": [(6, 9), (1, 9)],
+        },
+        "6H": {
+            "group": "Cố định khúc giữa",
+            "description": "Quả thon đều, thường lấy nải 5-7.",
+            "ranges": [(5, 7)],
+        },
+        "5H": {
+            "group": "Cố định khúc giữa",
+            "description": "Quả thon đều, thường lấy nải 8-10.",
+            "ranges": [(8, 10)],
+        },
+        "15CP": {
+            "group": "Tận dụng phần đuôi",
+            "description": "Quả nhỏ, thường tận dụng nải 10-12.",
+            "ranges": [(10, 12)],
+        },
+    }
+
+    def allocate_bunches_optimized(
+        total_bunches,
+        kg_per_bunch,
+        hands_per_bunch,
+        sku_rows,
+        kg_per_box=13,
+        boxes_per_container=1320,
+        beam_width=None,
+    ):
+        fallback_rows = []
+        for row in sku_rows:
+            fallback_row = dict(row)
+            sku = str(fallback_row.get("sku", "")).upper()
+            ranges = OPTIMIZER_SKU_RULES.get(sku, {}).get("ranges", [])
+            if ranges:
+                fallback_row["hand_from"], fallback_row["hand_to"] = ranges[0]
+            fallback_rows.append(fallback_row)
+        result = allocate_bunches_by_hands(
+            total_bunches,
+            kg_per_bunch,
+            hands_per_bunch,
+            fallback_rows,
+            kg_per_box=kg_per_box,
+            boxes_per_container=boxes_per_container,
+        )
+        result.setdefault("loss", {})
+        result["summary"].setdefault("optimizer_loss", 0.0)
+        for row in result.get("rows", []):
+            row.setdefault("range_label", f"{row.get('hand_from')}-{row.get('hand_to')}")
+        return result
 
 if hasattr(st, "dialog"):
     dialog_decorator = st.dialog
