@@ -32,29 +32,46 @@ DEFAULT_SKU_ROWS = [
 
 OPTIMIZER_SKU_RULES = {
     "27CP": {
-        "group": "Linh hoạt dải rộng",
-        "description": "Quả to, có thể lấy từ phần ngọn đến giữa buồng.",
-        "ranges": [(1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9)],
+        "markets": ["Nhật"],
+        "group": "Phần Ngọn",
+        "description": "Quả to, mập nhất. Yêu cầu khắt khe nhất, ưu tiên cắt phần ngọn đẹp nhất.",
+        "ranges": [(1, 4), (1, 5), (1, 9)],
     },
-    "30CP": {
-        "group": "Linh hoạt dải rộng",
-        "description": "Quả trung bình lớn, ưu tiên phần giữa sau ngọn.",
-        "ranges": [(6, 9), (1, 9)],
+    "8H": {
+        "markets": ["Hàn"],
+        "group": "Phần Ngọn",
+        "description": "Lấy phần ngọn tương tự 27CP nhưng dùng để ráp container Hàn.",
+        "ranges": [(1, 4)],
     },
     "6H": {
-        "group": "Cố định khúc giữa",
-        "description": "Quả thon đều, thường lấy nải 5-7.",
+        "markets": ["Nhật"],
+        "group": "Khúc Giữa",
+        "description": "Quả thon đều, cố định ở khúc giữa trên.",
         "ranges": [(5, 7)],
     },
+    "30CP": {
+        "markets": ["Nhật"],
+        "group": "Khúc Giữa",
+        "description": "Quả cỡ trung bình lớn, thường ráp nối tiếp sau khi 27CP đã lấy phần ngọn.",
+        "ranges": [(6, 9), (1, 9)],
+    },
     "5H": {
-        "group": "Cố định khúc giữa",
-        "description": "Quả thon đều, thường lấy nải 8-10.",
+        "markets": ["Nhật"],
+        "group": "Khúc Giữa",
+        "description": "Cố định ở khúc giữa dưới, gần đuôi.",
         "ranges": [(8, 10)],
     },
+    "5/6H": {
+        "markets": ["Hàn"],
+        "group": "Khúc Giữa",
+        "description": "Cắt dải dài xuyên suốt khúc giữa buồng, tốc độ gom hàng nhanh.",
+        "ranges": [(5, 10)],
+    },
     "15CP": {
-        "group": "Tận dụng phần đuôi",
-        "description": "Quả nhỏ, thường tận dụng nải 10-12.",
-        "ranges": [(10, 12)],
+        "markets": ["Hàn"],
+        "group": "Phần Đuôi",
+        "description": "Mã tận dụng chiến lược, gom vét các nải nhỏ cuối buồng.",
+        "ranges": [(10, 12), (11, 12)],
     },
 }
 
@@ -118,7 +135,11 @@ def _requested_boxes(row: dict[str, Any], boxes_per_container: int) -> int:
 
 def _valid_optimizer_ranges(row: dict[str, Any], hands_per_bunch: int) -> list[tuple[int, int]]:
     sku = row["sku"].upper()
-    ranges = OPTIMIZER_SKU_RULES.get(sku, {}).get("ranges")
+    sku_rule = OPTIMIZER_SKU_RULES.get(sku, {})
+    allowed_markets = sku_rule.get("markets", [])
+    if allowed_markets and row.get("market") not in allowed_markets:
+        return []
+    ranges = sku_rule.get("ranges")
     if not ranges and row.get("hand_from") and row.get("hand_to"):
         ranges = [(row["hand_from"], row["hand_to"])]
 

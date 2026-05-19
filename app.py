@@ -27,29 +27,46 @@ except ImportError:
 
     OPTIMIZER_SKU_RULES = {
         "27CP": {
-            "group": "Linh hoạt dải rộng",
-            "description": "Quả to, có thể lấy từ phần ngọn đến giữa buồng.",
-            "ranges": [(1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9)],
+            "markets": ["Nhật"],
+            "group": "Phần Ngọn",
+            "description": "Quả to, mập nhất. Yêu cầu khắt khe nhất, ưu tiên cắt phần ngọn đẹp nhất.",
+            "ranges": [(1, 4), (1, 5), (1, 9)],
         },
-        "30CP": {
-            "group": "Linh hoạt dải rộng",
-            "description": "Quả trung bình lớn, ưu tiên phần giữa sau ngọn.",
-            "ranges": [(6, 9), (1, 9)],
+        "8H": {
+            "markets": ["Hàn"],
+            "group": "Phần Ngọn",
+            "description": "Lấy phần ngọn tương tự 27CP nhưng dùng để ráp container Hàn.",
+            "ranges": [(1, 4)],
         },
         "6H": {
-            "group": "Cố định khúc giữa",
-            "description": "Quả thon đều, thường lấy nải 5-7.",
+            "markets": ["Nhật"],
+            "group": "Khúc Giữa",
+            "description": "Quả thon đều, cố định ở khúc giữa trên.",
             "ranges": [(5, 7)],
         },
+        "30CP": {
+            "markets": ["Nhật"],
+            "group": "Khúc Giữa",
+            "description": "Quả cỡ trung bình lớn, thường ráp nối tiếp sau khi 27CP đã lấy phần ngọn.",
+            "ranges": [(6, 9), (1, 9)],
+        },
         "5H": {
-            "group": "Cố định khúc giữa",
-            "description": "Quả thon đều, thường lấy nải 8-10.",
+            "markets": ["Nhật"],
+            "group": "Khúc Giữa",
+            "description": "Cố định ở khúc giữa dưới, gần đuôi.",
             "ranges": [(8, 10)],
         },
+        "5/6H": {
+            "markets": ["Hàn"],
+            "group": "Khúc Giữa",
+            "description": "Cắt dải dài xuyên suốt khúc giữa buồng, tốc độ gom hàng nhanh.",
+            "ranges": [(5, 10)],
+        },
         "15CP": {
-            "group": "Tận dụng phần đuôi",
-            "description": "Quả nhỏ, thường tận dụng nải 10-12.",
-            "ranges": [(10, 12)],
+            "markets": ["Hàn"],
+            "group": "Phần Đuôi",
+            "description": "Mã tận dụng chiến lược, gom vét các nải nhỏ cuối buồng.",
+            "ranges": [(10, 12), (11, 12)],
         },
     }
 
@@ -4734,6 +4751,14 @@ CONTAINER_SKU_DEFINITIONS = OPTIMIZER_SKU_RULES
 CONTAINER_MARKET_OPTIONS = ["Nhật", "Hàn"]
 
 
+def _container_sku_options_for_market(market: str) -> list:
+    options = [
+        sku for sku, cfg in CONTAINER_SKU_DEFINITIONS.items()
+        if market in cfg.get("markets", [])
+    ]
+    return options or list(CONTAINER_SKU_DEFINITIONS.keys())
+
+
 def _default_container_sku_editor_rows() -> list:
     return [{
         "Thị trường": r["market"],
@@ -4889,6 +4914,7 @@ def render_container_allocation_calculator():
                 ranges = ", ".join(f"{hand_from}-{hand_to}" for hand_from, hand_to in sku_def["ranges"])
                 sku_range_rows.append({
                     "Mã hàng": sku,
+                    "Thị trường": ", ".join(sku_def.get("markets", [])),
                     "Nhóm": sku_def["group"],
                     "Dải nải có thể dùng": ranges,
                 })
@@ -4898,16 +4924,16 @@ def render_container_allocation_calculator():
                 hide_index=True,
             )
 
-    known_skus = list(CONTAINER_SKU_DEFINITIONS.keys())
     current_rows = st.session_state["container_calc_sku_rows"] or _default_container_sku_editor_rows()
     normalized_current_rows = []
     for idx, row in enumerate(current_rows):
-        sku = _container_clean_text(row.get("Mã hàng"), known_skus[0]).upper()
-        if sku not in known_skus:
-            sku = known_skus[0]
         market = _container_clean_text(row.get("Thị trường"), CONTAINER_MARKET_OPTIONS[0])
         if market not in CONTAINER_MARKET_OPTIONS:
             market = CONTAINER_MARKET_OPTIONS[0]
+        market_skus = _container_sku_options_for_market(market)
+        sku = _container_clean_text(row.get("Mã hàng"), market_skus[0]).upper()
+        if sku not in market_skus:
+            sku = market_skus[0]
         normalized_current_rows.append({
             "_row_id": row.get("_row_id") or f"default_{idx}",
             "Thị trường": market,
@@ -4935,12 +4961,16 @@ def render_container_allocation_calculator():
                 label_visibility="collapsed",
             )
         with row_cols[1]:
-            sku_index = known_skus.index(row["Mã hàng"]) if row["Mã hàng"] in known_skus else 0
+            sku_options = _container_sku_options_for_market(market)
+            sku_key = f"container_order_sku_{row_id}"
+            if st.session_state.get(sku_key) not in sku_options:
+                st.session_state[sku_key] = row["Mã hàng"] if row["Mã hàng"] in sku_options else sku_options[0]
+            sku_index = sku_options.index(st.session_state[sku_key])
             sku = st.selectbox(
                 "Mã hàng",
-                options=known_skus,
+                options=sku_options,
                 index=sku_index,
-                key=f"container_order_sku_{row_id}",
+                key=sku_key,
                 label_visibility="collapsed",
             )
         with row_cols[2]:
@@ -4969,7 +4999,7 @@ def render_container_allocation_calculator():
             st.session_state["container_calc_sku_rows"] = order_rows + [{
                 "_row_id": f"new_{datetime.now().timestamp()}",
                 "Thị trường": CONTAINER_MARKET_OPTIONS[0],
-                "Mã hàng": known_skus[0],
+                "Mã hàng": _container_sku_options_for_market(CONTAINER_MARKET_OPTIONS[0])[0],
                 "Nhu cầu": 0,
             }]
             st.rerun()

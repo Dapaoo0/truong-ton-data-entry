@@ -155,3 +155,24 @@ def test_optimizer_expands_30cp_to_1_to_9_when_6_to_9_is_not_enough():
     row = result["rows"][0]
     assert row["range_label"] == "1-9"
     assert row["boxes_fulfilled"] == 1000
+
+
+def test_optimizer_supports_korea_skus_from_spec():
+    result = allocate_bunches_optimized(1000, 18, 12, [
+        _optimizer_row(1, 1, "8H", 300, market="Hàn"),
+        _optimizer_row(1, 2, "5/6H", 600, market="Hàn"),
+        _optimizer_row(1, 3, "15CP", 300, market="Hàn"),
+    ])
+
+    by_sku = {row["sku"]: row for row in result["rows"]}
+    assert by_sku["8H"]["range_label"] == "1-4"
+    assert by_sku["5/6H"]["range_label"] == "5-10"
+    assert by_sku["15CP"]["range_label"] == "11-12"
+
+
+def test_optimizer_does_not_allocate_sku_to_wrong_market():
+    result = allocate_bunches_optimized(1000, 18, 12, [
+        _optimizer_row(1, 1, "8H", 300, market="Nhật"),
+    ])
+
+    assert result["rows"] == []
