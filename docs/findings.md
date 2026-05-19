@@ -2,6 +2,8 @@
 
 Những khám phá, cấu hình cứng và lưu ý kinh nghiệm tìm được trong quá trình code và phân tích.
 
+- **[08/05] Ribbon Schedule centralization — silent failure bug**: Cột `mau_day` bị xóa khỏi `stage_logs`, `destruction_logs`, `harvest_logs` nhưng code vẫn gọi `row.get("mau_day")` → trả về `None` → forecast Mốc ③ **mất toàn bộ Pro-rata** (fallback Aggregate Ratio). Fix: Pre-compute `_ribbon_lookup` dict từ `ribbon_schedule`, dùng `_resolve_ribbon_color(row)` resolve qua `(year, tuan)`. **Bài học**: Khi drop column, phải grep toàn bộ codebase cho cả `.get("col")` và `["col"]` patterns.
+- **[07/05] Stage-Aware Destruction Allocation — 5 bugs fixed**: (1) Mốc ① trừ TẤT CẢ destruction thay vì chỉ "Trước chích bắp". (2) Mốc ②③ không trừ destruction. (3) Proportional allocation không lọc giai_doan. (4) Cross-season: hủy F0 ảnh hưởng F1+. (5) `so_luong_sau_huy` dùng chung mọi generation. Fix: tách destruction theo `giai_doan` + match vào gen bằng closest-midpoint. Mốc ② dùng Aggregate Ratio, Mốc ③ dùng Pro-rata mau_day.
 - **[05/05] Shift-based vs Normal Distribution — trade-off**: Normal Distribution cho dự báo mượt nhưng không phản ánh tiến độ thực tế. Shift-based dùng data chích/cắt bắp thực tế theo ngày → chính xác hơn nhưng chỉ dự báo được phần đã có data. Kết hợp song song: Mốc ① (lý thuyết) để forecast toàn vụ, Mốc ②③ (thực tế) để hiệu chỉnh khi có data.
 - **[05/05] Cumulative phase classification vs time-based**: Dùng tích lũy % thay vì vị trí trên trục thời gian cho Mốc ②③ — tránh phụ thuộc vào hình dạng phân phối (skewed, bimodal...). Mẫu số = `base_lots.so_luong` (tổng cây trồng ban đầu, cố định) thay vì dynamic count.
 - **[05/05] Boundary split precision**: Khi 1 ngày chích vượt ngưỡng phase (ví dụ cum=104, threshold=150, qty=346), cần `while` loop tách chính xác: 46 Bói + 300 Rộ. SQL simulation không tách được (gán toàn bộ vào phase cuối), chỉ Python code xử lý đúng.
@@ -62,9 +64,20 @@ Những khám phá, cấu hình cứng và lưu ý kinh nghiệm tìm được t
   2. **Không chỉ định → FIFO mặc định**: Khi người dùng chỉ nhập lô (VD: "chích bắp 3B = 300") mà không nói đợt nào → để trigger FIFO tự phân bổ theo đợt cũ nhất có capacity.
   - **Lưu ý**: FIFO có thể gán sai khi 1 lô có 2+ đợt thuộc **vụ khác nhau** (VD: 3B đợt 1=F1, đợt 2=F0). Trong trường hợp này cần user xác nhận hoặc dùng timeline để suy luận.
 - **Timeline-based season classification** (24/04/2026): Dùng window `ngay_trong + 120..240 ngày` để xác định record chích bắp thuộc vụ hiện tại hay vụ cũ. Nếu ngày chích không nằm trong window nào → vụ cũ (không có base_lots). Applied: 3A (20 records, 582 cây = vụ cũ), 8A (39 records, 1607 cây = vụ cũ), fact data trước 03/2026 phần lớn thuộc vụ cũ.
-- **⚠️ BUG: `so_luong_con_lai` vi phạm quy tắc reset vụ Fn** (06/05/2026):
+- **✅ BUG RESOLVED: `so_luong_con_lai` vi phạm quy tắc reset vụ Fn** (06/05/2026):
   - **Triệu chứng**: Lô 3B đợt 1 (base_lot_id=25): `so_luong` = 1,502 nhưng `so_luong_con_lai` = 1,318 (đã trừ 184 hủy F0). FIFO dùng `so_luong_con_lai` làm capacity → giới hạn chích F1 sai (thiếu 184 cây).
   - **Root cause**: Trigger `update_lot_inventory` trên `destruction_logs` trừ trực tiếp vào `so_luong_con_lai` mà **không phân biệt vụ**. Code FIFO (app.py:485) ưu tiên `so_luong_con_lai` thay vì `so_luong`.
-  - **Phạm vi ảnh hưởng**: (1) `allocate_fifo_quantity()` app.py:485, (2) DB trigger `auto_assign_base_lot_id` dùng `COALESCE(so_luong_con_lai, so_luong)`, (3) trigger `update_lot_inventory`.
-  - **Quy tắc đúng**: Vụ Fn phải reset capacity về `so_luong` gốc. Xuất hủy F0 không ảnh hưởng F1.
-  - **Status**: Chưa fix. Cần redesign `so_luong_con_lai` hoặc thêm logic per-season capacity.
+  - **Fix applied**:
+    1. **Data remediation**: Reset `so_luong_con_lai` cho bid=9 (1531→2531) và bid=28 (7880→8880).
+    2. **Trigger `update_lot_inventory`**: Scope từ `dim_lo_id` → `base_lot_id` (fix cross-batch contamination).
+    3. **Trigger `auto_assign_base_lot_id`**: `COALESCE(so_luong_con_lai, so_luong)` → season-aware inline subquery.
+    4. **App.py**: Tất cả 3 hàm (`resolve_base_lot_id`, `allocate_fifo_quantity`, `get_available_capacity_for_lot`) đổi từ `so_luong_con_lai` sang `so_luong - get_current_season_destruction(bid, "Trước chích bắp")`.
+    5. **New**: `get_current_season_destruction(bid, giai_doan)` — filter by season + giai_doan, fix double-counting.
+    6. **New**: `allocate_destruction_fifo()` — 3 chiến lược FIFO cho 3 giai đoạn xuất hủy.
+  - **Status**: ✅ RESOLVED. 10 SQL tests passed (A1, A2, B1, B2, E3, F1, F2, F6, G1, G2).
+- **[07/05] Chích bắp Tuần 18 — Farm 126**: Cập nhật 8 records từ bảng "Số Liệu Chích Bắp Tuần 18":
+  - **A8** (bid=27): 29/4: 241, 1/5: 135 → +376 cây (tổng tích lũy: 2,090/4,349 = 48.1%)
+  - **D4** (bid=58): 27/4: 315, 28/4: 312, 30/4: 143, 1/5: 130, 2/5: 128 → +1,028 cây (tổng tích lũy: 2,491/9,776 = 25.5%)
+  - **D3** (dim_lo_id=5, `base_lot_id=NULL`): 30/4: 43 cây — D3 là **chuối F vụ cũ**, không có record `base_lots` (Trồng mới) → insert với `base_lot_id = NULL`. Không ảnh hưởng forecast (chỉ "Trồng mới" tạo forecast F0→F3).
+  - **⚠️ Excel sai tổng**: D4 ghi TỔNG = 900, nhưng cộng 5 ngày = **1,028**. Đã dùng số liệu từng ngày (đúng), bỏ qua tổng sai.
+  - C4 và D6: 0 bắp (đúng — C4 chỉ 500 cây, D6 chưa tới giai đoạn).

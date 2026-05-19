@@ -240,15 +240,18 @@ Tài liệu này ghi lại chi tiết toàn bộ cấu trúc cơ sở dữ liệ
 ## public.stage_logs
 **Ý nghĩa:** Log lưu quá trình sinh trưởng (cắt bắp, chích bắp).
 
+**Ghi chú nghiệp vụ:**
+- Cột `mau_day` đã được xóa (migration 08/05/2026). Màu dây giờ được resolve từ `ribbon_schedule` qua `(farm_id, year, tuan)`.
+- Cắt bắp gắn liền với màu dây theo tuần — dùng `tuan` join `ribbon_schedule` để xác định.
+
 | Tên Trường (Field) | Kiểu Dữ Liệu (Type) | Bắt Buộc (Required) | Ý Nghĩa / Ghi Chú |
 |---|---|---|---|
 | id | integer | Có | - |
-| giai_doan | text | Có | - |
+| giai_doan | text | Có | "Chích bắp" hoặc "Cắt bắp" |
 | ngay_thuc_hien | date | Có | - |
 | so_luong | integer | Có | - |
-| mau_day | text | Không | Màu dây định danh lứa. **CHECK constraint `chk_chich_bap_no_mau_day`**: phải NULL khi `giai_doan = 'Chích bắp'`. Chỉ dùng cho Cắt bắp. |
 | created_at | timestamp with time zone | Không | Thời gian tạo record |
-| tuan | integer | Không | - |
+| tuan | integer | Không | Tuần trong năm (ISO week). Dùng để join `ribbon_schedule` lấy màu dây. |
 | is_deleted | boolean | Không | Cờ đánh dấu soft delete (True=Đã xóa) |
 | dim_lo_id | integer | Không | ID định danh/Khóa ngoại |
 | base_lot_id | integer | Không | FK → base_lots.id — Đợt trồng tương ứng, auto-resolved bằng timeline sinh trưởng |
@@ -256,22 +259,27 @@ Tài liệu này ghi lại chi tiết toàn bộ cấu trúc cơ sở dữ liệ
 ## public.destruction_logs
 **Ý nghĩa:** Log lưu quá trình xuất hủy cây chuối.
 
+**Ghi chú nghiệp vụ:**
+- Cột `mau_day` đã được xóa (migration 08/05/2026). Khi cần xác định màu dây cho xuất hủy "Trước thu hoạch", user chọn từ `ribbon_schedule` và hệ thống dùng `tuan` để cross-reference.
+
 | Tên Trường (Field) | Kiểu Dữ Liệu (Type) | Bắt Buộc (Required) | Ý Nghĩa / Ghi Chú |
 |---|---|---|---|
 | id | integer | Có | - |
 | ngay_xuat_huy | date | Có | - |
-| giai_doan | text | Có | - |
+| giai_doan | text | Có | "Trước chích bắp" / "Trước cắt bắp" / "Trước thu hoạch" |
 | ly_do | text | Có | - |
 | so_luong | integer | Có | - |
 | created_at | timestamp with time zone | Không | Thời gian tạo record |
-| tuan | integer | Không | - |
+| tuan | integer | Không | Tuần trong năm (ISO week) |
 | is_deleted | boolean | Không | Cờ đánh dấu soft delete (True=Đã xóa) |
-| mau_day | text | Không | - |
 | dim_lo_id | integer | Không | ID định danh/Khóa ngoại |
 | base_lot_id | integer | Không | FK → base_lots.id — Đợt trồng tương ứng, auto-resolved bằng timeline sinh trưởng |
 
 ## public.harvest_logs
 **Ý nghĩa:** Log lưu quá trình thu hoạch chuối.
+
+**Ghi chú nghiệp vụ:**
+- Cột `mau_day` đã được xóa (migration 08/05/2026). Màu dây resolve từ `ribbon_schedule` qua `(farm_id, year, tuan)`.
 
 | Tên Trường (Field) | Kiểu Dữ Liệu (Type) | Bắt Buộc (Required) | Ý Nghĩa / Ghi Chú |
 |---|---|---|---|
@@ -279,12 +287,30 @@ Tài liệu này ghi lại chi tiết toàn bộ cấu trúc cơ sở dữ liệ
 | ngay_thu_hoach | date | Có | - |
 | so_luong | integer | Có | - |
 | created_at | timestamp with time zone | Không | Thời gian tạo record |
-| tuan | integer | Không | - |
+| tuan | integer | Không | Tuần trong năm (ISO week). Dùng join `ribbon_schedule` lấy màu dây. |
 | is_deleted | boolean | Không | Cờ đánh dấu soft delete (True=Đã xóa) |
 | hinh_thuc_thu_hoach | text | Không | - |
-| mau_day | text | Không | - |
 | dim_lo_id | integer | Không | ID định danh/Khóa ngoại |
 | base_lot_id | integer | Không | FK → base_lots.id — Đợt trồng tương ứng, auto-resolved bằng timeline sinh trưởng |
+
+## public.ribbon_schedule
+**Ý nghĩa:** Bảng lịch trình màu dây (ribbon color) chuẩn hóa theo farm, năm và tuần. Đây là **nguồn dữ liệu duy nhất (single source of truth)** cho màu dây, thay thế cột `mau_day` trước đây trên `stage_logs`, `destruction_logs`, `harvest_logs`.
+
+**Ghi chú nghiệp vụ:**
+- Mỗi farm chỉ có **1 màu dây cho 1 tuần cụ thể**. Màu dây có thể được tái sử dụng ở các tuần khác nhau (VD: tuần 2 = cam, tuần 22 = cam).
+- Auto-create: Khi user nhập dữ liệu mới (cắt bắp, đo size...) với màu dây cho tuần chưa có record → tự động tạo `ribbon_schedule` entry.
+- Conflict prevention: Nếu tuần đó đã có màu dây khác → chặn entry, yêu cầu user sử dụng đúng màu.
+- UI: Tất cả selectbox màu dây đều dùng `build_color_selectbox()` helper để đảm bảo chuẩn hóa.
+
+| Tên Trường (Field) | Kiểu Dữ Liệu (Type) | Bắt Buộc (Required) | Ý Nghĩa / Ghi Chú |
+|---|---|---|---|
+| id | integer | Có | - |
+| farm_id | integer | Có | FK → dim_farm.farm_id |
+| year | integer | Có | Năm (ISO year) |
+| week_number | integer | Có | Tuần trong năm (ISO week) |
+| color_name | text | Có | Tên màu dây chuẩn hóa (viết thường, không viết tắt). VD: "cam", "xanh lá", "đỏ" |
+| created_at | timestamp with time zone | Không | Thời gian tạo record |
+| is_deleted | boolean | Không | Cờ đánh dấu soft delete (True=Đã xóa) |
 
 ## public.bsr_logs
 **Ý nghĩa:** Log đo lường chỉ số BSR.

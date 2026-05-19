@@ -2,7 +2,20 @@
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
 
-## [10/05/2026] - Responsive Map Overhaul (6 Breakpoints)
+## [18/05/2026] - Dự Báo Tuần Thu Hoạch trên Excel Cắt bắp
+
+#### Feature: Thêm dòng dự báo tuần thu hoạch vào báo cáo Excel Cắt bắp (`app.py`)
+- **[Thêm]**: Row 1 (header mới) — hiển thị tuần dự kiến thu hoạch cho mỗi tuần cắt bắp.
+- **[Format]**: `"25 (+8)/26 (+9)"` — tuần 25 nếu thu 8 tuần, tuần 26 nếu thu 9 tuần (tính cả tuần cắt bắp).
+- **[Chuyển năm]**: Nếu tuần thu hoạch rơi sang năm sau → hiển thị kèm năm: `"5-2027 (+8)/6-2027 (+9)"`. Cùng năm → chỉ số tuần (sheet đã chia theo năm).
+- **[Styling]**: Nền vàng pastel (`#FFF9C4`), chữ bold italic size 9.
+- **[Header shift]**: 3 dòng → 4 dòng. "Tuần X" → Row 2, "CẮT BẮP/XUẤT HỦY" → Row 3, Màu dây → Row 4. `data_start_row = 5`, `freeze_panes = "B5"`.
+- **[Lũy kế]**: Merged R1-R2, dòng dự báo để trống.
+- **[Helper]**: `_forecast_harvest_label(cut_week, cut_year)` — xử lý ISO week boundary (52/53 tuần) khi tính chuyển năm.
+
+---
+
+
 
 #### Fix: Bản đồ farm bị cắt bên phải trên iPad (`app.py`)
 - **[Root Cause]**: Thiếu `overflow-x: hidden` trên `html/body` trong iframe, thiếu `<meta viewport>`, và chỉ có 3 breakpoint (mobile/desktop/XL) — bỏ sót iPad (769–1024px).

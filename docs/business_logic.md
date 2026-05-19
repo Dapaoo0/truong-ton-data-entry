@@ -286,19 +286,24 @@ Hệ thống phân biệt **2 loại diện tích**:
 ## 9. Báo cáo Excel (Excel Export)
 
 ### 9.1 Nguyên tắc chung
-- Báo cáo Excel chỉ hiển thị **số liệu thực tế đã xảy ra** — không bao gồm xuất hủy hoặc hao hụt ước tính.
-- Ví dụ: Tuần 10 cắt 100 bắp → báo cáo hiển thị 100. Xuất hủy trước/sau đó không ảnh hưởng.
-- Dữ liệu xuất hủy (destruction) được xem ở dashboard riêng, không nằm trong báo cáo Excel.
+- Báo cáo Excel Cắt bắp hiển thị **2 cột mỗi tuần**: CẮT BẮP (số thực tế) và XUẤT HỦY (trước thu hoạch). Hai cột **độc lập, không bù trừ nhau**.
+- Ví dụ: Tuần 10 cắt 100 bắp + hủy 5 → Excel hiển thị CẮT BẮP: 100 | XUẤT HỦY: 5. KHÔNG hiển thị 95.
+- Cột Lũy kế cuối bảng tổng cộng dồn riêng CẮT và HỦY.
 
 ### 9.2 Báo cáo Cắt bắp (`generate_cut_bap_excel`)
-- **Input**: `df_lots` (base_lots filtered), `df_stg` (stage_logs filtered, `giai_doan == "Cắt bắp"`).
+- **Input**: `df_lots` (base_lots filtered), `df_stg` (stage_logs filtered), `df_des` (destruction_logs, `giai_doan == "Trước thu hoạch"`).
 - **Layout**: Chia sheet theo năm. Mỗi sheet = 1 năm.
   - Cột A: Tên lô (sorted tự nhiên: 1A, 2A, 3A... không phải 10A, 11A, 1A).
-  - Mỗi tuần = 1 cột. Header 2 dòng: Tuần (số) + Màu dây (từ `ribbon_schedule`).
-  - Cột cuối: **Lũy kế** = tổng cộng dồn theo lô.
-- **Data matching**: `df_cut["lo"] == lo_name` — so khớp trực tiếp, không qua `lot_id`.
+  - Mỗi tuần = 2 cột (CẮT BẮP | XUẤT HỦY).
+  - Cột cuối: **Lũy kế** = tổng cộng dồn theo lô (CẮT riêng, HỦY riêng).
+- **Header 4 dòng** (`data_start_row = 5`, `freeze_panes = "B5"`):
+  - **Row 1 — Dự báo thu hoạch**: `_forecast_harvest_label(cut_week, year)` → format `"25 (+8)/26 (+9)"`. Tính 8 tuần (mùa nắng) / 9 tuần (mùa mưa) kể từ tuần cắt bắp (tính cả tuần cắt). Nền vàng pastel (`#FFF9C4`), chữ bold italic. Xử lý chuyển năm ISO (52/53 tuần): `"5-2027 (+8)/6-2027 (+9)"`. Cột Lũy kế để trống.
+  - **Row 2 — Tuần X**: Số tuần ISO, merged 2 cột, nền xanh dương header (`#D9E1F2`).
+  - **Row 3 — Sub-headers**: "CẮT BẮP" | "XUẤT HỦY", nền trắng.
+  - **Row 4 — Màu dây**: Từ `ribbon_schedule` (farm_id, year, week_number), nền theo COLOR_MAP.
+- **Data matching**: `base_lot_id` (ưu tiên) hoặc fallback `df_cut["lo"] == lo_name`.
 - **Type safety**: `tuan` → `pd.to_numeric().astype(int)`, `_year` → `.astype(int)`.
-- **Lot union**: Tên lô lấy từ CẢ `base_lots` VÀ `stage_logs` (tránh miss lô chỉ tồn tại trong 1 nguồn).
+- **Lot union**: Tên lô lấy từ CẢ `base_lots` VÀ `stage_logs`/`destruction_logs` (tránh miss lô chỉ tồn tại trong 1 nguồn).
 
 ### 9.3 Báo cáo Chích bắp (`generate_chich_bap_excel`)
 - **Input**: `df_lots` (base_lots filtered), `df_stg` (stage_logs filtered, `giai_doan == "Chích bắp"`).

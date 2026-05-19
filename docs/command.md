@@ -2,6 +2,16 @@
 
 Tài liệu này lưu lại tóm tắt các yêu cầu của người dùng để theo dõi tiến độ và nhiệm vụ.
 
+## Ngày 08/05/2026
+
+- Chuẩn hóa Màu dây: Xóa cột `mau_day` từ `stage_logs`, `destruction_logs`, `harvest_logs`. Tập trung vào bảng `ribbon_schedule` (single source of truth).
+- Refactor FIFO Strategy 3 ("Trước thu hoạch"): Query `ribbon_schedule` thay vì `stage_logs.mau_day` (đã xóa).
+- Refactor Forecast Engine: Pre-compute `_ribbon_lookup` dict + `_resolve_ribbon_color(row)` helper để resolve màu dây cho Mốc ③ Pro-rata.
+- Refactor Excel Export: Week-color mapping query `ribbon_schedule` trực tiếp.
+- Bỏ cột `mau_day` khỏi UI display cho `stage_logs` và `destruction_logs`.
+- **Micro-PDF Forecast Engine (Mốc ②③)**: Thay thế Cumulative Threshold → Micro-PDF ±7d. Mỗi record spread ±7d Normal Distribution (σ=3) → gộp → phase bằng diện tích tích lũy + boundary-day splitting. Largest Remainder cho cả 3 mốc. 11/11 test passed.
+- Cập nhật toàn bộ docs: `schema.md`, `business_logic.md`, `codebase_summary.md`, `changelog.md`, `command.md`.
+
 ## Ngày 05/05/2026
 
 - Chuyển Mốc ②③ (Chích bắp / Cắt bắp) từ Normal Distribution sang **Shift-based model**: dịch ngày chích +84d / cắt +70d, phase theo tích lũy %, bỏ hao hụt 5% ước tính.
