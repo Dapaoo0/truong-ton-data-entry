@@ -572,6 +572,7 @@ def _allocate_bunches_cpsat(
             used_var = model.NewBoolVar(f"{var_prefix}_used")
             model.Add(boxes_var * kg_per_box_units <= bunches_var * kg_per_bunch_units)
             model.Add(bunches_var <= total_bunches * used_var)
+            model.Add(bunches_var >= used_var)
             segment = {
                 "processing_order": processing_order,
                 "original_index": original_index,
@@ -589,6 +590,7 @@ def _allocate_bunches_cpsat(
             row_record["segments"].append(segment)
             all_segments.append(segment)
 
+        model.Add(sum(segment["used_var"] for segment in row_record["segments"]) <= 1)
         fulfilled_var = model.NewIntVar(0, requested_boxes, f"r{processing_order}_fulfilled")
         short_var = model.NewIntVar(0, requested_boxes, f"r{processing_order}_short")
         model.Add(fulfilled_var == sum(segment["boxes_var"] for segment in row_record["segments"]))
@@ -885,6 +887,7 @@ def _calculate_max_containers_cpsat(
         for sku, sku_rule in OPTIMIZER_SKU_RULES.items():
             if market not in sku_rule.get("markets", []):
                 continue
+            sku_segments = []
             row = {
                 "sku": sku,
                 "market": market,
@@ -900,6 +903,7 @@ def _calculate_max_containers_cpsat(
                 used_var = model.NewBoolVar(f"{var_prefix}_used")
                 model.Add(boxes_var * kg_per_box_units <= bunches_var * kg_per_bunch_units)
                 model.Add(bunches_var <= total_bunches * used_var)
+                model.Add(bunches_var >= used_var)
                 segment = {
                     "market": market,
                     "market_priority": market_priority,
@@ -915,7 +919,10 @@ def _calculate_max_containers_cpsat(
                     "used_var": used_var,
                 }
                 market_segments.append(segment)
+                sku_segments.append(segment)
                 all_segments.append(segment)
+            if sku_segments:
+                model.Add(sum(segment["used_var"] for segment in sku_segments) <= 1)
 
         boxes_var = model.NewIntVar(0, source_boxes_capacity, f"market_{market_priority}_boxes")
         full_containers_var = model.NewIntVar(0, max_possible_containers, f"market_{market_priority}_containers")
