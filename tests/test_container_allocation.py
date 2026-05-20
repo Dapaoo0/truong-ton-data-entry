@@ -164,6 +164,7 @@ def test_optimizer_can_choose_contiguous_subrange_inside_parent_range():
     assert by_sku["30CP"]["range_label"] == "6-8"
     assert by_sku["27CP"]["boxes_fulfilled"] == 591
     assert by_sku["30CP"]["boxes_fulfilled"] == 300
+    assert result["summary"]["active_bunches_estimated"] == 922
 
 
 def test_optimizer_prefers_single_full_range_over_split_or_partial_bunches():
@@ -178,6 +179,35 @@ def test_optimizer_prefers_single_full_range_over_split_or_partial_bunches():
     assert by_sku["27CP"]["boxes_fulfilled"] == 37
     assert by_sku["6H"]["range_label"] == "6-7"
     assert by_sku["6H"]["boxes_fulfilled"] == 15
+    assert result["summary"]["active_bunches_estimated"] == 65
+
+
+def test_optimizer_reports_minimum_opened_bunches_when_source_is_surplus():
+    result = allocate_bunches_optimized(5000, 18, 12, [
+        _optimizer_row(1, 1, "27CP", 520),
+        _optimizer_row(1, 2, "6H", 240),
+    ])
+
+    by_sku = {row["sku"]: row for row in result["rows"]}
+    assert by_sku["27CP"]["range_label"] == "1-5"
+    assert by_sku["6H"]["range_label"] == "6-7"
+    assert by_sku["27CP"]["boxes_fulfilled"] == 520
+    assert by_sku["6H"]["boxes_fulfilled"] == 240
+    assert result["summary"]["active_bunches_estimated"] == 1040
+    assert result["summary"]["total_bunches"] == 5000
+
+
+def test_optimizer_prioritizes_higher_market_before_opened_bunch_minimization():
+    result = allocate_bunches_optimized(100, 18, 12, [
+        _optimizer_row(1, 1, "27CP", 100),
+        _optimizer_row(2, 1, "8H", 100, market="Hàn"),
+    ])
+
+    by_sku = {row["sku"]: row for row in result["rows"]}
+    assert by_sku["27CP"]["range_label"] == "1-5"
+    assert by_sku["27CP"]["boxes_fulfilled"] == 57
+    assert by_sku["8H"]["boxes_fulfilled"] == 0
+    assert result["summary"]["active_bunches_estimated"] == 100
 
 
 def test_optimizer_uses_tail_for_15cp_without_extra_bunches():
@@ -199,8 +229,10 @@ def test_optimizer_expands_30cp_to_needed_subrange_when_shorter_ranges_are_not_e
     ])
 
     row = result["rows"][0]
-    assert row["range_label"] == "1-8"
+    assert row["range_label"] == "1-9"
+    assert row["bunches_allocated"] == 867
     assert row["boxes_fulfilled"] == 1000
+    assert result["summary"]["active_bunches_estimated"] == 867
 
 
 def test_optimizer_supports_korea_skus_from_spec():

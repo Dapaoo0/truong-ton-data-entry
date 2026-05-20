@@ -2,6 +2,18 @@
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
 
+## [20/05/2026] - Chuẩn hóa mục tiêu máy tính phân bổ container
+
+#### Fix/Refactor: Tối ưu theo số buồng nguyên tối thiểu cần xẻ (`container_allocation.py`, `app.py`)
+- **[Mục tiêu chính]**: Mode Theo đơn hàng giờ được định nghĩa rõ là tìm `Buồng xẻ tối thiểu`: số buồng nguyên ít nhất cần mở để đáp ứng đơn hàng theo ưu tiên thị trường/mã hàng.
+- **[Objective]**: CP-SAT tối ưu lexicographic: thiếu thùng theo ưu tiên → số buồng nguyên cần xẻ (`active_bunches_estimated`) → số segment → nải-buồng → kg dư.
+- **[Hard constraint]**: Mỗi dòng đơn hàng/mỗi mã chỉ được chọn một khoảng nải liền kề duy nhất. Không còn case 27CP bị tách `1-1` + `2-5`.
+- **[Fallback]**: Beam search fallback được cập nhật cùng thứ tự mục tiêu để khi thiếu OR-Tools vẫn bám mục tiêu vận hành và hiển thị `APPROXIMATE`.
+- **[UI]**: Kết quả tổng hiển thị thêm metric `Buồng xẻ tối thiểu`; bảng kết quả đổi cột buồng sang ý nghĩa buồng nguyên cần xẻ.
+- **[Tests]**: Thêm edge cases cho nguồn dư, nguồn thiếu, range rộng giảm số buồng xẻ, mã không trùng nải dùng chung một lô buồng, và regression case 65 buồng.
+
+---
+
 ## [18/05/2026] - Dự Báo Tuần Thu Hoạch trên Excel Cắt bắp
 
 #### Feature: Thêm dòng dự báo tuần thu hoạch vào báo cáo Excel Cắt bắp (`app.py`)

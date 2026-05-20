@@ -102,6 +102,8 @@ except ImportError:
         )
         result.setdefault("loss", {})
         result["summary"].setdefault("optimizer_loss", 0.0)
+        result["summary"].setdefault("active_bunches_estimated", 0)
+        result["summary"].setdefault("segment_count", len(result.get("rows", [])))
         result["summary"].setdefault("solver_status", "APPROXIMATE")
         result["summary"].setdefault("solver_backend", "legacy_fallback")
         result.setdefault("solver_status", result["summary"]["solver_status"])
@@ -133,6 +135,8 @@ except ImportError:
                 "source_cont_capacity": (int(source_kg // kg_per_box) / boxes_per_container) if boxes_per_container else 0,
                 "fulfilled_boxes": 0,
                 "fulfilled_containers": 0,
+                "active_bunches_estimated": 0,
+                "segment_count": 0,
                 "solver_status": "APPROXIMATE",
                 "solver_backend": "legacy_fallback",
             },
@@ -5067,16 +5071,18 @@ def render_container_allocation_calculator():
             st.warning("Kết quả xấp xỉ do thiếu solver tối ưu hoặc đang dùng fallback.")
         else:
             st.caption(f"Trạng thái tối ưu: {solver_status} · {solver_backend}")
-        m1, m2, m3, m4, m5 = st.columns(5)
+        m1, m2, m3, m4, m5, m6 = st.columns(6)
         with m1:
             st.metric("Nguồn buồng", f"{summary['total_bunches']:,}")
         with m2:
-            st.metric("Kg nguồn", f"{summary['source_kg']:,.0f}")
+            st.metric("Buồng xẻ tối thiểu", f"{summary.get('active_bunches_estimated', 0):,}")
         with m3:
-            st.metric("Kg/nải", f"{summary['kg_per_hand']:.2f}")
+            st.metric("Kg nguồn", f"{summary['source_kg']:,.0f}")
         with m4:
-            st.metric("Cont lý thuyết", f"{summary['source_cont_capacity']:,.2f}")
+            st.metric("Kg/nải", f"{summary['kg_per_hand']:.2f}")
         with m5:
+            st.metric("Cont lý thuyết", f"{summary['source_cont_capacity']:,.2f}")
+        with m6:
             st.metric("Cont đủ tối đa", f"{summary['fulfilled_containers']:,}")
 
         if max_result["rows"]:
@@ -5353,16 +5359,18 @@ def render_container_allocation_calculator():
         st.warning("Kết quả xấp xỉ do thiếu solver tối ưu hoặc đang dùng fallback.")
     else:
         st.caption(f"Trạng thái tối ưu: {solver_status} · {solver_backend}")
-    m1, m2, m3, m4, m5 = st.columns(5)
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
     with m1:
         st.metric("Nguồn buồng", f"{summary['total_bunches']:,}")
     with m2:
-        st.metric("Kg nguồn", f"{summary['source_kg']:,.0f}")
+        st.metric("Buồng xẻ tối thiểu", f"{summary.get('active_bunches_estimated', 0):,}")
     with m3:
-        st.metric("Kg/nải", f"{summary['kg_per_hand']:.2f}")
+        st.metric("Kg nguồn", f"{summary['source_kg']:,.0f}")
     with m4:
-        st.metric("Cont lý thuyết", f"{summary['source_cont_capacity']:,.2f}")
+        st.metric("Kg/nải", f"{summary['kg_per_hand']:.2f}")
     with m5:
+        st.metric("Cont lý thuyết", f"{summary['source_cont_capacity']:,.2f}")
+    with m6:
         st.metric("Thùng đáp ứng", f"{summary['fulfilled_boxes']:,}", f"Thiếu {summary['short_boxes']:,} thùng")
 
     if result["rows"]:
@@ -5404,8 +5412,7 @@ def render_container_allocation_calculator():
                 "Thiếu thùng": int(market_info.get("short_boxes", 0)),
                 "Cont đủ": int(market_info.get("full_containers", 0)),
                 "Thùng lẻ": int(market_info.get("remaining_boxes", 0)),
-                "Buồng cần": "",
-                "Buồng phân bổ": "",
+                "Buồng xẻ tối thiểu": "",
             })
             for _, sku_row in market_rows_df.iterrows():
                 compact_rows.append({
@@ -5416,8 +5423,7 @@ def render_container_allocation_calculator():
                     "Thiếu thùng": int(sku_row["short_boxes"]),
                     "Cont đủ": "",
                     "Thùng lẻ": "",
-                    "Buồng cần": int(sku_row["bunches_needed"]),
-                    "Buồng phân bổ": int(sku_row["bunches_allocated"]),
+                    "Buồng xẻ tối thiểu": int(sku_row["bunches_allocated"]),
                 })
 
         st.dataframe(pd.DataFrame(compact_rows), use_container_width=True, hide_index=True)
@@ -5438,8 +5444,7 @@ def render_container_allocation_calculator():
                     f"/ {sku_row['kg_per_bunch_for_sku']:.2f}"
                 ),
                 "Kết quả": (
-                    f"cần {int(sku_row['bunches_needed']):,} buồng, "
-                    f"phân bổ {int(sku_row['bunches_allocated']):,} buồng, "
+                    f"xẻ {int(sku_row['bunches_allocated']):,} buồng nguyên, "
                     f"đáp ứng {int(sku_row['boxes_fulfilled']):,} thùng"
                     + (
                         f", thiếu {int(sku_row['short_boxes']):,} thùng"

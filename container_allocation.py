@@ -259,10 +259,18 @@ def _allocate_candidate_range(
 def _optimizer_state_key(state: dict[str, Any]) -> tuple:
     return (
         tuple(state["shortage_vector"]),
+        state["active_bunches_estimated"],
+        state["segment_count"],
         state["hand_units_consumed"],
         state["range_preference"],
         round(state["extra_kg_from_rounding"], 6),
     )
+
+
+def _active_bunches_from_remaining(total_bunches: int, remaining_hands: dict[int, int]) -> int:
+    if not remaining_hands:
+        return 0
+    return max(total_bunches - remaining_qty for remaining_qty in remaining_hands.values())
 
 
 def _allocate_bunches_beam(
@@ -280,8 +288,9 @@ def _allocate_bunches_beam(
 
     The search keeps a beam of low-loss plans. The loss is lexicographic:
     shortage for higher-priority rows dominates shortage for lower-priority
-    rows, then the optimizer minimizes hand units consumed, less-preferred
-    ranges, and rounding waste.
+    rows, then the optimizer minimizes the number of whole bunches opened,
+    the number of cut segments, hand units consumed, less-preferred ranges,
+    and rounding waste.
     """
     total_bunches = max(0, _to_int(total_bunches))
     kg_per_bunch = max(0.0, _to_float(kg_per_bunch))
@@ -301,6 +310,8 @@ def _allocate_bunches_beam(
         "short_boxes": 0,
         "short_containers": 0.0,
         "optimizer_loss": 0.0,
+        "active_bunches_estimated": 0,
+        "segment_count": 0,
         "solver_status": solver_status,
         "solver_backend": solver_backend,
     }
@@ -341,6 +352,8 @@ def _allocate_bunches_beam(
         "remaining_hands": remaining_hands,
         "rows": [],
         "shortage_vector": [],
+        "active_bunches_estimated": 0,
+        "segment_count": 0,
         "hand_units_consumed": 0.0,
         "range_preference": 0.0,
         "extra_kg_from_rounding": 0.0,
@@ -362,10 +375,13 @@ def _allocate_bunches_beam(
                     processing_order,
                     range_rank,
                 )
+                active_bunches_estimated = _active_bunches_from_remaining(total_bunches, next_remaining)
                 next_states.append({
                     "remaining_hands": next_remaining,
                     "rows": state["rows"] + [result_row],
                     "shortage_vector": state["shortage_vector"] + [result_row["short_boxes"]],
+                    "active_bunches_estimated": active_bunches_estimated,
+                    "segment_count": state["segment_count"] + (1 if result_row["bunches_allocated"] > 0 else 0),
                     "hand_units_consumed": state["hand_units_consumed"] + penalties["hand_units_consumed"],
                     "range_preference": state["range_preference"] + penalties["range_preference"],
                     "extra_kg_from_rounding": state["extra_kg_from_rounding"] + penalties["extra_kg_from_rounding"],
@@ -401,6 +417,8 @@ def _allocate_bunches_beam(
     )
     optimizer_loss = (
         shortage_loss * 1_000_000
+        + best_state["active_bunches_estimated"] * 100_000
+        + best_state["segment_count"] * 10_000
         + best_state["hand_units_consumed"] * 10
         + best_state["range_preference"] * 100
         + best_state["extra_kg_from_rounding"]
@@ -416,12 +434,16 @@ def _allocate_bunches_beam(
         "short_boxes": short_boxes_total,
         "short_containers": short_boxes_total / boxes_per_container,
         "optimizer_loss": optimizer_loss,
+        "active_bunches_estimated": best_state["active_bunches_estimated"],
+        "segment_count": best_state["segment_count"],
         "solver_status": solver_status,
         "solver_backend": solver_backend,
     }
     loss = {
         "shortage_vector": best_state["shortage_vector"],
         "shortage_loss": shortage_loss,
+        "active_bunches_estimated": best_state["active_bunches_estimated"],
+        "segment_count": best_state["segment_count"],
         "hand_units_consumed": best_state["hand_units_consumed"],
         "range_preference": best_state["range_preference"],
         "extra_kg_from_rounding": best_state["extra_kg_from_rounding"],
@@ -494,6 +516,8 @@ def _empty_optimized_result(
         "short_boxes": 0,
         "short_containers": 0.0,
         "optimizer_loss": 0.0,
+        "active_bunches_estimated": 0,
+        "segment_count": 0,
         "solver_status": solver_status,
         "solver_backend": solver_backend,
     }
@@ -1097,6 +1121,8 @@ def calculate_max_containers_by_market(
         "source_cont_capacity": 0.0,
         "fulfilled_boxes": 0,
         "fulfilled_containers": 0,
+        "active_bunches_estimated": 0,
+        "segment_count": 0,
         "solver_status": "APPROXIMATE",
         "solver_backend": "recipe_fallback",
     }
@@ -1176,12 +1202,15 @@ def calculate_max_containers_by_market(
                 })
 
     fulfilled_boxes = sum(row["boxes_allocated"] for row in market_rows)
+    active_bunches_estimated = _active_bunches_from_remaining(total_bunches, remaining_hands)
     summary = {
         "total_bunches": total_bunches,
         "source_kg": source_kg,
         "kg_per_hand": kg_per_hand,
         "source_boxes_capacity": int(math.floor(source_kg / kg_per_box)),
         "source_cont_capacity": int(math.floor(source_kg / kg_per_box)) / boxes_per_container,
+        "active_bunches_estimated": active_bunches_estimated,
+        "segment_count": len(detail_rows),
         "fulfilled_boxes": fulfilled_boxes,
         "fulfilled_containers": sum(row["full_containers"] for row in market_rows),
         "solver_status": "APPROXIMATE",

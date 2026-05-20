@@ -2,6 +2,15 @@
 
 Tài liệu này lưu lại tóm tắt các yêu cầu của người dùng để theo dõi tiến độ và nhiệm vụ.
 
+## Ngày 20/05/2026
+
+- Chuẩn hóa mục tiêu máy tính phân bổ container: kết quả chính là **số buồng nguyên tối thiểu cần xẻ** để đáp ứng đơn hàng theo ưu tiên.
+- Cập nhật optimizer: ưu tiên thiếu thùng theo thị trường/mã hàng trước, sau đó tối thiểu `active_bunches_estimated`, số segment, nải-buồng và kg dư.
+- Khóa mỗi dòng đơn/mỗi mã hàng chỉ chọn một khoảng nải liền kề duy nhất trong khoảng mẹ; không tách cùng mã thành nhiều đoạn.
+- Cập nhật UI hiển thị metric `Buồng xẻ tối thiểu`.
+- Bổ sung edge-case tests cho nguồn dư, nguồn thiếu, range rộng, dùng chung buồng khi không trùng nải, và regression 65 buồng.
+- Cập nhật docs: `business_logic.md`, `codebase_summary.md`, `changelog.md`, `command.md`, `findings.md`.
+
 ## Ngày 08/05/2026
 
 - Chuẩn hóa Màu dây: Xóa cột `mau_day` từ `stage_logs`, `destruction_logs`, `harvest_logs`. Tập trung vào bảng `ribbon_schedule` (single source of truth).
