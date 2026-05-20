@@ -34,57 +34,57 @@ OPTIMIZER_SKU_RULES = {
     "27CP": {
         "markets": ["Nhật"],
         "group": "Phần Ngọn",
-        "description": "Quả to, mập nhất. Yêu cầu khắt khe nhất, ưu tiên cắt phần gần cuống đẹp nhất.",
-        "ranges": [(9, 12), (8, 12), (4, 12)],
+        "description": "Quả to, mập nhất. Vùng nải mẹ 1-5; thuật toán có thể chọn mọi khoảng con liền kề bên trong vùng này.",
+        "ranges": [(1, 5)],
     },
     "8H": {
         "markets": ["Hàn"],
         "group": "Phần Ngọn",
-        "description": "Lấy phần gần cuống tương tự 27CP nhưng dùng để ráp container Hàn.",
-        "ranges": [(9, 12)],
+        "description": "Vùng nải mẹ 1-4 cho container Hàn; thuật toán có thể chọn mọi khoảng con liền kề bên trong vùng này.",
+        "ranges": [(1, 4)],
     },
     "6H": {
         "markets": ["Nhật"],
         "group": "Khúc Giữa",
-        "description": "Quả thon đều, cố định ở khúc giữa trên.",
-        "ranges": [(6, 8)],
+        "description": "Vùng nải mẹ 5-7; thuật toán có thể chọn mọi khoảng con liền kề bên trong vùng này.",
+        "ranges": [(5, 7)],
     },
     "30CP": {
         "markets": ["Nhật"],
         "group": "Khúc Giữa",
-        "description": "Quả cỡ trung bình lớn, thường ráp nối tiếp sau khi 27CP đã lấy phần ngọn.",
-        "ranges": [(4, 7), (4, 12)],
+        "description": "Vùng nải mẹ 1-9; thuật toán có thể chọn mọi khoảng con liền kề bên trong vùng này.",
+        "ranges": [(1, 9)],
     },
     "5H": {
         "markets": ["Nhật"],
         "group": "Khúc Giữa",
-        "description": "Cố định ở khúc giữa dưới, gần đuôi.",
-        "ranges": [(3, 5)],
+        "description": "Vùng nải mẹ 8-10; thuật toán có thể chọn mọi khoảng con liền kề bên trong vùng này.",
+        "ranges": [(8, 10)],
     },
     "5/6H": {
         "markets": ["Hàn"],
         "group": "Khúc Giữa",
-        "description": "Cắt dải dài xuyên suốt khúc giữa buồng, tốc độ gom hàng nhanh.",
-        "ranges": [(3, 8)],
+        "description": "Vùng nải mẹ 5-9; thuật toán có thể chọn mọi khoảng con liền kề bên trong vùng này.",
+        "ranges": [(5, 9)],
     },
     "15CP": {
         "markets": ["Hàn"],
         "group": "Phần Đuôi",
-        "description": "Mã tận dụng chiến lược, gom vét các nải nhỏ cuối buồng.",
-        "ranges": [(1, 3), (1, 2)],
+        "description": "Vùng nải mẹ 10-12; thuật toán có thể chọn mọi khoảng con liền kề bên trong vùng này.",
+        "ranges": [(10, 12)],
     },
 }
 
 MARKET_MAX_CONTAINER_RECIPES = {
     "Nhật": [
-        {"sku": "27CP", "hand_from": 9, "hand_to": 12},
-        {"sku": "6H", "hand_from": 6, "hand_to": 8},
-        {"sku": "5H", "hand_from": 3, "hand_to": 5},
+        {"sku": "27CP", "hand_from": 1, "hand_to": 4},
+        {"sku": "6H", "hand_from": 5, "hand_to": 7},
+        {"sku": "5H", "hand_from": 8, "hand_to": 10},
     ],
     "Hàn": [
-        {"sku": "8H", "hand_from": 9, "hand_to": 12},
-        {"sku": "5/6H", "hand_from": 3, "hand_to": 8},
-        {"sku": "15CP", "hand_from": 1, "hand_to": 2},
+        {"sku": "8H", "hand_from": 1, "hand_to": 4},
+        {"sku": "5/6H", "hand_from": 5, "hand_to": 9},
+        {"sku": "15CP", "hand_from": 10, "hand_to": 12},
     ],
 }
 
@@ -146,6 +146,14 @@ def _requested_boxes(row: dict[str, Any], boxes_per_container: int) -> int:
     )
 
 
+def _contiguous_subranges(hand_from: int, hand_to: int) -> list[tuple[int, int]]:
+    ranges = []
+    for hand_count in range(1, hand_to - hand_from + 2):
+        for start in range(hand_from, hand_to - hand_count + 2):
+            ranges.append((start, start + hand_count - 1))
+    return ranges
+
+
 def _valid_optimizer_ranges(row: dict[str, Any], hands_per_bunch: int) -> list[tuple[int, int]]:
     sku = row["sku"].upper()
     sku_rule = OPTIMIZER_SKU_RULES.get(sku, {})
@@ -153,13 +161,21 @@ def _valid_optimizer_ranges(row: dict[str, Any], hands_per_bunch: int) -> list[t
     if allowed_markets and row.get("market") not in allowed_markets:
         return []
     ranges = sku_rule.get("ranges")
+    expand_subranges = bool(ranges)
     if not ranges and row.get("hand_from") and row.get("hand_to"):
         ranges = [(row["hand_from"], row["hand_to"])]
 
     valid_ranges = []
     for hand_from, hand_to in ranges or []:
         if 1 <= hand_from <= hand_to <= hands_per_bunch:
-            valid_ranges.append((hand_from, hand_to))
+            candidate_ranges = (
+                _contiguous_subranges(hand_from, hand_to)
+                if expand_subranges
+                else [(hand_from, hand_to)]
+            )
+            for candidate in candidate_ranges:
+                if candidate not in valid_ranges:
+                    valid_ranges.append(candidate)
     return valid_ranges
 
 
