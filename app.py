@@ -102,6 +102,11 @@ except ImportError:
         )
         result.setdefault("loss", {})
         result["summary"].setdefault("optimizer_loss", 0.0)
+        result["summary"].setdefault("solver_status", "APPROXIMATE")
+        result["summary"].setdefault("solver_backend", "legacy_fallback")
+        result.setdefault("solver_status", result["summary"]["solver_status"])
+        result.setdefault("solver_backend", result["summary"]["solver_backend"])
+        result.setdefault("detail_rows", result.get("rows", []))
         for row in result.get("rows", []):
             row.setdefault("range_label", f"{row.get('hand_from')}-{row.get('hand_to')}")
         return result
@@ -128,7 +133,11 @@ except ImportError:
                 "source_cont_capacity": (int(source_kg // kg_per_box) / boxes_per_container) if boxes_per_container else 0,
                 "fulfilled_boxes": 0,
                 "fulfilled_containers": 0,
+                "solver_status": "APPROXIMATE",
+                "solver_backend": "legacy_fallback",
             },
+            "solver_status": "APPROXIMATE",
+            "solver_backend": "legacy_fallback",
         }
 
 if hasattr(st, "dialog"):
@@ -5026,6 +5035,12 @@ def render_container_allocation_calculator():
         summary = max_result["summary"]
 
         st.markdown("##### Kết quả tổng")
+        solver_status = summary.get("solver_status", max_result.get("solver_status", "APPROXIMATE"))
+        solver_backend = summary.get("solver_backend", max_result.get("solver_backend", "unknown"))
+        if solver_status == "APPROXIMATE":
+            st.warning("Kết quả xấp xỉ do thiếu solver tối ưu hoặc đang dùng fallback.")
+        else:
+            st.caption(f"Trạng thái tối ưu: {solver_status} · {solver_backend}")
         m1, m2, m3, m4, m5 = st.columns(5)
         with m1:
             st.metric("Nguồn buồng", f"{summary['total_bunches']:,}")
@@ -5306,6 +5321,12 @@ def render_container_allocation_calculator():
     summary = result["summary"]
 
     st.markdown("##### Kết quả tổng")
+    solver_status = summary.get("solver_status", result.get("solver_status", "APPROXIMATE"))
+    solver_backend = summary.get("solver_backend", result.get("solver_backend", "unknown"))
+    if solver_status == "APPROXIMATE":
+        st.warning("Kết quả xấp xỉ do thiếu solver tối ưu hoặc đang dùng fallback.")
+    else:
+        st.caption(f"Trạng thái tối ưu: {solver_status} · {solver_backend}")
     m1, m2, m3, m4, m5 = st.columns(5)
     with m1:
         st.metric("Nguồn buồng", f"{summary['total_bunches']:,}")
@@ -5375,7 +5396,10 @@ def render_container_allocation_calculator():
 
         st.dataframe(pd.DataFrame(compact_rows), use_container_width=True, hide_index=True)
         process_rows = []
-        for _, sku_row in sorted_result_df.iterrows():
+        detail_result_df = pd.DataFrame(result.get("detail_rows") or result["rows"])
+        if not detail_result_df.empty:
+            detail_result_df = detail_result_df.sort_values(["market_priority", "sku_priority", "processing_order"])
+        for _, sku_row in detail_result_df.iterrows():
             process_rows.append({
                 "Bước": int(sku_row["processing_order"]),
                 "Thị trường": sku_row["market"],

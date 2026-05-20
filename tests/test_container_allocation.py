@@ -2,6 +2,7 @@ from container_allocation import (
     allocate_bunches_by_hands,
     allocate_bunches_optimized,
     calculate_max_containers_by_market,
+    _valid_optimizer_ranges,
 )
 
 
@@ -111,6 +112,33 @@ def _optimizer_row(market_priority, sku_priority, sku, demand, unit="Thùng", ma
         "demand": demand,
         "unit": unit,
     }
+
+
+def test_parent_ranges_generate_all_contiguous_subranges():
+    ranges = _valid_optimizer_ranges(_optimizer_row(1, 1, "30CP", 100), 12)
+
+    assert (1, 1) in ranges
+    assert (1, 2) in ranges
+    assert (4, 9) in ranges
+    assert (6, 9) in ranges
+    assert (1, 9) in ranges
+    assert len(ranges) == 45
+
+
+def test_fixed_specs_are_parent_ranges_too():
+    for sku, market, expected_count in [
+        ("5H", "Nhật", 6),
+        ("6H", "Nhật", 6),
+        ("15CP", "Hàn", 6),
+    ]:
+        ranges = _valid_optimizer_ranges(_optimizer_row(1, 1, sku, 100, market=market), 12)
+        assert len(ranges) == expected_count
+
+
+def test_27cp_is_not_available_for_korea():
+    ranges = _valid_optimizer_ranges(_optimizer_row(1, 1, "27CP", 100, market="Hàn"), 12)
+
+    assert ranges == []
 
 
 def test_optimizer_selects_27cp_parent_range_when_needed():
