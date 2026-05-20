@@ -598,11 +598,16 @@ def _allocate_bunches_cpsat(
         row_record["short_var"] = short_var
         row_records.append(row_record)
 
+    hand_usage_exprs = {}
     for hand in range(1, hands_per_bunch + 1):
-        model.Add(
-            sum(segment["bunches_var"] for segment in all_segments if hand in segment["hands"])
-            <= total_bunches
+        hand_usage_exprs[hand] = sum(
+            segment["bunches_var"] for segment in all_segments if hand in segment["hands"]
         )
+        model.Add(hand_usage_exprs[hand] <= total_bunches)
+
+    active_bunches_var = model.NewIntVar(0, total_bunches, "active_bunches")
+    for hand_usage_expr in hand_usage_exprs.values():
+        model.Add(active_bunches_var >= hand_usage_expr)
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = max(1, _to_int(time_limit_seconds, CP_SAT_TIME_LIMIT_SECONDS))
@@ -634,9 +639,10 @@ def _allocate_bunches_cpsat(
         segment["used_var"] * (segment["range_rank"] + 1)
         for segment in all_segments
     )
+    segment_count_expr = sum(segment["used_var"] for segment in all_segments)
     extra_units_expr = capacity_units_expr - fulfilled_units_expr
 
-    for objective_expr in (hand_units_expr, extra_units_expr):
+    for objective_expr in (active_bunches_var, segment_count_expr, hand_units_expr, extra_units_expr):
         model.Minimize(objective_expr)
         status = solver.Solve(model)
         if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -710,7 +716,15 @@ def _allocate_bunches_cpsat(
         fulfilled_boxes = sum(segment["boxes_fulfilled"] for segment in segment_rows)
         short_boxes = max(0, requested_boxes - fulfilled_boxes)
         kg_allocated = sum(segment["kg_allocated"] for segment in segment_rows)
-        bunches_allocated = sum(segment["bunches_allocated"] for segment in segment_rows)
+        row_hand_usage = {
+            hand: sum(
+                segment["bunches_allocated"]
+                for segment in segment_rows
+                if segment["hand_from"] <= hand <= segment["hand_to"]
+            )
+            for hand in range(1, hands_per_bunch + 1)
+        }
+        bunches_allocated = max(row_hand_usage.values(), default=0)
         hand_units_consumed = sum(segment["hand_units_consumed"] for segment in segment_rows)
         boxes_capacity = sum(segment["boxes_capacity"] for segment in segment_rows)
         extra_kg_from_rounding = max(0.0, kg_allocated - fulfilled_boxes * kg_per_box)
@@ -729,7 +743,7 @@ def _allocate_bunches_cpsat(
             "range_label": range_labels or "Chưa phân bổ",
             "requested_boxes": requested_boxes,
             "kg_per_bunch_for_sku": kg_allocated / bunches_allocated if bunches_allocated else 0.0,
-            "bunches_needed": sum(segment["bunches_needed"] for segment in segment_rows),
+            "bunches_needed": bunches_allocated if fulfilled_boxes else 0,
             "bunches_allocated": bunches_allocated,
             "kg_allocated": kg_allocated,
             "boxes_capacity": boxes_capacity,
@@ -748,6 +762,8 @@ def _allocate_bunches_cpsat(
     source_boxes_capacity = int(math.floor(source_kg / kg_per_box))
     loss = {
         "shortage_vector": [row["short_boxes"] for row in rows],
+        "active_bunches_estimated": solver.Value(active_bunches_var),
+        "segment_count": solver.Value(segment_count_expr),
         "hand_units_consumed": sum(row["hand_units_consumed"] for row in rows),
         "extra_kg_from_rounding": sum(row["extra_kg_from_rounding"] for row in rows),
         "solver_status": final_status_name,
@@ -759,6 +775,8 @@ def _allocate_bunches_cpsat(
         "kg_per_hand": kg_per_bunch / hands_per_bunch,
         "source_boxes_capacity": source_boxes_capacity,
         "source_cont_capacity": source_boxes_capacity / boxes_per_container,
+        "active_bunches_estimated": solver.Value(active_bunches_var),
+        "segment_count": solver.Value(segment_count_expr),
         "fulfilled_boxes": fulfilled_boxes_total,
         "fulfilled_containers": fulfilled_boxes_total / boxes_per_container,
         "short_boxes": short_boxes_total,
@@ -916,11 +934,16 @@ def _calculate_max_containers_cpsat(
     if not all_segments:
         return None
 
+    hand_usage_exprs = {}
     for hand in range(1, hands_per_bunch + 1):
-        model.Add(
-            sum(segment["bunches_var"] for segment in all_segments if hand in segment["hands"])
-            <= total_bunches
+        hand_usage_exprs[hand] = sum(
+            segment["bunches_var"] for segment in all_segments if hand in segment["hands"]
         )
+        model.Add(hand_usage_exprs[hand] <= total_bunches)
+
+    active_bunches_var = model.NewIntVar(0, total_bunches, "max_cont_active_bunches")
+    for hand_usage_expr in hand_usage_exprs.values():
+        model.Add(active_bunches_var >= hand_usage_expr)
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = max(1, _to_int(time_limit_seconds, CP_SAT_TIME_LIMIT_SECONDS))
@@ -941,7 +964,8 @@ def _calculate_max_containers_cpsat(
         segment["used_var"] * (segment["range_rank"] + 1)
         for segment in all_segments
     )
-    for objective_expr in (hand_units_expr, excess_boxes_expr):
+    segment_count_expr = sum(segment["used_var"] for segment in all_segments)
+    for objective_expr in (active_bunches_var, segment_count_expr, hand_units_expr, excess_boxes_expr):
         model.Minimize(objective_expr)
         status = solver.Solve(model)
         if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -1008,6 +1032,8 @@ def _calculate_max_containers_cpsat(
         "kg_per_hand": kg_per_bunch / hands_per_bunch,
         "source_boxes_capacity": source_boxes_capacity,
         "source_cont_capacity": source_boxes_capacity / boxes_per_container,
+        "active_bunches_estimated": solver.Value(active_bunches_var),
+        "segment_count": solver.Value(segment_count_expr),
         "fulfilled_boxes": fulfilled_boxes,
         "fulfilled_containers": sum(row["full_containers"] for row in market_rows),
         "solver_status": final_status_name,
