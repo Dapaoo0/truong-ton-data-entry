@@ -4974,7 +4974,7 @@ def render_container_allocation_calculator():
         lead_col, f_col, y_col, w_col = st.columns([1.2, 1.6, 1.6, 1.6])
         with lead_col:
             selected_forecast_weeks = st.selectbox(
-                "Số tuần cắt bắp -> thu hoạch (tính cả tuần cắt bắp)",
+                "Cách dự báo",
                 options=CAT_FORECAST_WEEK_OPTIONS,
                 format_func=lambda value: f"Dự báo +{value} tuần",
                 key="container_forecast_weeks_inclusive",
