@@ -166,6 +166,20 @@ def test_optimizer_can_choose_contiguous_subrange_inside_parent_range():
     assert by_sku["30CP"]["boxes_fulfilled"] == 300
 
 
+def test_optimizer_prefers_single_full_range_over_split_or_partial_bunches():
+    result = allocate_bunches_optimized(65, 18, 12, [
+        _optimizer_row(1, 1, "27CP", 520),
+        _optimizer_row(1, 2, "6H", 240),
+    ])
+
+    by_sku = {row["sku"]: row for row in result["rows"]}
+    assert by_sku["27CP"]["range_label"] == "1-5"
+    assert by_sku["27CP"]["bunches_allocated"] == 65
+    assert by_sku["27CP"]["boxes_fulfilled"] == 37
+    assert by_sku["6H"]["range_label"] == "6-7"
+    assert by_sku["6H"]["boxes_fulfilled"] == 15
+
+
 def test_optimizer_uses_tail_for_15cp_without_extra_bunches():
     result = allocate_bunches_optimized(922, 20, 12, [
         _optimizer_row(1, 1, "27CP", 591),
