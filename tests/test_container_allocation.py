@@ -113,27 +113,27 @@ def _optimizer_row(market_priority, sku_priority, sku, demand, unit="Thùng", ma
     }
 
 
-def test_optimizer_selects_27cp_1_to_5_when_that_is_enough():
+def test_optimizer_selects_27cp_8_to_12_when_that_is_enough():
     result = allocate_bunches_optimized(922, 20, 12, [
         _optimizer_row(1, 1, "27CP", 591),
     ])
 
     row = result["rows"][0]
     assert row["sku"] == "27CP"
-    assert row["hand_from"] == 1
-    assert row["hand_to"] == 5
+    assert row["hand_from"] == 8
+    assert row["hand_to"] == 12
     assert row["boxes_fulfilled"] == 591
 
 
-def test_optimizer_preserves_6_to_9_for_30cp_after_27cp():
+def test_optimizer_preserves_4_to_7_for_30cp_after_27cp():
     result = allocate_bunches_optimized(922, 20, 12, [
         _optimizer_row(1, 1, "27CP", 591),
         _optimizer_row(1, 2, "30CP", 300),
     ])
 
     by_sku = {row["sku"]: row for row in result["rows"]}
-    assert by_sku["27CP"]["range_label"] == "1-5"
-    assert by_sku["30CP"]["range_label"] == "6-9"
+    assert by_sku["27CP"]["range_label"] == "8-12"
+    assert by_sku["30CP"]["range_label"] == "4-7"
     assert by_sku["27CP"]["boxes_fulfilled"] == 591
     assert by_sku["30CP"]["boxes_fulfilled"] == 300
 
@@ -146,18 +146,18 @@ def test_optimizer_uses_tail_for_15cp_without_extra_bunches():
     ])
 
     by_sku = {row["sku"]: row for row in result["rows"]}
-    assert by_sku["15CP"]["range_label"] == "10-12"
+    assert by_sku["15CP"]["range_label"] == "1-3"
     assert by_sku["15CP"]["boxes_fulfilled"] == 354
     assert by_sku["15CP"]["bunches_allocated"] <= 922
 
 
-def test_optimizer_expands_30cp_to_1_to_9_when_6_to_9_is_not_enough():
+def test_optimizer_expands_30cp_to_4_to_12_when_4_to_7_is_not_enough():
     result = allocate_bunches_optimized(1000, 20, 12, [
         _optimizer_row(1, 1, "30CP", 1000),
     ])
 
     row = result["rows"][0]
-    assert row["range_label"] == "1-9"
+    assert row["range_label"] == "4-12"
     assert row["boxes_fulfilled"] == 1000
 
 
@@ -169,9 +169,9 @@ def test_optimizer_supports_korea_skus_from_spec():
     ])
 
     by_sku = {row["sku"]: row for row in result["rows"]}
-    assert by_sku["8H"]["range_label"] == "1-4"
-    assert by_sku["5/6H"]["range_label"] == "5-10"
-    assert by_sku["15CP"]["range_label"] == "11-12"
+    assert by_sku["8H"]["range_label"] == "9-12"
+    assert by_sku["5/6H"]["range_label"] == "3-8"
+    assert by_sku["15CP"]["range_label"] == "1-2"
 
 
 def test_optimizer_does_not_allocate_sku_to_wrong_market():

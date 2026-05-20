@@ -34,57 +34,57 @@ OPTIMIZER_SKU_RULES = {
     "27CP": {
         "markets": ["Nhật"],
         "group": "Phần Ngọn",
-        "description": "Quả to, mập nhất. Yêu cầu khắt khe nhất, ưu tiên cắt phần ngọn đẹp nhất.",
-        "ranges": [(1, 4), (1, 5), (1, 9)],
+        "description": "Quả to, mập nhất. Yêu cầu khắt khe nhất, ưu tiên cắt phần gần cuống đẹp nhất.",
+        "ranges": [(9, 12), (8, 12), (4, 12)],
     },
     "8H": {
         "markets": ["Hàn"],
         "group": "Phần Ngọn",
-        "description": "Lấy phần ngọn tương tự 27CP nhưng dùng để ráp container Hàn.",
-        "ranges": [(1, 4)],
+        "description": "Lấy phần gần cuống tương tự 27CP nhưng dùng để ráp container Hàn.",
+        "ranges": [(9, 12)],
     },
     "6H": {
         "markets": ["Nhật"],
         "group": "Khúc Giữa",
         "description": "Quả thon đều, cố định ở khúc giữa trên.",
-        "ranges": [(5, 7)],
+        "ranges": [(6, 8)],
     },
     "30CP": {
         "markets": ["Nhật"],
         "group": "Khúc Giữa",
         "description": "Quả cỡ trung bình lớn, thường ráp nối tiếp sau khi 27CP đã lấy phần ngọn.",
-        "ranges": [(6, 9), (1, 9)],
+        "ranges": [(4, 7), (4, 12)],
     },
     "5H": {
         "markets": ["Nhật"],
         "group": "Khúc Giữa",
         "description": "Cố định ở khúc giữa dưới, gần đuôi.",
-        "ranges": [(8, 10)],
+        "ranges": [(3, 5)],
     },
     "5/6H": {
         "markets": ["Hàn"],
         "group": "Khúc Giữa",
         "description": "Cắt dải dài xuyên suốt khúc giữa buồng, tốc độ gom hàng nhanh.",
-        "ranges": [(5, 10)],
+        "ranges": [(3, 8)],
     },
     "15CP": {
         "markets": ["Hàn"],
         "group": "Phần Đuôi",
         "description": "Mã tận dụng chiến lược, gom vét các nải nhỏ cuối buồng.",
-        "ranges": [(10, 12), (11, 12)],
+        "ranges": [(1, 3), (1, 2)],
     },
 }
 
 MARKET_MAX_CONTAINER_RECIPES = {
     "Nhật": [
-        {"sku": "27CP", "hand_from": 1, "hand_to": 4},
-        {"sku": "6H", "hand_from": 5, "hand_to": 7},
-        {"sku": "5H", "hand_from": 8, "hand_to": 10},
+        {"sku": "27CP", "hand_from": 9, "hand_to": 12},
+        {"sku": "6H", "hand_from": 6, "hand_to": 8},
+        {"sku": "5H", "hand_from": 3, "hand_to": 5},
     ],
     "Hàn": [
-        {"sku": "8H", "hand_from": 1, "hand_to": 4},
-        {"sku": "5/6H", "hand_from": 5, "hand_to": 10},
-        {"sku": "15CP", "hand_from": 11, "hand_to": 12},
+        {"sku": "8H", "hand_from": 9, "hand_to": 12},
+        {"sku": "5/6H", "hand_from": 3, "hand_to": 8},
+        {"sku": "15CP", "hand_from": 1, "hand_to": 2},
     ],
 }
 
