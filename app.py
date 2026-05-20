@@ -4839,6 +4839,13 @@ def build_weekly_cat_forecast(df_stg: pd.DataFrame, forecast_weeks_inclusive: in
 
 CONTAINER_SKU_DEFINITIONS = OPTIMIZER_SKU_RULES
 CONTAINER_MARKET_OPTIONS = ["Nhật", "Hàn"]
+CONTAINER_EMPTY_OPTION = "Không chọn"
+CONTAINER_CUSTOMER_MARKETS = {
+    "Wismettac (Nhật 1)": "Nhật",
+    "Advance (Nhật 2)": "Nhật",
+    "Uone": "Hàn",
+}
+CONTAINER_CUSTOMER_OPTIONS = list(CONTAINER_CUSTOMER_MARKETS.keys())
 
 
 def _container_sku_options_for_market(market: str) -> list:
@@ -4849,12 +4856,18 @@ def _container_sku_options_for_market(market: str) -> list:
     return options or list(CONTAINER_SKU_DEFINITIONS.keys())
 
 
+def _container_customer_market(customer: str) -> str:
+    return CONTAINER_CUSTOMER_MARKETS.get(_container_clean_text(customer), "")
+
+
 def _default_container_sku_editor_rows() -> list:
     return [{
-        "Thị trường": r["market"],
-        "Mã hàng": r["sku"],
-        "Nhu cầu": r["demand"],
-    } for r in DEFAULT_SKU_ROWS]
+        "_row_id": "blank_0",
+        "Khách hàng": "",
+        "Thị trường": "",
+        "Mã hàng": "",
+        "Nhu cầu": 0,
+    }]
 
 
 def _unique_keep_order(values: list) -> list:
@@ -4895,35 +4908,65 @@ def _container_priority_map(values: list, fallback_values: list) -> dict:
     return {value: index + 1 for index, value in enumerate(ordered)}
 
 
-def _prepare_container_rows_for_allocation(order_rows: list, market_order: list, sku_orders_by_market: dict) -> list:
-    all_markets = [row.get("Thị trường") for row in order_rows]
-    market_priority = _container_priority_map(market_order, all_markets)
+def _prepare_container_rows_for_allocation(order_rows: list, customer_order: list, sku_orders_by_customer: dict) -> list:
+    all_customers = [row.get("Khách hàng") for row in order_rows]
+    customer_priority = _container_priority_map(customer_order, all_customers)
     allocation_rows = []
 
     for row_index, row in enumerate(order_rows):
+        customer = _container_clean_text(row.get("Khách hàng"))
         market = _container_clean_text(row.get("Thị trường"))
         sku = _container_clean_text(row.get("Mã hàng")).upper()
+        demand = _container_clean_int(row.get("Nhu cầu"))
         sku_def = CONTAINER_SKU_DEFINITIONS.get(sku)
-        if not market or not sku_def:
+        if not customer or not market or not sku_def or demand <= 0:
             continue
 
-        market_skus = [
+        customer_skus = [
             item.get("Mã hàng")
             for item in order_rows
-            if _container_clean_text(item.get("Thị trường")) == market
+            if _container_clean_text(item.get("Khách hàng")) == customer
         ]
-        sku_priority = _container_priority_map(sku_orders_by_market.get(market, []), market_skus)
+        sku_priority = _container_priority_map(sku_orders_by_customer.get(customer, []), customer_skus)
+        priority = customer_priority.get(customer, 999)
         allocation_rows.append({
-            "market_priority": market_priority.get(market, 999),
+            "customer_priority": priority,
+            "customer": customer,
+            "market_priority": priority,
             "market": market,
             "sku_priority": sku_priority.get(sku, 999),
             "sku": sku,
-            "demand": row.get("Nhu cầu", 0),
+            "demand": demand,
             "unit": "Thùng",
             "_row_index": row_index,
         })
 
     return allocation_rows
+
+
+def _render_container_customer_priority_controls(key_prefix: str) -> list:
+    priority_customer_options = [CONTAINER_EMPTY_OPTION] + CONTAINER_CUSTOMER_OPTIONS
+    customer_order = []
+    p_cols = st.columns(3)
+    for idx, col in enumerate(p_cols, start=1):
+        with col:
+            customer_key = f"{key_prefix}_{idx}"
+            if st.session_state.get(customer_key) not in priority_customer_options:
+                st.session_state[customer_key] = None
+            selected_customer = st.selectbox(
+                f"Khách hàng ưu tiên {idx}",
+                options=priority_customer_options,
+                index=None,
+                placeholder="Không chọn",
+                key=customer_key,
+            )
+            if (
+                selected_customer
+                and selected_customer != CONTAINER_EMPTY_OPTION
+                and selected_customer not in customer_order
+            ):
+                customer_order.append(selected_customer)
+    return customer_order
 
 
 def _render_container_market_priority_controls(key_prefix: str, default_all_markets: bool = True) -> list:
@@ -4957,6 +5000,9 @@ def _render_container_market_priority_controls(key_prefix: str, default_all_mark
 def render_container_allocation_calculator():
     st.markdown("#### Máy tính phân bổ container theo nải")
 
+    if st.session_state.get("container_calc_customer_schema_version") != 1:
+        st.session_state["container_calc_sku_rows"] = _default_container_sku_editor_rows()
+        st.session_state["container_calc_customer_schema_version"] = 1
     if "container_calc_sku_rows" not in st.session_state:
         st.session_state["container_calc_sku_rows"] = _default_container_sku_editor_rows()
 
@@ -5208,15 +5254,17 @@ def render_container_allocation_calculator():
     current_rows = st.session_state["container_calc_sku_rows"] or _default_container_sku_editor_rows()
     normalized_current_rows = []
     for idx, row in enumerate(current_rows):
-        market = _container_clean_text(row.get("Thị trường"), CONTAINER_MARKET_OPTIONS[0])
-        if market not in CONTAINER_MARKET_OPTIONS:
-            market = CONTAINER_MARKET_OPTIONS[0]
-        market_skus = _container_sku_options_for_market(market)
-        sku = _container_clean_text(row.get("Mã hàng"), market_skus[0]).upper()
-        if sku not in market_skus:
-            sku = market_skus[0]
+        customer = _container_clean_text(row.get("Khách hàng"))
+        if customer not in CONTAINER_CUSTOMER_OPTIONS:
+            customer = ""
+        market = _container_customer_market(customer)
+        market_skus = _container_sku_options_for_market(market) if market else []
+        sku = _container_clean_text(row.get("Mã hàng")).upper()
+        if not market_skus or sku not in market_skus:
+            sku = ""
         normalized_current_rows.append({
             "_row_id": row.get("_row_id") or f"default_{idx}",
+            "Khách hàng": customer,
             "Thị trường": market,
             "Mã hàng": sku,
             "Nhu cầu": _container_clean_int(row.get("Nhu cầu")),
@@ -5226,37 +5274,45 @@ def render_container_allocation_calculator():
     order_rows = []
     delete_row_index = None
     header_cols = st.columns([2, 1.4, 1.4, 0.7])
-    header_cols[0].caption("Thị trường")
+    header_cols[0].caption("Khách hàng")
     header_cols[1].caption("Mã hàng")
     header_cols[2].caption("Nhu cầu (thùng)")
     for idx, row in enumerate(current_rows):
         row_id = row["_row_id"]
         row_cols = st.columns([2, 1.4, 1.4, 0.7])
         with row_cols[0]:
-            market_index = CONTAINER_MARKET_OPTIONS.index(row["Thị trường"]) if row["Thị trường"] in CONTAINER_MARKET_OPTIONS else 0
-            market_key = f"container_order_market_{row_id}"
-            if st.session_state.get(market_key) not in CONTAINER_MARKET_OPTIONS:
-                st.session_state[market_key] = row["Thị trường"] if row["Thị trường"] in CONTAINER_MARKET_OPTIONS else CONTAINER_MARKET_OPTIONS[0]
-            market = st.selectbox(
-                "Thị trường",
-                options=CONTAINER_MARKET_OPTIONS,
-                index=market_index,
-                key=market_key,
+            customer_options = [CONTAINER_EMPTY_OPTION] + CONTAINER_CUSTOMER_OPTIONS
+            customer_key = f"container_order_customer_{row_id}"
+            if st.session_state.get(customer_key) not in customer_options:
+                st.session_state[customer_key] = row["Khách hàng"] if row["Khách hàng"] in CONTAINER_CUSTOMER_OPTIONS else None
+            customer = st.selectbox(
+                "Khách hàng",
+                options=customer_options,
+                index=None,
+                placeholder="Chọn khách hàng",
+                key=customer_key,
                 label_visibility="collapsed",
             )
+            if customer == CONTAINER_EMPTY_OPTION:
+                customer = ""
+            market = _container_customer_market(customer)
         with row_cols[1]:
-            sku_options = _container_sku_options_for_market(market)
+            sku_options = _container_sku_options_for_market(market) if market else []
+            sku_select_options = [CONTAINER_EMPTY_OPTION] + sku_options
             sku_key = f"container_order_sku_{row_id}"
-            if st.session_state.get(sku_key) not in sku_options:
-                st.session_state[sku_key] = row["Mã hàng"] if row["Mã hàng"] in sku_options else sku_options[0]
-            sku_index = sku_options.index(st.session_state[sku_key])
+            if st.session_state.get(sku_key) not in sku_select_options:
+                st.session_state[sku_key] = row["Mã hàng"] if row["Mã hàng"] in sku_options else None
             sku = st.selectbox(
                 "Mã hàng",
-                options=sku_options,
-                index=sku_index,
+                options=sku_select_options,
+                index=None,
+                placeholder="Chọn mã hàng" if market else "Chọn khách hàng trước",
                 key=sku_key,
                 label_visibility="collapsed",
+                disabled=not bool(market),
             )
+            if sku == CONTAINER_EMPTY_OPTION:
+                sku = ""
         with row_cols[2]:
             demand = st.number_input(
                 "Nhu cầu (thùng)",
@@ -5272,8 +5328,9 @@ def render_container_allocation_calculator():
 
         order_rows.append({
             "_row_id": row_id,
+            "Khách hàng": customer or "",
             "Thị trường": market,
-            "Mã hàng": sku,
+            "Mã hàng": sku or "",
             "Nhu cầu": demand,
         })
 
@@ -5282,8 +5339,9 @@ def render_container_allocation_calculator():
         if st.button("Thêm dòng", key="container_order_add"):
             st.session_state["container_calc_sku_rows"] = order_rows + [{
                 "_row_id": f"new_{datetime.now().timestamp()}",
-                "Thị trường": CONTAINER_MARKET_OPTIONS[0],
-                "Mã hàng": _container_sku_options_for_market(CONTAINER_MARKET_OPTIONS[0])[0],
+                "Khách hàng": "",
+                "Thị trường": "",
+                "Mã hàng": "",
                 "Nhu cầu": 0,
             }]
             st.rerun()
@@ -5299,8 +5357,9 @@ def render_container_allocation_calculator():
     order_totals_by_market = {}
     for row in order_rows:
         market = _container_clean_text(row.get("Thị trường"))
+        sku = _container_clean_text(row.get("Mã hàng"))
         demand = _container_clean_int(row.get("Nhu cầu"))
-        if market and demand > 0:
+        if market and sku and demand > 0:
             order_totals_by_market[market] = order_totals_by_market.get(market, 0) + demand
     for market, requested_boxes in order_totals_by_market.items():
         if 0 < requested_boxes < BOXES_PER_CONTAINER:
@@ -5309,38 +5368,46 @@ def render_container_allocation_calculator():
                 f"({BOXES_PER_CONTAINER:,} thùng). Có thể đáp ứng đủ số thùng này nhưng chưa chốt được cont nguyên."
             )
 
-    active_markets = _unique_keep_order([row.get("Thị trường") for row in order_rows])
-    market_order = _render_container_market_priority_controls("container_market_priority")
+    customer_order = _render_container_customer_priority_controls("container_customer_priority")
 
-    sku_orders_by_market = {}
-    for market in active_markets:
+    active_customers = _unique_keep_order([
+        row.get("Khách hàng")
+        for row in order_rows
+        if _container_clean_text(row.get("Mã hàng"))
+    ])
+    sku_orders_by_customer = {}
+    for customer in active_customers:
         market_skus = _unique_keep_order([
             row.get("Mã hàng")
             for row in order_rows
-            if _container_clean_text(row.get("Thị trường")) == market
+            if _container_clean_text(row.get("Khách hàng")) == customer
         ])
         if not market_skus:
             continue
-        sku_options = ["Không chọn"] + market_skus
-        st.markdown(f"###### Ưu tiên loại hàng - {market}")
+        sku_options = [CONTAINER_EMPTY_OPTION] + market_skus
+        st.markdown(f"###### Ưu tiên loại hàng - {customer}")
         sku_cols = st.columns(min(3, max(1, len(market_skus))))
         selected_skus = []
         for idx, col in enumerate(sku_cols, start=1):
             with col:
-                sku_key = f"container_sku_priority_{market}_{idx}"
+                sku_key = f"container_sku_priority_{customer}_{idx}"
                 if st.session_state.get(sku_key) not in sku_options:
-                    st.session_state[sku_key] = "Không chọn"
+                    st.session_state[sku_key] = None
                 selected_sku = st.selectbox(
                     f"Loại hàng ưu tiên {idx}",
                     options=sku_options,
-                    index=idx if idx < len(sku_options) else 0,
+                    index=None,
+                    placeholder="Không chọn",
                     key=sku_key,
                 )
-                if selected_sku != "Không chọn":
+                if selected_sku and selected_sku != CONTAINER_EMPTY_OPTION:
                     selected_skus.append(selected_sku)
-        sku_orders_by_market[market] = selected_skus
+        sku_orders_by_customer[customer] = selected_skus
 
-    allocation_rows = _prepare_container_rows_for_allocation(order_rows, market_order, sku_orders_by_market)
+    allocation_rows = _prepare_container_rows_for_allocation(order_rows, customer_order, sku_orders_by_customer)
+    if not allocation_rows:
+        st.info("Chọn khách hàng, mã hàng và nhập nhu cầu để bắt đầu tính phân bổ.")
+        return
 
     result = allocate_bunches_optimized(
         source_bunches,
@@ -5406,11 +5473,18 @@ def render_container_allocation_calculator():
 
         market_lookup = market_summary.set_index("market").to_dict("index")
         compact_rows = []
-        sorted_result_df = result_df.sort_values(["market_priority", "sku_priority", "processing_order"])
-        for market_name, market_rows_df in sorted_result_df.groupby("market", sort=False):
+        order_sort_cols = [
+            "customer_priority" if "customer_priority" in result_df.columns else "market_priority",
+            "sku_priority",
+            "processing_order",
+        ]
+        sorted_result_df = result_df.sort_values(order_sort_cols)
+        for _, market_row in market_summary.iterrows():
+            market_name = market_row["market"]
             market_info = market_lookup.get(market_name, {})
             compact_rows.append({
                 "Thị trường": market_name,
+                "Khách hàng": "",
                 "Mã hàng": "Tổng",
                 "Thùng yêu cầu": int(market_info.get("requested_boxes", 0)),
                 "Thùng đáp ứng": int(market_info.get("boxes_fulfilled", 0)),
@@ -5419,27 +5493,34 @@ def render_container_allocation_calculator():
                 "Thùng lẻ": int(market_info.get("remaining_boxes", 0)),
                 "Buồng xẻ tối thiểu": "",
             })
-            for _, sku_row in market_rows_df.iterrows():
-                compact_rows.append({
-                    "Thị trường": market_name,
-                    "Mã hàng": sku_row["sku"],
-                    "Thùng yêu cầu": int(sku_row["requested_boxes"]),
-                    "Thùng đáp ứng": int(sku_row["boxes_fulfilled"]),
-                    "Thiếu thùng": int(sku_row["short_boxes"]),
-                    "Cont đủ": "",
-                    "Thùng lẻ": "",
-                    "Buồng xẻ tối thiểu": int(sku_row["bunches_allocated"]),
-                })
+        for _, sku_row in sorted_result_df.iterrows():
+            compact_rows.append({
+                "Thị trường": sku_row["market"],
+                "Khách hàng": sku_row.get("customer", ""),
+                "Mã hàng": sku_row["sku"],
+                "Thùng yêu cầu": int(sku_row["requested_boxes"]),
+                "Thùng đáp ứng": int(sku_row["boxes_fulfilled"]),
+                "Thiếu thùng": int(sku_row["short_boxes"]),
+                "Cont đủ": "",
+                "Thùng lẻ": "",
+                "Buồng xẻ tối thiểu": int(sku_row["bunches_allocated"]),
+            })
 
         st.dataframe(pd.DataFrame(compact_rows), use_container_width=True, hide_index=True)
         process_rows = []
         detail_result_df = pd.DataFrame(result.get("detail_rows") or result["rows"])
         if not detail_result_df.empty:
-            detail_result_df = detail_result_df.sort_values(["market_priority", "sku_priority", "processing_order"])
+            detail_sort_cols = [
+                "customer_priority" if "customer_priority" in detail_result_df.columns else "market_priority",
+                "sku_priority",
+                "processing_order",
+            ]
+            detail_result_df = detail_result_df.sort_values(detail_sort_cols)
         for _, sku_row in detail_result_df.iterrows():
             process_rows.append({
                 "Bước": int(sku_row["processing_order"]),
                 "Thị trường": sku_row["market"],
+                "Khách hàng": sku_row.get("customer", ""),
                 "Mã hàng": sku_row["sku"],
                 "Nải chọn": sku_row["range_label"],
                 "Cách tính": (
@@ -5479,6 +5560,8 @@ def render_container_allocation_calculator():
             "kg_per_bunch": kg_per_bunch,
             "hands_per_bunch": hands_per_bunch,
             "sku_rows": order_rows,
+            "customer_order": customer_order,
+            "sku_orders_by_customer": sku_orders_by_customer,
             "result": result,
             "saved_at": datetime.now().isoformat(),
         }

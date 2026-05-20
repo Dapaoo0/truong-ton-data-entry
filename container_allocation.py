@@ -126,8 +126,20 @@ def normalize_sku_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for row in rows:
         normalized.append(
             {
+                "customer_priority": _to_int(
+                    row.get(
+                        "customer_priority",
+                        row.get("Ưu tiên khách hàng", row.get("market_priority", row.get("Ưu tiên thị trường"))),
+                    ),
+                    999,
+                ),
+                "customer": str(row.get("customer", row.get("Khách hàng", "")) or "").strip(),
                 "market_priority": _to_int(
-                    row.get("market_priority", row.get("Ưu tiên thị trường")), 999
+                    row.get(
+                        "market_priority",
+                        row.get("Ưu tiên thị trường", row.get("customer_priority", row.get("Ưu tiên khách hàng"))),
+                    ),
+                    999,
                 ),
                 "market": str(row.get("market", row.get("Thị trường", "")) or "").strip(),
                 "sku_priority": _to_int(
@@ -224,6 +236,8 @@ def _allocate_candidate_range(
     result_row = {
         "processing_order": processing_order,
         "original_index": original_index,
+        "customer_priority": row.get("customer_priority", row["market_priority"]),
+        "customer": row.get("customer", ""),
         "market_priority": row["market_priority"],
         "market": row["market"],
         "sku_priority": row["sku_priority"],
@@ -331,7 +345,7 @@ def _allocate_bunches_beam(
     sorted_rows = sorted(
         enumerate(normalized_rows),
         key=lambda item: (
-            item[1]["market_priority"],
+            item[1]["customer_priority"],
             item[1]["sku_priority"],
             item[0],
         ),
@@ -479,7 +493,7 @@ def _build_candidate_rows(
     sorted_rows = sorted(
         enumerate(normalized_rows),
         key=lambda item: (
-            item[1]["market_priority"],
+            item[1]["customer_priority"],
             item[1]["sku_priority"],
             item[0],
         ),
@@ -712,6 +726,8 @@ def _allocate_bunches_cpsat(
             segment_row = {
                 "processing_order": row_record["processing_order"],
                 "original_index": row_record["original_index"],
+                "customer_priority": row.get("customer_priority", row["market_priority"]),
+                "customer": row.get("customer", ""),
                 "market_priority": row["market_priority"],
                 "market": row["market"],
                 "sku_priority": row["sku_priority"],
@@ -758,6 +774,8 @@ def _allocate_bunches_cpsat(
         rows.append({
             "processing_order": row_record["processing_order"],
             "original_index": row_record["original_index"],
+            "customer_priority": row.get("customer_priority", row["market_priority"]),
+            "customer": row.get("customer", ""),
             "market_priority": row["market_priority"],
             "market": row["market"],
             "sku_priority": row["sku_priority"],
@@ -1267,7 +1285,7 @@ def allocate_bunches_by_hands(
     sorted_rows = sorted(
         enumerate(normalized_rows),
         key=lambda item: (
-            item[1]["market_priority"],
+            item[1]["customer_priority"],
             item[1]["sku_priority"],
             item[0],
         ),
@@ -1314,6 +1332,8 @@ def allocate_bunches_by_hands(
             {
                 "processing_order": len(results) + 1,
                 "original_index": original_index,
+                "customer_priority": row.get("customer_priority", row["market_priority"]),
+                "customer": row.get("customer", ""),
                 "market_priority": row["market_priority"],
                 "market": row["market"],
                 "sku_priority": row["sku_priority"],

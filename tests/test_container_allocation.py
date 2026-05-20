@@ -116,6 +116,19 @@ def _optimizer_row(market_priority, sku_priority, sku, demand, unit="Thùng", ma
     }
 
 
+def _optimizer_customer_row(customer_priority, customer, sku_priority, sku, demand, market, unit="Thùng"):
+    return {
+        "customer_priority": customer_priority,
+        "customer": customer,
+        "market_priority": customer_priority,
+        "market": market,
+        "sku_priority": sku_priority,
+        "sku": sku,
+        "demand": demand,
+        "unit": unit,
+    }
+
+
 def test_parent_ranges_generate_all_contiguous_subranges():
     ranges = _valid_optimizer_ranges(_optimizer_row(1, 1, "30CP", 100), 12)
 
@@ -232,6 +245,17 @@ def test_optimizer_prioritizes_higher_market_before_opened_bunch_minimization():
     assert by_sku["27CP"]["boxes_fulfilled"] == 57
     assert by_sku["8H"]["boxes_fulfilled"] == 0
     assert result["summary"]["active_bunches_estimated"] == 100
+
+
+def test_optimizer_prioritizes_customer_before_market_grouping():
+    result = allocate_bunches_optimized(100, 18, 12, [
+        _optimizer_customer_row(2, "Wismettac (Nhật 1)", 1, "27CP", 100, "Nhật"),
+        _optimizer_customer_row(1, "Uone", 1, "8H", 100, "Hàn"),
+    ])
+
+    assert result["rows"][0]["customer"] == "Uone"
+    assert result["rows"][0]["market"] == "Hàn"
+    assert result["rows"][0]["boxes_fulfilled"] >= result["rows"][1]["boxes_fulfilled"]
 
 
 def test_optimizer_uses_tail_for_15cp_without_extra_bunches():
