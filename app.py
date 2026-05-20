@@ -5070,7 +5070,7 @@ def render_container_allocation_calculator():
         if solver_status == "APPROXIMATE":
             st.warning("Kết quả xấp xỉ do thiếu solver tối ưu hoặc đang dùng fallback.")
         else:
-            st.caption(f"Trạng thái tối ưu: {solver_status} · {solver_backend}")
+            st.caption(f"Thuật toán tối ưu: {solver_status} · {solver_backend}")
         m1, m2, m3, m4, m5, m6 = st.columns(6)
         with m1:
             st.metric("Nguồn buồng", f"{summary['total_bunches']:,}")
@@ -5358,7 +5358,7 @@ def render_container_allocation_calculator():
     if solver_status == "APPROXIMATE":
         st.warning("Kết quả xấp xỉ do thiếu solver tối ưu hoặc đang dùng fallback.")
     else:
-        st.caption(f"Trạng thái tối ưu: {solver_status} · {solver_backend}")
+        st.caption(f"Thuật toán tối ưu: {solver_status} · {solver_backend}")
     m1, m2, m3, m4, m5, m6 = st.columns(6)
     with m1:
         st.metric("Nguồn buồng", f"{summary['total_bunches']:,}")
@@ -5397,7 +5397,12 @@ def render_container_allocation_calculator():
             else:
                 conclusion_parts.append(f"{market_name}: {full_containers} cont")
         if conclusion_parts:
-            st.success("Kết luận theo thị trường: " + " · ".join(conclusion_parts))
+            active_bunches = int(summary.get("active_bunches_estimated", 0))
+            st.success(
+                "Kết luận theo thị trường: "
+                + " · ".join(conclusion_parts)
+                + f" · Buồng xẻ tối thiểu: {active_bunches:,} buồng"
+            )
 
         market_lookup = market_summary.set_index("market").to_dict("index")
         compact_rows = []

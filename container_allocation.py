@@ -288,9 +288,10 @@ def _allocate_bunches_beam(
 
     The search keeps a beam of low-loss plans. The loss is lexicographic:
     shortage for higher-priority rows dominates shortage for lower-priority
-    rows, then the optimizer minimizes the number of whole bunches opened,
-    the number of cut segments, hand units consumed, less-preferred ranges,
-    and rounding waste.
+    rows, then the optimizer minimizes the number of whole bunches opened.
+    Splitting one order row across multiple contiguous subranges is allowed,
+    but segment count is penalized immediately after opened bunches so a split
+    only survives when it improves fulfillment or lowers whole-bunch usage.
     """
     total_bunches = max(0, _to_int(total_bunches))
     kg_per_bunch = max(0.0, _to_float(kg_per_bunch))
@@ -614,7 +615,6 @@ def _allocate_bunches_cpsat(
             row_record["segments"].append(segment)
             all_segments.append(segment)
 
-        model.Add(sum(segment["used_var"] for segment in row_record["segments"]) <= 1)
         fulfilled_var = model.NewIntVar(0, requested_boxes, f"r{processing_order}_fulfilled")
         short_var = model.NewIntVar(0, requested_boxes, f"r{processing_order}_short")
         model.Add(fulfilled_var == sum(segment["boxes_var"] for segment in row_record["segments"]))
@@ -945,9 +945,6 @@ def _calculate_max_containers_cpsat(
                 market_segments.append(segment)
                 sku_segments.append(segment)
                 all_segments.append(segment)
-            if sku_segments:
-                model.Add(sum(segment["used_var"] for segment in sku_segments) <= 1)
-
         boxes_var = model.NewIntVar(0, source_boxes_capacity, f"market_{market_priority}_boxes")
         full_containers_var = model.NewIntVar(0, max_possible_containers, f"market_{market_priority}_containers")
         excess_boxes_var = model.NewIntVar(0, boxes_per_container - 1, f"market_{market_priority}_excess_boxes")

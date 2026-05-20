@@ -150,13 +150,14 @@ Mục tiêu nghiệp vụ của máy tính này là **tính số buồng nguyên
 | 5/6H | Hàn | 5-9 |
 | 15CP | Hàn | 10-12 |
 
-Các khoảng trên là **khoảng mẹ**. Thuật toán được phép chọn mọi khoảng con liền kề trong khoảng mẹ, nhưng **mỗi dòng đơn hàng/mỗi mã chỉ được chọn một khoảng liền kề duy nhất**. Không được tách một dòng 27CP thành `1-1` và `2-5`, vì cách đó để hở nải trong cùng lô buồng và không phù hợp vận hành xưởng.
+Các khoảng trên là **khoảng mẹ**. Thuật toán được phép chọn mọi khoảng con liền kề trong khoảng mẹ. Một dòng đơn hàng cũng có thể được tách thành nhiều khoảng con nếu việc tách đó giúp giảm thiếu hàng hoặc giảm số buồng nguyên phải xẻ. Tuy nhiên số đoạn cắt là penalty vận hành đứng ngay sau `active_bunches_estimated`, nên thuật toán sẽ ưu tiên một dải liền kề duy nhất khi số buồng xẻ không đổi.
 
 **Thứ tự tối ưu trong mode Theo đơn hàng**
 1. Giảm thiếu thùng theo thứ tự ưu tiên thị trường, ưu tiên mã hàng, thứ tự dòng.
 2. Với mức đáp ứng đã chốt, giảm số buồng nguyên cần xẻ (`active_bunches_estimated`).
-3. Giảm số đoạn cắt, tổng nải-buồng tiêu thụ, kg dư do làm tròn.
-4. Tie-break ổn định theo thứ tự khoảng con.
+3. Giảm số đoạn cắt để tránh bẻ dòng đơn hàng không cần thiết.
+4. Giảm tổng nải-buồng tiêu thụ, kg dư do làm tròn.
+5. Tie-break ổn định theo thứ tự khoảng con.
 
 Nếu nguồn buồng không đủ, thuật toán vẫn ưu tiên đáp ứng dòng ưu tiên cao nhất trước, sau đó báo thiếu thùng cho các dòng còn lại. Nếu nguồn dư, thuật toán không dùng hết nguồn mà báo số buồng xẻ tối thiểu.
 

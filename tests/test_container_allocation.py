@@ -1,3 +1,5 @@
+import container_allocation as ca
+
 from container_allocation import (
     allocate_bunches_by_hands,
     allocate_bunches_optimized,
@@ -180,6 +182,28 @@ def test_optimizer_prefers_single_full_range_over_split_or_partial_bunches():
     assert by_sku["6H"]["range_label"] == "6-7"
     assert by_sku["6H"]["boxes_fulfilled"] == 15
     assert result["summary"]["active_bunches_estimated"] == 65
+
+
+def test_optimizer_allows_split_when_it_reduces_opened_bunches():
+    if ca.cp_model is None:
+        return
+
+    result = allocate_bunches_optimized(100, 18, 12, [
+        _optimizer_row(1, 1, "6H", 34),
+        _optimizer_row(1, 2, "30CP", 69),
+    ])
+
+    by_sku = {row["sku"]: row for row in result["rows"]}
+    selected_30cp_ranges = {
+        range_label.strip()
+        for range_label in by_sku["30CP"]["range_label"].split(",")
+    }
+
+    assert by_sku["6H"]["range_label"] == "5-7"
+    assert selected_30cp_ranges == {"1-4", "8-9"}
+    assert by_sku["30CP"]["boxes_fulfilled"] == 69
+    assert result["summary"]["active_bunches_estimated"] == 100
+    assert result["summary"]["segment_count"] == 3
 
 
 def test_optimizer_reports_minimum_opened_bunches_when_source_is_surplus():
