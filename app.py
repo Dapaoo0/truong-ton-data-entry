@@ -4768,7 +4768,10 @@ def render_global_data_tab(c_farm):
 # =====================================================
 # MÁY TÍNH PHÂN BỔ CONTAINER (KINH DOANH)
 # =====================================================
-def build_weekly_cat_forecast(df_stg: pd.DataFrame) -> pd.DataFrame:
+CAT_FORECAST_WEEK_OPTIONS = [8, 9]
+
+
+def build_weekly_cat_forecast(df_stg: pd.DataFrame, forecast_weeks_inclusive: int = 8) -> pd.DataFrame:
     """Gom dự báo thu hoạch từ cắt bắp theo ISO year/week."""
     if df_stg is None or df_stg.empty or "giai_doan" not in df_stg.columns:
         return pd.DataFrame(columns=["farm", "year", "week", "forecast_bunches"])
@@ -4776,6 +4779,14 @@ def build_weekly_cat_forecast(df_stg: pd.DataFrame) -> pd.DataFrame:
     df_cat = df_stg[df_stg["giai_doan"] == "Cắt bắp"].copy()
     if df_cat.empty:
         return pd.DataFrame(columns=["farm", "year", "week", "forecast_bunches"])
+
+    try:
+        forecast_weeks_inclusive = int(forecast_weeks_inclusive)
+    except (TypeError, ValueError):
+        forecast_weeks_inclusive = 8
+    if forecast_weeks_inclusive not in CAT_FORECAST_WEEK_OPTIONS:
+        forecast_weeks_inclusive = 8
+    forecast_days_from_cut = (forecast_weeks_inclusive - 1) * 7
 
     micro_offsets = list(range(-MICRO_WINDOW_HALF, MICRO_WINDOW_HALF + 1))
     raw_weights = [pow(2.718281828459045, -0.5 * pow(offset / MICRO_SIGMA, 2)) for offset in micro_offsets]
@@ -4795,7 +4806,7 @@ def build_weekly_cat_forecast(df_stg: pd.DataFrame) -> pd.DataFrame:
             continue
 
         farm_name = row.get("farm") or "Không rõ farm"
-        midpoint = ngay_cat + timedelta(days=DAYS_CAT_TO_THU)
+        midpoint = ngay_cat + timedelta(days=forecast_days_from_cut)
         for offset, weight in zip(micro_offsets, micro_weights):
             harvest_day = midpoint + timedelta(days=offset)
             iso = harvest_day.isocalendar()
@@ -4956,13 +4967,22 @@ def render_container_allocation_calculator():
     source_label = "Chưa chọn nguồn"
     if source_mode == "Dự báo từ cắt bắp":
         df_stg_all = fetch_table_data("stage_logs", "Phòng Kinh doanh")
-        weekly_forecast = build_weekly_cat_forecast(df_stg_all)
+        lead_col, f_col, y_col, w_col = st.columns([1.2, 1.6, 1.6, 1.6])
+        with lead_col:
+            selected_forecast_weeks = st.selectbox(
+                "Cách dịch tuần",
+                options=CAT_FORECAST_WEEK_OPTIONS,
+                format_func=lambda value: f"Dự báo +{value} tuần",
+                key="container_forecast_weeks_inclusive",
+            )
+        weekly_forecast = build_weekly_cat_forecast(df_stg_all, selected_forecast_weeks)
         if weekly_forecast.empty:
             st.warning("Chưa có dữ liệu cắt bắp để dự báo theo tuần.")
         else:
-            f_col, y_col, w_col = st.columns(3)
             with f_col:
                 farm_options = ["Tất cả"] + sorted(weekly_forecast["farm"].dropna().unique().tolist())
+                if st.session_state.get("container_forecast_farm") not in farm_options:
+                    st.session_state["container_forecast_farm"] = farm_options[0]
                 selected_farm = st.selectbox("Farm", options=farm_options, key="container_forecast_farm")
             df_week_opts = weekly_forecast.copy()
             if selected_farm != "Tất cả":
@@ -4970,13 +4990,17 @@ def render_container_allocation_calculator():
             year_options = sorted(df_week_opts["year"].dropna().astype(int).unique().tolist())
             default_year_idx = year_options.index(date.today().year) if date.today().year in year_options else 0
             with y_col:
+                if st.session_state.get("container_forecast_year") not in year_options:
+                    st.session_state["container_forecast_year"] = year_options[default_year_idx]
                 selected_year = st.selectbox("Năm thu hoạch dự báo", options=year_options, index=default_year_idx, key="container_forecast_year")
             df_week_opts = df_week_opts[df_week_opts["year"] == int(selected_year)]
             week_options = sorted(df_week_opts["week"].dropna().astype(int).unique().tolist())
             default_week = date.today().isocalendar().week
             default_week_idx = week_options.index(default_week) if default_week in week_options else 0
             with w_col:
-                week_key = f"container_forecast_harvest_week_{selected_farm}_{selected_year}"
+                week_key = f"container_forecast_harvest_week_{selected_farm}_{selected_year}_{selected_forecast_weeks}"
+                if st.session_state.get(week_key) not in week_options:
+                    st.session_state[week_key] = week_options[default_week_idx]
                 selected_week = st.selectbox(
                     "Tuần thu hoạch dự báo",
                     options=week_options,
@@ -4986,9 +5010,11 @@ def render_container_allocation_calculator():
 
             df_selected = df_week_opts[df_week_opts["week"] == int(selected_week)]
             source_bunches = int(df_selected["forecast_bunches"].sum())
-            source_label = f"{selected_farm} · Tuần thu hoạch dự báo {selected_week}/{selected_year}"
+            source_label = f"{selected_farm} · Tuần thu hoạch dự báo {selected_week}/{selected_year} · +{selected_forecast_weeks} tuần"
             st.metric("Số buồng dự báo thu hoạch từ cắt bắp", f"{source_bunches:,} buồng", source_label)
-            st.caption("Tuần này là tuần thu hoạch dự báo sau khi dịch dữ liệu cắt bắp khoảng 70 ngày, không phải tuần cắt bắp nguồn.")
+            st.caption(
+                f"+{selected_forecast_weeks} tuần tính cả tuần cắt bắp. Ví dụ +8: cắt tuần 20 thì rơi vào tuần thu hoạch dự báo 27."
+            )
     else:
         source_bunches = int(st.number_input("Số buồng thu hoạch / dự kiến", min_value=0, value=0, step=100, key="container_manual_bunches"))
         source_label = "Nhập tay"
