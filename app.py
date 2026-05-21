@@ -2637,6 +2637,59 @@ def render_global_data_tab(c_farm):
         aspect = img_h / img_w if img_w else 0.5625
         return min(max(500, int(aspect * 1100) + 90), 900)
 
+    def _compute_map_area_metrics(lot_info_map, total_farm_area=None):
+        """Tính panel diện tích bản đồ theo mốc lũy kế, dùng chung cho mọi farm."""
+        if total_farm_area is None:
+            total_farm_area = sum(
+                max(float(info.get("area_ha") or 0), float(info.get("dien_tich_trong") or 0))
+                for info in lot_info_map.values()
+            )
+
+        metrics = {
+            "total_farm_area": float(total_farm_area or 0),
+            "area_planted": 0.0,
+            "area_growing": 0.0,
+            "area_chich": 0.0,
+            "area_cat": 0.0,
+            "area_harvest": 0.0,
+        }
+        counted_blids = set()
+        for info in lot_info_map.values():
+            for batch in info.get("batches", []):
+                blid = batch.get("base_lot_id")
+                if blid is None or blid in counted_blids:
+                    continue
+                counted_blids.add(blid)
+                dt = float(batch.get("dien_tich_trong") or 0)
+                total_cay = int(batch.get("so_cay") or 0)
+                if dt <= 0 or total_cay <= 0:
+                    continue
+
+                n_harvest = min(max(int(batch.get("thu") or 0), 0), total_cay)
+                n_cat = min(max(int(batch.get("cat") or 0), n_harvest), total_cay)
+                n_chich = min(max(int(batch.get("chich") or 0), n_cat), total_cay)
+                ratio = dt / total_cay
+
+                metrics["area_planted"] += dt
+                metrics["area_harvest"] += n_harvest * ratio
+                metrics["area_cat"] += n_cat * ratio
+                metrics["area_chich"] += n_chich * ratio
+                metrics["area_growing"] += max(total_cay - n_chich, 0) * ratio
+        return metrics
+
+    def _build_map_info_panel_html(metrics):
+        info_panel_html = ""
+        for label, value, color in [
+            ("Tổng DT lô", f"{metrics['total_farm_area']:.2f} ha", "#94a3b8"),
+            ("Đã trồng", f"{metrics['area_planted']:.2f} ha", "#a8e6cf"),
+            ("Sinh trưởng", f"{metrics['area_growing']:.2f} ha", "#00b894"),
+            ("Chích bắp", f"{metrics['area_chich']:.2f} ha", "#fdcb6e"),
+            ("Cắt bắp", f"{metrics['area_cat']:.2f} ha", "#e17055"),
+            ("Thu hoạch", f"{metrics['area_harvest']:.2f} ha", "#0984e3"),
+        ]:
+            info_panel_html += f'<div class="info-row"><span class="info-label">{label}</span><span class="info-value" style="color:{color}">{value}</span></div>'
+        return info_panel_html
+
     def _render_generic_farm_map(farm_name, polygon_filename, default_width, default_height):
         polygon_path = os.path.join(os.path.dirname(__file__), polygon_filename)
         if not os.path.exists(polygon_path) or c_farm not in [farm_name, "Admin", "Phòng Kinh doanh"]:
@@ -2819,47 +2872,7 @@ def render_global_data_tab(c_farm):
             legend_html += f'<span class="legend-item"><span class="legend-dot" style="background:{color}"></span>{stage}</span>'
         legend_html += f'<span class="legend-item"><span class="legend-dot" style="background:{default_color}"></span>Chưa có dữ liệu</span>'
 
-        total_farm_area = sum(
-            max(float(info.get("area_ha") or 0), float(info.get("dien_tich_trong") or 0))
-            for info in lot_info_map.values()
-        )
-
-        area_planted = area_growing = area_chich = area_cat = area_harvest = 0.0
-        counted_blids = set()
-        for info in lot_info_map.values():
-            for batch in info.get("batches", []):
-                blid = batch.get("base_lot_id")
-                if blid is None or blid in counted_blids:
-                    continue
-                counted_blids.add(blid)
-                dt = float(batch.get("dien_tich_trong") or 0)
-                total_cay = int(batch.get("so_cay") or 0)
-                if dt <= 0 or total_cay <= 0:
-                    continue
-                area_planted += dt
-                remaining = total_cay
-                n_thu = min(max(int(batch.get("thu") or 0), 0), remaining)
-                remaining -= n_thu
-                n_cat = min(max(int(batch.get("cat") or 0) - int(batch.get("thu") or 0), 0), remaining)
-                remaining -= n_cat
-                n_chich = min(max(int(batch.get("chich") or 0) - int(batch.get("cat") or 0), 0), remaining)
-                remaining -= n_chich
-                ratio = dt / total_cay
-                area_harvest += n_thu * ratio
-                area_cat += n_cat * ratio
-                area_chich += n_chich * ratio
-                area_growing += max(remaining, 0) * ratio
-
-        info_panel_html = ""
-        for label, value, color in [
-            ("Tổng DT lô", f"{total_farm_area:.2f} ha", "#94a3b8"),
-            ("Đã trồng", f"{area_planted:.2f} ha", "#a8e6cf"),
-            ("Sinh trưởng", f"{area_growing:.2f} ha", "#00b894"),
-            ("Chích bắp", f"{area_chich:.2f} ha", "#fdcb6e"),
-            ("Cắt bắp", f"{area_cat:.2f} ha", "#e17055"),
-            ("Thu hoạch", f"{area_harvest:.2f} ha", "#0984e3"),
-        ]:
-            info_panel_html += f'<div class="info-row"><span class="info-label">{label}</span><span class="info-value" style="color:{color}">{value}</span></div>'
+        info_panel_html = _build_map_info_panel_html(_compute_map_area_metrics(lot_info_map))
 
         from map_template import build_farm_map_html
         html_content = build_farm_map_html(
@@ -3065,54 +3078,9 @@ def render_global_data_tab(c_farm):
                     if pd.notna(_v):
                         _total_farm_area += float(_v)
 
-        # 2. Diện tích theo giai đoạn: phân bổ theo tỉ lệ cây trong từng đợt.
-        #    Mỗi base_lot chỉ được tính một lần (season hiện tại/mới nhất),
-        #    và các trạng thái bị cap để tổng không vượt diện tích trồng.
-        _area_planted = 0.0      # Tổng DT đã trồng
-        _area_growing = 0.0      # Đang sinh trưởng
-        _area_chich = 0.0        # Chích bắp
-        _area_cat = 0.0          # Cắt bắp
-        _area_harvest = 0.0      # Thu hoạch
-        _counted_blids = set()
-        for _info in lot_info_map.values():
-            for _batch in _info.get("batches", []):
-                _blid = _batch.get("base_lot_id")
-                if _blid is None or _blid in _counted_blids:
-                    continue
-                _counted_blids.add(_blid)
-                _dt = float(_batch.get("dien_tich_trong") or 0)
-                _total_cay = int(_batch.get("so_cay") or 0)
-                if _dt <= 0 or _total_cay <= 0:
-                    continue
-                _area_planted += _dt
-
-                _remaining = _total_cay
-                _n_thu = min(max(int(_batch.get("thu") or 0), 0), _remaining)
-                _remaining -= _n_thu
-                _n_cat = min(max(int(_batch.get("cat") or 0) - int(_batch.get("thu") or 0), 0), _remaining)
-                _remaining -= _n_cat
-                _n_chich = min(max(int(_batch.get("chich") or 0) - int(_batch.get("cat") or 0), 0), _remaining)
-                _remaining -= _n_chich
-                _n_grow = max(_remaining, 0)
-
-                _ratio = _dt / _total_cay
-                _area_harvest += _n_thu * _ratio
-                _area_cat += _n_cat * _ratio
-                _area_chich += _n_chich * _ratio
-                _area_growing += _n_grow * _ratio
-
-        # Build info panel HTML
-        _info_rows = [
-            ("Tổng DT lô", f"{_total_farm_area:.2f} ha", "#94a3b8"),
-            ("Đã trồng", f"{_area_planted:.2f} ha", "#a8e6cf"),
-            ("Sinh trưởng", f"{_area_growing:.2f} ha", "#00b894"),
-            ("Chích bắp", f"{_area_chich:.2f} ha", "#fdcb6e"),
-            ("Cắt bắp", f"{_area_cat:.2f} ha", "#e17055"),
-            ("Thu hoạch", f"{_area_harvest:.2f} ha", "#0984e3"),
-        ]
-        info_panel_html = ""
-        for _label, _value, _color in _info_rows:
-            info_panel_html += f'<div class="info-row"><span class="info-label">{_label}</span><span class="info-value" style="color:{_color}">{_value}</span></div>'
+        info_panel_html = _build_map_info_panel_html(
+            _compute_map_area_metrics(lot_info_map, total_farm_area=_total_farm_area)
+        )
 
         from map_template import build_farm_map_html
         html_content = build_farm_map_html(
@@ -3292,50 +3260,9 @@ def render_global_data_tab(c_farm):
         except Exception:
             pass
 
-        _area_planted_195 = 0.0
-        _area_growing_195 = 0.0
-        _area_chich_195 = 0.0
-        _area_cat_195 = 0.0
-        _area_harvest_195 = 0.0
-        _counted_blids_195 = set()
-        for _info in lot_info_map_195.values():
-            for _batch in _info.get("batches", []):
-                _blid = _batch.get("base_lot_id")
-                if _blid is None or _blid in _counted_blids_195:
-                    continue
-                _counted_blids_195.add(_blid)
-                _dt = float(_batch.get("dien_tich_trong") or 0)
-                _total_cay = int(_batch.get("so_cay") or 0)
-                if _dt <= 0 or _total_cay <= 0:
-                    continue
-                _area_planted_195 += _dt
-
-                _remaining = _total_cay
-                _n_thu = min(max(int(_batch.get("thu") or 0), 0), _remaining)
-                _remaining -= _n_thu
-                _n_cat = min(max(int(_batch.get("cat") or 0) - int(_batch.get("thu") or 0), 0), _remaining)
-                _remaining -= _n_cat
-                _n_chich = min(max(int(_batch.get("chich") or 0) - int(_batch.get("cat") or 0), 0), _remaining)
-                _remaining -= _n_chich
-                _n_grow = max(_remaining, 0)
-
-                _ratio = _dt / _total_cay
-                _area_harvest_195 += _n_thu * _ratio
-                _area_cat_195 += _n_cat * _ratio
-                _area_chich_195 += _n_chich * _ratio
-                _area_growing_195 += _n_grow * _ratio
-
-        _info_rows_195 = [
-            ("Tổng DT lô", f"{_total_farm_area_195:.2f} ha", "#94a3b8"),
-            ("Đã trồng", f"{_area_planted_195:.2f} ha", "#a8e6cf"),
-            ("Sinh trưởng", f"{_area_growing_195:.2f} ha", "#00b894"),
-            ("Chích bắp", f"{_area_chich_195:.2f} ha", "#fdcb6e"),
-            ("Cắt bắp", f"{_area_cat_195:.2f} ha", "#e17055"),
-            ("Thu hoạch", f"{_area_harvest_195:.2f} ha", "#0984e3"),
-        ]
-        info_panel_html_195 = ""
-        for _label, _value, _color in _info_rows_195:
-            info_panel_html_195 += f'<div class="info-row"><span class="info-label">{_label}</span><span class="info-value" style="color:{_color}">{_value}</span></div>'
+        info_panel_html_195 = _build_map_info_panel_html(
+            _compute_map_area_metrics(lot_info_map_195, total_farm_area=_total_farm_area_195)
+        )
 
         from map_template import build_farm_map_html
         html_content_195 = build_farm_map_html(

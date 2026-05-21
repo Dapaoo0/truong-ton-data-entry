@@ -315,6 +315,7 @@ Hệ thống phân biệt **2 loại diện tích**:
 - **Panel "Diện tích Farm"**: "Tổng DT lô" = `SUM(dim_lo.area_ha)` cho tất cả lô `is_active=True`.
 - **Panel "Đã trồng"**: = `SUM(base_lots.dien_tich_trong)` cho tất cả đợt trồng active.
 - **Fallback khi thiếu `dien_tich_trong`**: ước tính theo mật độ chuẩn `so_luong / 2190` ha, sau đó chặn tổng batch không vượt `dim_lo.area_ha`.
+- **Panel mốc sinh trưởng**: `Chích bắp`, `Cắt bắp`, `Thu hoạch` là diện tích **lũy kế đã đạt mốc đó**. Diện tích đã cắt vẫn nằm trong tổng đã chích; diện tích đã thu vẫn nằm trong tổng đã cắt và đã chích. `Sinh trưởng` chỉ là phần đã trồng nhưng chưa chích.
 - **Tooltip bản đồ**: Hiển thị cả 2 dòng ("Diện tích lô" + "Diện tích trồng") để user phân biệt.
 
 ### 8.2 Tổng số cây (Map tooltip)
