@@ -2738,13 +2738,32 @@ def render_global_data_tab(c_farm):
                         dt_trong_total = float(dt_vals.sum())
 
                 area_ha = dim_lo_area_map.get(lo_name)
-                if area_ha is not None and dt_trong_total > 0:
-                    dt_trong_total = min(dt_trong_total, float(area_ha))
+                if area_ha is not None:
+                    area_limit = float(area_ha)
                     batch_dt_sum = sum(float(b.get("dien_tich_trong") or 0) for b in batches if b.get("base_lot_id") is not None)
-                    if batch_dt_sum > float(area_ha):
-                        area_scale = float(area_ha) / batch_dt_sum
+                    missing_dt_batches = [
+                        b for b in batches
+                        if b.get("base_lot_id") is not None
+                        and float(b.get("dien_tich_trong") or 0) <= 0
+                        and int(b.get("so_cay") or 0) > 0
+                    ]
+                    remaining_area = max(area_limit - batch_dt_sum, 0.0)
+                    if missing_dt_batches and remaining_area > 0:
+                        missing_tree_total = sum(int(b.get("so_cay") or 0) for b in missing_dt_batches)
+                        if missing_tree_total > 0:
+                            for b in missing_dt_batches:
+                                b["dien_tich_trong"] = remaining_area * int(b.get("so_cay") or 0) / missing_tree_total
+                            batch_dt_sum = sum(float(b.get("dien_tich_trong") or 0) for b in batches if b.get("base_lot_id") is not None)
+
+                    if dt_trong_total > 0:
+                        dt_trong_total = min(dt_trong_total, area_limit)
+                    if batch_dt_sum > 0:
+                        dt_trong_total = min(max(dt_trong_total, batch_dt_sum), area_limit)
+                    if batch_dt_sum > area_limit:
+                        area_scale = area_limit / batch_dt_sum
                         for b in batches:
                             b["dien_tich_trong"] = float(b.get("dien_tich_trong") or 0) * area_scale
+                        dt_trong_total = area_limit
                 elif dt_trong_total > 0:
                     # Some Farm 126 lots are missing dim_lo.area_ha. Use planted area as
                     # a conservative display fallback so total lot area never appears
