@@ -2632,6 +2632,10 @@ def render_global_data_tab(c_farm):
                 for _, b_row in grp_df.iterrows():
                     batch_label_map[b_row["id"]] = lo_name_grp
 
+    def _map_component_initial_height(img_w, img_h):
+        aspect = img_h / img_w if img_w else 0.5625
+        return min(max(500, int(aspect * 1100) + 90), 900)
+
     def _render_generic_farm_map(farm_name, polygon_filename, default_width, default_height):
         polygon_path = os.path.join(os.path.dirname(__file__), polygon_filename)
         if not os.path.exists(polygon_path) or c_farm not in [farm_name, "Admin", "Phòng Kinh doanh"]:
@@ -2848,8 +2852,7 @@ def render_global_data_tab(c_farm):
         )
 
         import streamlit.components.v1 as components
-        aspect = img_h / img_w if img_w else 0.5625
-        components.html(html_content, height=max(500, int(aspect * 1600) + 30), scrolling=False)
+        components.html(html_content, height=_map_component_initial_height(img_w, img_h), scrolling=False)
 
     _render_generic_farm_map("Farm 126", "farm_126_polygons.json", 2382, 1684)
 
@@ -3101,9 +3104,7 @@ def render_global_data_tab(c_farm):
         )
 
         import streamlit.components.v1 as components
-        _aspect = img_h / img_w if img_w else 0.5625
-        _map_fallback_h = int(_aspect * 1600) + 30
-        components.html(html_content, height=max(500, _map_fallback_h), scrolling=False)
+        components.html(html_content, height=_map_component_initial_height(img_w, img_h), scrolling=False)
 
     # ═══════════════════════════════════════════════════════════════════
     # 🗺️ BẢN ĐỒ TƯƠNG TÁC FARM 195
@@ -3326,9 +3327,7 @@ def render_global_data_tab(c_farm):
         )
 
         import streamlit.components.v1 as components
-        _aspect_195 = img_h_195 / img_w_195 if img_w_195 else 0.5625
-        _map_fallback_h_195 = int(_aspect_195 * 1600) + 30
-        components.html(html_content_195, height=max(500, _map_fallback_h_195), scrolling=False)
+        components.html(html_content_195, height=_map_component_initial_height(img_w_195, img_h_195), scrolling=False)
 
     st.divider()
 

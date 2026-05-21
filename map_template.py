@@ -487,6 +487,44 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
         // ── Auto-fit iframe height to content ──
         (function() {{
             var lastH = 0;
+            var readySent = false;
+
+            function sendComponentReady() {{
+                if (readySent) return;
+                readySent = true;
+                try {{
+                    window.parent.postMessage({{
+                        isStreamlitMessage: true,
+                        type: "streamlit:componentReady",
+                        apiVersion: 1
+                    }}, "*");
+                }} catch(e) {{}}
+            }}
+
+            function sendFrameHeight(h) {{
+                sendComponentReady();
+                try {{
+                    window.parent.postMessage({{
+                        isStreamlitMessage: true,
+                        type: "streamlit:setFrameHeight",
+                        height: h
+                    }}, "*");
+                }} catch(e) {{}}
+                try {{
+                    var frame = window.frameElement;
+                    if (frame) {{
+                        frame.height = h;
+                        frame.style.height = h + 'px';
+                    }}
+                    var wrapper = frame && frame.parentElement;
+                    if (wrapper) {{
+                        wrapper.style.height = h + 'px';
+                    }}
+                }} catch(e) {{
+                    document.body.style.height = h + 'px';
+                }}
+            }}
+
             function fitHeight() {{
                 var c = document.querySelector('.farm-map-container');
                 if (!c) return;
@@ -495,17 +533,9 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
                 h = Math.ceil(h) + 2;
                 if (h === lastH) return;
                 lastH = h;
-                try {{
-                    var frame = window.frameElement;
-                    frame.style.height = h + 'px';
-                    var wrapper = frame.parentElement;
-                    if (wrapper) {{
-                        wrapper.style.height = h + 'px';
-                    }}
-                }} catch(e) {{
-                    document.body.style.height = h + 'px';
-                }}
+                sendFrameHeight(h);
             }}
+            sendComponentReady();
             if ('ResizeObserver' in window) {{
                 new ResizeObserver(fitHeight).observe(document.querySelector('.farm-map-container'));
             }}
