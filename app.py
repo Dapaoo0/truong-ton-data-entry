@@ -2649,13 +2649,18 @@ def render_global_data_tab(c_farm):
 
         dim_lo_area_map = {}
         try:
-            dim_lo_res = supabase.table("dim_lo").select("lo_code, area_ha, dim_farm!inner(farm_name)").eq("is_active", True).eq("dim_farm.farm_name", farm_name).execute()
+            dim_lo_res = supabase.table("dim_lo").select("lo_name, lo_code, area_ha, dim_farm!inner(farm_name)").eq("is_active", True).eq("dim_farm.farm_name", farm_name).execute()
             if dim_lo_res.data:
                 for dl in dim_lo_res.data:
+                    lo_name_db = dl.get("lo_name")
                     lo_code = dl.get("lo_code")
                     area_ha = dl.get("area_ha")
-                    if lo_code and area_ha is not None:
-                        dim_lo_area_map[lo_code] = float(area_ha)
+                    if area_ha is not None:
+                        area_val = float(area_ha)
+                        if lo_code:
+                            dim_lo_area_map[lo_code] = area_val
+                        if lo_name_db:
+                            dim_lo_area_map[lo_name_db] = area_val
         except Exception:
             pass
 
@@ -2740,6 +2745,11 @@ def render_global_data_tab(c_farm):
                         area_scale = float(area_ha) / batch_dt_sum
                         for b in batches:
                             b["dien_tich_trong"] = float(b.get("dien_tich_trong") or 0) * area_scale
+                elif dt_trong_total > 0:
+                    # Some Farm 126 lots are missing dim_lo.area_ha. Use planted area as
+                    # a conservative display fallback so total lot area never appears
+                    # smaller than planted area.
+                    area_ha = dt_trong_total
 
                 lot_info_map[lo_name] = {
                     "dominant_gd": dominant["gd"],
@@ -2792,16 +2802,10 @@ def render_global_data_tab(c_farm):
             legend_html += f'<span class="legend-item"><span class="legend-dot" style="background:{color}"></span>{stage}</span>'
         legend_html += f'<span class="legend-item"><span class="legend-dot" style="background:{default_color}"></span>Chưa có dữ liệu</span>'
 
-        total_farm_area = 0.0
-        try:
-            area_res = supabase.table("dim_lo").select("area_ha, dim_farm!inner(farm_name)").eq("is_active", True).eq("dim_farm.farm_name", farm_name).execute()
-            if area_res.data:
-                for row in area_res.data:
-                    area_ha = row.get("area_ha")
-                    if area_ha is not None:
-                        total_farm_area += float(area_ha)
-        except Exception:
-            pass
+        total_farm_area = sum(
+            max(float(info.get("area_ha") or 0), float(info.get("dien_tich_trong") or 0))
+            for info in lot_info_map.values()
+        )
 
         area_planted = area_growing = area_chich = area_cat = area_harvest = 0.0
         counted_blids = set()
