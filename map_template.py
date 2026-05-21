@@ -13,7 +13,7 @@ MAP_SMALL_MAP_ZOOM = 1.1
 
 
 def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
-                        img_w, img_h, stage_colors_json):
+                        img_w, img_h, stage_colors_json, map_zoom=None):
     """Build self-contained HTML for an interactive farm map.
 
     Parameters
@@ -42,7 +42,7 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
     polygon_stroke_width = round(MAP_STROKE_WIDTH * stroke_scale, 2)
     polygon_hover_stroke_width = round(MAP_STROKE_HOVER_WIDTH * stroke_scale, 2)
     polygon_pinned_stroke_width = round(MAP_STROKE_PINNED_WIDTH * stroke_scale, 2)
-    map_zoom = MAP_SMALL_MAP_ZOOM if img_w and img_w < MAP_STROKE_REFERENCE_WIDTH else 1
+    map_zoom = map_zoom or (MAP_SMALL_MAP_ZOOM if img_w and img_w < MAP_STROKE_REFERENCE_WIDTH else 1)
     viewbox_w = img_w / map_zoom
     viewbox_h = img_h / map_zoom
     viewbox_x = (img_w - viewbox_w) / 2

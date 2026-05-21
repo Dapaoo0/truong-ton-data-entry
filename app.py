@@ -2844,6 +2844,7 @@ def render_global_data_tab(c_farm):
             img_w=img_w,
             img_h=img_h,
             stage_colors_json=_MAP_STAGE_COLORS_JSON,
+            map_zoom=1.0,
         )
 
         import streamlit.components.v1 as components
