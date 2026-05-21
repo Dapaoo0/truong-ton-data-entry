@@ -206,6 +206,7 @@ VU_OPTIONS = ["F0", "F1", "F2", "F3", "F4", "F5"]
 LOAI_TRONG_OPTIONS = ["Trồng mới", "Trồng dặm"]
 STAGE_NT_OPTIONS = ["Chích bắp", "Cắt bắp"]  # Không còn Thu Hoạch ở đây
 DESTRUCTION_STAGE_OPTIONS = ["Trước chích bắp", "Trước cắt bắp", "Trước thu hoạch"]
+PLANTING_DENSITY_TREES_PER_HA = 2190
 
 # =====================================================
 # BẢNG MÀU DÂY CHUẨN (Ribbon Colors)
@@ -2747,13 +2748,10 @@ def render_global_data_tab(c_farm):
                         and float(b.get("dien_tich_trong") or 0) <= 0
                         and int(b.get("so_cay") or 0) > 0
                     ]
-                    remaining_area = max(area_limit - batch_dt_sum, 0.0)
-                    if missing_dt_batches and remaining_area > 0:
-                        missing_tree_total = sum(int(b.get("so_cay") or 0) for b in missing_dt_batches)
-                        if missing_tree_total > 0:
-                            for b in missing_dt_batches:
-                                b["dien_tich_trong"] = remaining_area * int(b.get("so_cay") or 0) / missing_tree_total
-                            batch_dt_sum = sum(float(b.get("dien_tich_trong") or 0) for b in batches if b.get("base_lot_id") is not None)
+                    if missing_dt_batches:
+                        for b in missing_dt_batches:
+                            b["dien_tich_trong"] = int(b.get("so_cay") or 0) / PLANTING_DENSITY_TREES_PER_HA
+                        batch_dt_sum = sum(float(b.get("dien_tich_trong") or 0) for b in batches if b.get("base_lot_id") is not None)
 
                     if dt_trong_total > 0:
                         dt_trong_total = min(dt_trong_total, area_limit)

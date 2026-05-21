@@ -314,6 +314,7 @@ Hệ thống phân biệt **2 loại diện tích**:
 - **Ràng buộc**: Tổng `dien_tich_trong` của các đợt trồng trong 1 lô **không được vượt quá** `area_ha`.
 - **Panel "Diện tích Farm"**: "Tổng DT lô" = `SUM(dim_lo.area_ha)` cho tất cả lô `is_active=True`.
 - **Panel "Đã trồng"**: = `SUM(base_lots.dien_tich_trong)` cho tất cả đợt trồng active.
+- **Fallback khi thiếu `dien_tich_trong`**: ước tính theo mật độ chuẩn `so_luong / 2190` ha, sau đó chặn tổng batch không vượt `dim_lo.area_ha`.
 - **Tooltip bản đồ**: Hiển thị cả 2 dòng ("Diện tích lô" + "Diện tích trồng") để user phân biệt.
 
 ### 8.2 Tổng số cây (Map tooltip)
