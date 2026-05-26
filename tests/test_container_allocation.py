@@ -57,6 +57,23 @@ def test_allocation_can_use_scaled_hand_weight_profile():
     assert row["boxes_fulfilled"] == 240
 
 
+def test_optimizer_can_use_scaled_hand_weight_profile():
+    profile = build_hand_weight_profile(12, 18)
+    result = allocate_bunches_optimized(
+        5000,
+        profile["kg_per_bunch"],
+        profile["hands_per_bunch"],
+        [_optimizer_row(1, 1, "6H", 240)],
+        hand_weights=profile["hand_weights"],
+    )
+    row = result["rows"][0]
+
+    assert row["range_label"] == "5-7"
+    assert round(row["kg_per_bunch_for_sku"], 2) == 4.31
+    assert row["bunches_allocated"] == 724
+    assert row["boxes_fulfilled"] == 240
+
+
 def test_6h_examples_from_guide():
     r18 = _first_result(5000, 18, _row(1, 1, "6H", 5, 7, 240))
     r20 = _first_result(5000, 20, _row(1, 1, "6H", 5, 7, 240))
@@ -267,11 +284,11 @@ def test_optimizer_reports_minimum_opened_bunches_when_source_is_surplus():
     ])
 
     by_sku = {row["sku"]: row for row in result["rows"]}
-    assert by_sku["27CP"]["range_label"] == "1-5"
-    assert by_sku["6H"]["range_label"] == "6-7"
+    assert set(by_sku["27CP"]["range_label"].split(", ")) == {"5-5", "1-4"}
+    assert set(by_sku["6H"]["range_label"].split(", ")) == {"5-5", "6-7"}
     assert by_sku["27CP"]["boxes_fulfilled"] == 520
     assert by_sku["6H"]["boxes_fulfilled"] == 240
-    assert result["summary"]["active_bunches_estimated"] == 1040
+    assert result["summary"]["active_bunches_estimated"] == 941
     assert result["summary"]["total_bunches"] == 5000
 
 
@@ -285,7 +302,7 @@ def test_optimizer_prioritizes_higher_market_before_opened_bunch_minimization():
     assert by_sku["27CP"]["range_label"] == "1-5"
     assert by_sku["27CP"]["boxes_fulfilled"] == 57
     assert by_sku["8H"]["boxes_fulfilled"] == 0
-    assert result["summary"]["active_bunches_estimated"] == 100
+    assert result["summary"]["active_bunches_estimated"] == 99
 
 
 def test_optimizer_prioritizes_customer_before_market_grouping():
@@ -352,6 +369,14 @@ def test_max_container_mode_allocates_week_28_example_by_market_priority():
     assert by_market["Nhật"]["full_containers"] == 2
     assert by_market["Hàn"]["full_containers"] == 1
     assert result["summary"]["fulfilled_containers"] == 3
+
+
+def test_max_container_market_rows_report_active_bunches_not_segment_sum():
+    result = calculate_max_containers_by_market(3342, 18, 12, ["Nhật", "Hàn"])
+
+    assert result["summary"]["active_bunches_estimated"] <= 3342
+    for row in result["rows"]:
+        assert row["active_bunches_used"] <= 3342
 
 
 def test_max_container_mode_matches_15kg_4000_bunch_scenario():

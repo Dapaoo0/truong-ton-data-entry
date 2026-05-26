@@ -831,9 +831,7 @@ def _allocate_bunches_cpsat(
             kg_per_bunch_units = _range_weight_units(hand_from, hand_to, hand_weight_units)
             var_prefix = f"r{processing_order}_c{range_rank}"
             bunches_var = model.NewIntVar(0, total_bunches, f"{var_prefix}_bunches")
-            boxes_var = model.NewIntVar(0, requested_boxes, f"{var_prefix}_boxes")
             used_var = model.NewBoolVar(f"{var_prefix}_used")
-            model.Add(boxes_var * kg_per_box_units <= bunches_var * kg_per_bunch_units)
             model.Add(bunches_var <= total_bunches * used_var)
             model.Add(bunches_var >= used_var)
             segment = {
@@ -847,7 +845,6 @@ def _allocate_bunches_cpsat(
                 "hands": list(range(hand_from, hand_to + 1)),
                 "kg_per_bunch_units": kg_per_bunch_units,
                 "bunches_var": bunches_var,
-                "boxes_var": boxes_var,
                 "used_var": used_var,
             }
             row_record["segments"].append(segment)
@@ -855,7 +852,11 @@ def _allocate_bunches_cpsat(
 
         fulfilled_var = model.NewIntVar(0, requested_boxes, f"r{processing_order}_fulfilled")
         short_var = model.NewIntVar(0, requested_boxes, f"r{processing_order}_short")
-        model.Add(fulfilled_var == sum(segment["boxes_var"] for segment in row_record["segments"]))
+        row_capacity_units = sum(
+            segment["bunches_var"] * segment["kg_per_bunch_units"]
+            for segment in row_record["segments"]
+        )
+        model.Add(fulfilled_var * kg_per_box_units <= row_capacity_units)
         model.Add(fulfilled_var <= requested_boxes)
         model.Add(short_var == requested_boxes - fulfilled_var)
         row_record["fulfilled_var"] = fulfilled_var
@@ -896,8 +897,8 @@ def _allocate_bunches_cpsat(
         for segment in all_segments
     )
     fulfilled_units_expr = sum(
-        segment["boxes_var"] * kg_per_box_units
-        for segment in all_segments
+        row_record["fulfilled_var"] * kg_per_box_units
+        for row_record in row_records
     )
     range_preference_expr = sum(
         segment["used_var"] * (segment["range_rank"] + 1)
@@ -929,11 +930,11 @@ def _allocate_bunches_cpsat(
     for row_record in row_records:
         row = row_record["row"]
         requested_boxes = row_record["requested_boxes"]
+        row_fulfilled_boxes = solver.Value(row_record["fulfilled_var"])
         segment_rows = []
         for segment in row_record["segments"]:
             bunches_allocated = solver.Value(segment["bunches_var"])
-            boxes_fulfilled = solver.Value(segment["boxes_var"])
-            if bunches_allocated <= 0 and boxes_fulfilled <= 0:
+            if bunches_allocated <= 0:
                 continue
             for hand in segment["hands"]:
                 remaining_hands[hand] -= bunches_allocated
@@ -941,12 +942,7 @@ def _allocate_bunches_cpsat(
             boxes_capacity = (
                 bunches_allocated * segment["kg_per_bunch_units"]
             ) // kg_per_box_units
-            extra_kg_from_rounding = max(0.0, kg_allocated - boxes_fulfilled * kg_per_box)
-            bunches_needed = (
-                int(math.ceil((boxes_fulfilled * kg_per_box_units) / segment["kg_per_bunch_units"]))
-                if boxes_fulfilled > 0 and segment["kg_per_bunch_units"] > 0
-                else 0
-            )
+            boxes_equivalent = kg_allocated / kg_per_box if kg_per_box > 0 else 0.0
             segment_row = {
                 "processing_order": row_record["processing_order"],
                 "original_index": row_record["original_index"],
@@ -961,25 +957,56 @@ def _allocate_bunches_cpsat(
                 "hand_count": segment["hand_count"],
                 "range_rank": segment["range_rank"],
                 "range_label": f"{segment['hand_from']}-{segment['hand_to']}",
-                "requested_boxes": boxes_fulfilled,
+                "requested_boxes": 0,
                 "order_requested_boxes": requested_boxes,
                 "kg_per_bunch_for_sku": segment["kg_per_bunch_units"] / WEIGHT_SCALE,
-                "bunches_needed": bunches_needed,
+                "bunches_needed": 0,
                 "bunches_allocated": bunches_allocated,
                 "kg_allocated": kg_allocated,
                 "boxes_capacity": int(boxes_capacity),
-                "boxes_fulfilled": boxes_fulfilled,
-                "containers_fulfilled": boxes_fulfilled / boxes_per_container,
+                "boxes_equivalent": boxes_equivalent,
+                "boxes_fulfilled": 0,
+                "containers_fulfilled": 0.0,
                 "short_boxes": 0,
                 "short_containers": 0.0,
-                "extra_kg_from_rounding": extra_kg_from_rounding,
+                "extra_kg_from_rounding": 0.0,
                 "hand_units_consumed": bunches_allocated * segment["hand_count"],
                 "is_fulfilled": True,
             }
             segment_rows.append(segment_row)
-            detail_rows.append(segment_row)
 
-        fulfilled_boxes = sum(segment["boxes_fulfilled"] for segment in segment_rows)
+        remaining_segment_boxes = row_fulfilled_boxes
+        for segment_row in segment_rows:
+            assigned_boxes = min(segment_row["boxes_capacity"], remaining_segment_boxes)
+            segment_row["boxes_fulfilled"] = assigned_boxes
+            remaining_segment_boxes -= assigned_boxes
+        if remaining_segment_boxes > 0:
+            fractional_rows = sorted(
+                segment_rows,
+                key=lambda item: item["boxes_equivalent"] - math.floor(item["boxes_equivalent"]),
+                reverse=True,
+            )
+            for segment_row in fractional_rows:
+                if remaining_segment_boxes <= 0:
+                    break
+                segment_row["boxes_fulfilled"] += 1
+                remaining_segment_boxes -= 1
+
+        for segment_row in segment_rows:
+            segment_row["requested_boxes"] = segment_row["boxes_fulfilled"]
+            segment_row["containers_fulfilled"] = segment_row["boxes_fulfilled"] / boxes_per_container
+            segment_row["bunches_needed"] = (
+                int(math.ceil((segment_row["boxes_fulfilled"] * kg_per_box) / segment_row["kg_per_bunch_for_sku"]))
+                if segment_row["boxes_fulfilled"] > 0 and segment_row["kg_per_bunch_for_sku"] > 0
+                else 0
+            )
+            segment_row["extra_kg_from_rounding"] = max(
+                0.0,
+                segment_row["kg_allocated"] - segment_row["boxes_fulfilled"] * kg_per_box,
+            )
+        detail_rows.extend(segment_rows)
+
+        fulfilled_boxes = row_fulfilled_boxes
         short_boxes = max(0, requested_boxes - fulfilled_boxes)
         kg_allocated = sum(segment["kg_allocated"] for segment in segment_rows)
         row_hand_usage = {
@@ -992,7 +1019,7 @@ def _allocate_bunches_cpsat(
         }
         bunches_allocated = max(row_hand_usage.values(), default=0)
         hand_units_consumed = sum(segment["hand_units_consumed"] for segment in segment_rows)
-        boxes_capacity = sum(segment["boxes_capacity"] for segment in segment_rows)
+        boxes_capacity = int(math.floor(kg_allocated / kg_per_box)) if kg_per_box > 0 else 0
         extra_kg_from_rounding = max(0.0, kg_allocated - fulfilled_boxes * kg_per_box)
         range_labels = ", ".join(segment["range_label"] for segment in segment_rows)
         rows.append({
@@ -1272,6 +1299,7 @@ def _calculate_max_containers_cpsat(
     for market_record in market_records:
         bundles_used = 0
         kg_allocated = 0.0
+        market_hand_usage = {hand: 0 for hand in range(1, hands_per_bunch + 1)}
         for segment in market_record["segments"]:
             bunches_allocated = solver.Value(segment["bunches_var"])
             boxes_equivalent = solver.Value(segment["boxes_var"])
@@ -1279,6 +1307,7 @@ def _calculate_max_containers_cpsat(
                 continue
             for hand in segment["hands"]:
                 remaining_hands[hand] -= bunches_allocated
+                market_hand_usage[hand] += bunches_allocated
             segment_kg = bunches_allocated * segment["kg_per_bunch_units"] / WEIGHT_SCALE
             bundles_used += bunches_allocated
             kg_allocated += segment_kg
@@ -1315,6 +1344,7 @@ def _calculate_max_containers_cpsat(
             "boxes_allocated": boxes_allocated,
             "remaining_boxes_potential": solver.Value(market_record["excess_boxes_var"]),
             "bundles_used": bundles_used,
+            "active_bunches_used": max(market_hand_usage.values(), default=0),
             "kg_allocated": kg_allocated,
         })
 
@@ -1447,6 +1477,7 @@ def calculate_max_containers_by_market(
             "boxes_allocated": boxes_allocated,
             "remaining_boxes_potential": max(0, capacity_boxes - boxes_allocated),
             "bundles_used": bundles_used,
+            "active_bunches_used": bundles_used,
             "kg_allocated": kg_allocated,
         })
 

@@ -5420,7 +5420,7 @@ def render_container_allocation_calculator():
                     "Cont đủ": int(market_row["full_containers"]),
                     "Thùng chốt": int(market_row["boxes_allocated"]),
                     "Thùng lẻ": int(market_row["remaining_boxes_potential"]),
-                    "Buồng dùng": int(market_row["bundles_used"]),
+                    "Buồng dùng": int(market_row.get("active_bunches_used", market_row["bundles_used"])),
                     "Kg phân bổ": f"{market_row['kg_allocated']:,.0f}",
                 })
                 if not detail_df.empty:
@@ -5794,13 +5794,13 @@ def render_container_allocation_calculator():
                 "Mã hàng": sku_row["sku"],
                 "Nải chọn": sku_row["range_label"],
                 "Cách tính": (
-                    f"{_container_range_formula(sku_row['hand_from'], sku_row['hand_to'], hand_weights)}; "
-                    f"{int(sku_row['requested_boxes']):,} thùng x {KG_PER_BOX} kg "
-                    f"/ {sku_row['kg_per_bunch_for_sku']:.2f}"
+                    f"{int(sku_row['bunches_allocated']):,} buồng x "
+                    f"({_container_range_formula(sku_row['hand_from'], sku_row['hand_to'], hand_weights)}) "
+                    f"= {float(sku_row['kg_allocated']):,.1f} kg"
                 ),
                 "Kết quả": (
-                    f"xẻ {int(sku_row['bunches_allocated']):,} buồng nguyên, "
-                    f"đáp ứng {int(sku_row['boxes_fulfilled']):,} thùng"
+                    f"~{float(sku_row.get('boxes_equivalent', sku_row['kg_allocated'] / KG_PER_BOX)):,.2f} thùng quy đổi; "
+                    "tổng thùng chốt xem ở dòng mã hàng"
                     + (
                         f", thiếu {int(sku_row['short_boxes']):,} thùng"
                         if int(sku_row["short_boxes"]) > 0
