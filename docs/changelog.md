@@ -2,6 +2,15 @@
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
 
+## [26/05/2026] - Lưu kế hoạch phân bổ container theo account
+
+#### Feature: Persist kế hoạch máy tính phân bổ cont (`app.py`, DB)
+- **[DB]**: Thêm bảng `container_allocation_plans` để lưu snapshot đầy đủ input/output của kế hoạch theo `account_farm` + `account_team`.
+- **[UI]**: Nút `Lưu kế hoạch` lưu vào DB, không còn mất khi F5. Khu `Kế hoạch đã lưu` đọc lại kế hoạch của account hiện tại và cho phép xóa mềm.
+- **[Popup]**: Chi tiết kế hoạch cũ được format lại bằng cột tiếng Việt: input đơn hàng, ưu tiên, kết quả phân bổ, quá trình chọn nải, tồn nải; không phơi raw column kỹ thuật.
+
+---
+
 ## [26/05/2026] - Profile khối lượng nải cho máy tính phân bổ container
 
 #### Feature: Scale kg từng nải theo kịch bản buồng (`container_allocation.py`, `app.py`)
