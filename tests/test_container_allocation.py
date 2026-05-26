@@ -3,7 +3,9 @@ import container_allocation as ca
 from container_allocation import (
     allocate_bunches_by_hands,
     allocate_bunches_optimized,
+    build_hand_weight_profile,
     calculate_max_containers_by_market,
+    range_weight,
     _valid_optimizer_ranges,
 )
 
@@ -24,6 +26,35 @@ def _row(market_priority, sku_priority, sku, hand_from, hand_to, demand, unit="T
 def _first_result(total_bunches, kg_per_bunch, row):
     result = allocate_bunches_by_hands(total_bunches, kg_per_bunch, 12, [row])
     return result["rows"][0]
+
+
+def test_scaled_hand_weight_profiles_match_target_kg():
+    profile_12_18 = build_hand_weight_profile(12, 18)
+    profile_12_20 = build_hand_weight_profile(12, 20)
+    profile_9_12 = build_hand_weight_profile(9, 12)
+
+    assert round(sum(profile_12_18["hand_weights"].values()), 6) == 18
+    assert round(sum(profile_12_20["hand_weights"].values()), 6) == 20
+    assert round(sum(profile_9_12["hand_weights"].values()), 6) == 12
+    assert round(range_weight(5, 7, profile_12_18["hand_weights"]), 2) == 4.31
+    assert round(range_weight(5, 7, profile_12_20["hand_weights"]), 2) == 4.79
+    assert round(range_weight(8, 9, profile_9_12["hand_weights"]), 2) == 3.54
+
+
+def test_allocation_can_use_scaled_hand_weight_profile():
+    profile = build_hand_weight_profile(12, 18)
+    result = allocate_bunches_by_hands(
+        5000,
+        profile["kg_per_bunch"],
+        profile["hands_per_bunch"],
+        [_row(1, 1, "6H", 5, 7, 240)],
+        hand_weights=profile["hand_weights"],
+    )
+    row = result["rows"][0]
+
+    assert round(row["kg_per_bunch_for_sku"], 2) == 4.31
+    assert row["bunches_needed"] == 724
+    assert row["boxes_fulfilled"] == 240
 
 
 def test_6h_examples_from_guide():
@@ -138,6 +169,16 @@ def test_parent_ranges_generate_all_contiguous_subranges():
     assert (6, 9) in ranges
     assert (1, 9) in ranges
     assert len(ranges) == 45
+
+
+def test_nine_hand_profile_uses_inferred_parent_ranges():
+    ranges_30cp = _valid_optimizer_ranges(_optimizer_row(1, 1, "30CP", 100), 9)
+    ranges_15cp = _valid_optimizer_ranges(_optimizer_row(1, 1, "15CP", 100, market="Hàn"), 9)
+
+    assert (1, 7) in ranges_30cp
+    assert (8, 9) in ranges_15cp
+    assert (8, 8) in ranges_15cp
+    assert (10, 10) not in ranges_15cp
 
 
 def test_fixed_specs_are_parent_ranges_too():

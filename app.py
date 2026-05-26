@@ -25,7 +25,9 @@ try:
         DEFAULT_SKU_ROWS,
         OPTIMIZER_SKU_RULES,
         allocate_bunches_optimized,
+        build_hand_weight_profile,
         calculate_max_containers_by_market,
+        get_optimizer_sku_rules,
     )
 except ImportError:
     from container_allocation import DEFAULT_SKU_ROWS, allocate_bunches_by_hands
@@ -83,6 +85,7 @@ except ImportError:
         kg_per_box=13,
         boxes_per_container=1320,
         beam_width=None,
+        hand_weights=None,
     ):
         fallback_rows = []
         for row in sku_rows:
@@ -99,6 +102,7 @@ except ImportError:
             fallback_rows,
             kg_per_box=kg_per_box,
             boxes_per_container=boxes_per_container,
+            hand_weights=hand_weights,
         )
         result.setdefault("loss", {})
         result["summary"].setdefault("optimizer_loss", 0.0)
@@ -120,6 +124,7 @@ except ImportError:
         market_order,
         kg_per_box=13,
         boxes_per_container=1320,
+        hand_weights=None,
     ):
         source_kg = max(0, total_bunches) * max(0, kg_per_bunch)
         kg_per_hand = kg_per_bunch / hands_per_bunch if hands_per_bunch else 0
@@ -143,6 +148,18 @@ except ImportError:
             "solver_status": "APPROXIMATE",
             "solver_backend": "legacy_fallback",
         }
+
+    def build_hand_weight_profile(hands_per_bunch, target_kg_per_bunch):
+        kg_per_hand = target_kg_per_bunch / hands_per_bunch if hands_per_bunch else 0
+        return {
+            "hands_per_bunch": hands_per_bunch,
+            "kg_per_bunch": target_kg_per_bunch,
+            "kg_per_hand": kg_per_hand,
+            "hand_weights": {hand: kg_per_hand for hand in range(1, hands_per_bunch + 1)},
+        }
+
+    def get_optimizer_sku_rules(hands_per_bunch):
+        return OPTIMIZER_SKU_RULES
 
 if hasattr(st, "dialog"):
     dialog_decorator = st.dialog
@@ -5016,12 +5033,20 @@ CONTAINER_CUSTOMER_MARKETS = {
 CONTAINER_CUSTOMER_OPTIONS = list(CONTAINER_CUSTOMER_MARKETS.keys())
 
 
-def _container_sku_options_for_market(market: str) -> list:
+def _container_sku_definitions_for_hands(hands_per_bunch: int) -> dict:
+    try:
+        return get_optimizer_sku_rules(hands_per_bunch)
+    except Exception:
+        return CONTAINER_SKU_DEFINITIONS
+
+
+def _container_sku_options_for_market(market: str, hands_per_bunch: int = 12) -> list:
+    sku_definitions = _container_sku_definitions_for_hands(hands_per_bunch)
     options = [
-        sku for sku, cfg in CONTAINER_SKU_DEFINITIONS.items()
+        sku for sku, cfg in sku_definitions.items()
         if market in cfg.get("markets", [])
     ]
-    return options or list(CONTAINER_SKU_DEFINITIONS.keys())
+    return options or list(sku_definitions.keys())
 
 
 def _container_customer_market(customer: str) -> str:
@@ -5065,6 +5090,17 @@ def _container_clean_int(value, default: int = 0) -> int:
         return int(float(value))
     except (TypeError, ValueError):
         return default
+
+
+def _container_range_weight(hand_from: int, hand_to: int, hand_weights: dict) -> float:
+    return sum(float(hand_weights.get(hand, 0.0)) for hand in range(int(hand_from), int(hand_to) + 1))
+
+
+def _container_range_formula(hand_from: int, hand_to: int, hand_weights: dict) -> str:
+    values = [float(hand_weights.get(hand, 0.0)) for hand in range(int(hand_from), int(hand_to) + 1)]
+    parts = " + ".join(f"{value:.2f}" for value in values)
+    total = sum(values)
+    return f"{parts} = {total:.2f} kg/buồng"
 
 
 def _container_priority_map(values: list, fallback_values: list) -> dict:
@@ -5238,18 +5274,44 @@ def render_container_allocation_calculator():
         source_label = "Nhập tay"
 
     st.divider()
-    cfg1, cfg2, cfg3 = st.columns(3)
+    cfg1, cfg2, cfg3, cfg4 = st.columns([1.2, 1.3, 1, 1])
     with cfg1:
-        kg_mode = st.radio("Kịch bản kg/buồng", ["18 kg", "20 kg", "Tùy chỉnh"], horizontal=True, key="container_kg_mode")
+        bunch_type = st.selectbox(
+            "Loại buồng",
+            options=[12, 9],
+            format_func=lambda value: f"{value} nải",
+            key="container_bunch_type",
+        )
     with cfg2:
-        if kg_mode == "Tùy chỉnh":
-            kg_per_bunch = float(st.number_input("Kg/buồng", min_value=0.1, value=18.0, step=0.5, format="%.2f", key="container_custom_kg"))
+        if bunch_type == 12:
+            target_kg_per_bunch = st.radio(
+                "Kịch bản kg/buồng",
+                options=[18.0, 20.0],
+                format_func=lambda value: f"{value:g} kg",
+                horizontal=True,
+                key="container_12_hand_kg_scenario",
+            )
         else:
-            kg_per_bunch = 18.0 if kg_mode == "18 kg" else 20.0
-            st.metric("Kg/buồng", f"{kg_per_bunch:g} kg")
+            target_kg_per_bunch = 12.0
+            st.metric("Kịch bản kg/buồng", "12 kg")
     with cfg3:
-        hands_per_bunch = 12
-        st.metric("Số nải/buồng", "12 nải")
+        hand_profile = build_hand_weight_profile(bunch_type, target_kg_per_bunch)
+        hands_per_bunch = int(hand_profile["hands_per_bunch"])
+        kg_per_bunch = float(hand_profile["kg_per_bunch"])
+        hand_weights = hand_profile["hand_weights"]
+        st.metric("Kg/buồng", f"{kg_per_bunch:.1f} kg")
+    with cfg4:
+        st.metric("Kg/nải TB", f"{hand_profile['kg_per_hand']:.2f}")
+
+    with st.popover("Bảng kg từng nải"):
+        st.dataframe(
+            pd.DataFrame([
+                {"Nải": hand, "Kg sau quy đổi": round(weight, 3)}
+                for hand, weight in hand_weights.items()
+            ]),
+            use_container_width=True,
+            hide_index=True,
+        )
 
     calc_mode_options = ["Theo đơn hàng", "Tối đa cont theo thị trường"]
     calc_mode = _persisted_segmented_control(
@@ -5275,6 +5337,7 @@ def render_container_allocation_calculator():
             market_order,
             kg_per_box=KG_PER_BOX,
             boxes_per_container=BOXES_PER_CONTAINER,
+            hand_weights=hand_weights,
         )
         summary = max_result["summary"]
 
@@ -5293,7 +5356,7 @@ def render_container_allocation_calculator():
         with m3:
             st.metric("Kg nguồn", f"{summary['source_kg']:,.0f}")
         with m4:
-            st.metric("Kg/nải", f"{summary['kg_per_hand']:.2f}")
+            st.metric("Kg/nải TB", f"{summary['kg_per_hand']:.2f}")
         with m5:
             st.metric("Cont lý thuyết", f"{summary['source_cont_capacity']:,.2f}")
         with m6:
@@ -5344,9 +5407,8 @@ def render_container_allocation_calculator():
                     "Mã hàng": "Tổng",
                     "Nải chọn": "Theo bộ quy cách",
                     "Cách tính": (
-                        f"{int(market_row['available_bundles']):,} buồng khả dụng x "
-                        f"{int(market_row['hands_per_recipe'])} nải x {summary['kg_per_hand']:.2f} kg/nải "
-                        f"/ {KG_PER_BOX} kg"
+                        f"{int(market_row['available_bundles']):,} buồng khả dụng; "
+                        f"solver chọn các dải chi tiết bên dưới"
                     ),
                     "Kết quả": (
                         f"{int(market_row['capacity_boxes']):,} thùng khả dụng, "
@@ -5362,7 +5424,7 @@ def render_container_allocation_calculator():
                             "Nải chọn": detail_row["range_label"],
                             "Cách tính": (
                                 f"{int(detail_row['bundles_used']):,} buồng x "
-                                f"{int(detail_row['hand_count'])} nải x {summary['kg_per_hand']:.2f} kg/nải "
+                                f"({_container_range_formula(detail_row['hand_from'], detail_row['hand_to'], hand_weights)}) "
                                 f"/ {KG_PER_BOX} kg"
                             ),
                             "Kết quả": f"{int(detail_row['boxes_equivalent']):,} thùng quy đổi",
@@ -5388,6 +5450,7 @@ def render_container_allocation_calculator():
                 "source_bunches": source_bunches,
                 "kg_per_bunch": kg_per_bunch,
                 "hands_per_bunch": hands_per_bunch,
+                "hand_weights": hand_weights,
                 "market_order": market_order,
                 "result": max_result,
                 "saved_at": datetime.now().isoformat(),
@@ -5405,7 +5468,7 @@ def render_container_allocation_calculator():
     with help_col:
         with st.popover("?"):
             sku_range_rows = []
-            for sku, sku_def in CONTAINER_SKU_DEFINITIONS.items():
+            for sku, sku_def in _container_sku_definitions_for_hands(hands_per_bunch).items():
                 ranges = ", ".join(f"{hand_from}-{hand_to}" for hand_from, hand_to in sku_def["ranges"])
                 sku_range_rows.append({
                     "Mã hàng": sku,
@@ -5426,7 +5489,7 @@ def render_container_allocation_calculator():
         if customer not in CONTAINER_CUSTOMER_OPTIONS:
             customer = ""
         market = _container_customer_market(customer)
-        market_skus = _container_sku_options_for_market(market) if market else []
+        market_skus = _container_sku_options_for_market(market, hands_per_bunch) if market else []
         sku = _container_clean_text(row.get("Mã hàng")).upper()
         if not market_skus or sku not in market_skus:
             sku = ""
@@ -5465,7 +5528,7 @@ def render_container_allocation_calculator():
                 customer = ""
             market = _container_customer_market(customer)
         with row_cols[1]:
-            sku_options = _container_sku_options_for_market(market) if market else []
+            sku_options = _container_sku_options_for_market(market, hands_per_bunch) if market else []
             sku_select_options = [CONTAINER_EMPTY_OPTION] + sku_options
             sku_key = f"container_order_sku_{row_id}"
             if st.session_state.get(sku_key) not in sku_select_options:
@@ -5584,6 +5647,7 @@ def render_container_allocation_calculator():
         allocation_rows,
         kg_per_box=KG_PER_BOX,
         boxes_per_container=BOXES_PER_CONTAINER,
+        hand_weights=hand_weights,
     )
     summary = result["summary"]
 
@@ -5602,7 +5666,7 @@ def render_container_allocation_calculator():
     with m3:
         st.metric("Kg nguồn", f"{summary['source_kg']:,.0f}")
     with m4:
-        st.metric("Kg/nải", f"{summary['kg_per_hand']:.2f}")
+        st.metric("Kg/nải TB", f"{summary['kg_per_hand']:.2f}")
     with m5:
         st.metric("Cont lý thuyết", f"{summary['source_cont_capacity']:,.2f}")
     with m6:
@@ -5692,8 +5756,7 @@ def render_container_allocation_calculator():
                 "Mã hàng": sku_row["sku"],
                 "Nải chọn": sku_row["range_label"],
                 "Cách tính": (
-                    f"{int(sku_row['hand_count'])} nải x {summary['kg_per_hand']:.2f} kg/nải "
-                    f"= {sku_row['kg_per_bunch_for_sku']:.2f} kg/buồng; "
+                    f"{_container_range_formula(sku_row['hand_from'], sku_row['hand_to'], hand_weights)}; "
                     f"{int(sku_row['requested_boxes']):,} thùng x {KG_PER_BOX} kg "
                     f"/ {sku_row['kg_per_bunch_for_sku']:.2f}"
                 ),
@@ -5727,6 +5790,7 @@ def render_container_allocation_calculator():
             "source_bunches": source_bunches,
             "kg_per_bunch": kg_per_bunch,
             "hands_per_bunch": hands_per_bunch,
+            "hand_weights": hand_weights,
             "sku_rows": order_rows,
             "customer_order": customer_order,
             "sku_orders_by_customer": sku_orders_by_customer,

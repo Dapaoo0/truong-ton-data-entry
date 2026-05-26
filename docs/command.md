@@ -2,6 +2,26 @@
 
 Tài liệu này lưu lại tóm tắt các yêu cầu của người dùng để theo dõi tiến độ và nhiệm vụ.
 
+## Ngày 26/05/2026
+
+- Chuẩn hóa máy tính phân bổ container dùng profile khối lượng từng nải: profile gốc 12 nải tổng 28.4kg và 9 nải tổng 19kg được scale về kịch bản 18/20/12kg.
+- Đổi công thức optimizer từ chia đều kg/nải sang cộng kg từng nải trong dải cắt sau scale.
+- Thêm lựa chọn `Loại buồng` trong UI: 12 nải chọn 18kg/20kg, 9 nải dùng 12kg; hiển thị bảng kg từng nải sau quy đổi.
+- Thêm mapping suy luận cho quy cách buồng 9 nải và cập nhật docs/tests liên quan.
+
+## Ngày 23/05/2026
+
+- Thêm DB constraint `chk_stage_logs_active_stage_requires_base_lot` để chặn insert active `Chích bắp`/`Cắt bắp` thiếu `base_lot_id`.
+- Xóa cứng dữ liệu D3 Farm 126 tuần 20 vì D3 chưa có `base_lots`/đợt trồng hợp lệ trong hệ thống.
+- Cập nhật docs: lô cũ/chưa trồng không được insert vào `stage_logs` cho `Chích bắp`/`Cắt bắp`; nếu cần tracking legacy phải có cơ chế riêng.
+
+## Ngày 22/05/2026
+
+- Cập nhật dữ liệu chích bắp Farm 157 tuần 20 từ file Excel, bỏ qua 8A theo yêu cầu, và verify khớp từng lô/từng ngày sau khi loại dữ liệu dư.
+- Làm rõ quy ước `3B`/`3BF`: `3B` = 3B đợt 2/F0 (`base_lot_id=7`), `3BF` = 3B đợt 1/F1 (`base_lot_id=25`), cùng `dim_lo_id` lô 3B.
+- Ghi chú cảnh báo truy vấn: `base_lot_id=25` có nhiều dòng `seasons` (F0/F1), nên join `stage_logs -> seasons` theo `base_lot_id` có thể nhân đôi record nếu không lọc `vu` hoặc dedupe theo `stage_logs.id`.
+- Cập nhật docs: `business_logic.md`, `schema.md`, `findings.md`, `changelog.md`, `codebase_summary.md`, `command.md`.
+
 ## Ngày 20/05/2026
 
 - Chuẩn hóa mục tiêu máy tính phân bổ container: kết quả chính là **số buồng nguyên tối thiểu cần xẻ** để đáp ứng đơn hàng theo ưu tiên.

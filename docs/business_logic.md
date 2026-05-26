@@ -139,6 +139,12 @@ Mục tiêu nghiệp vụ của máy tính này là **tính số buồng nguyên
 - Thuật toán tính `active_bunches_estimated = max(số buồng đã dùng ở từng vị trí nải)`. Đây là số buồng nguyên tối thiểu cần mở để có các nải đã phân bổ.
 - Ví dụ: 27CP dùng nải 1-5 của 902 buồng và 6H dùng nải 6-7 của 1,040 buồng → chỉ cần mở 1,040 buồng, không phải 1,942 buồng, vì 902 buồng đầu có thể đồng thời cho 27CP và 6H.
 
+**Profile khối lượng nải**
+- Bảng kg từng nải là profile tỷ trọng, không dùng trực tiếp như kg/buồng. App scale profile theo kịch bản: `kg_nải = kg_profile_gốc * target_kg_buồng / tổng_profile_gốc`.
+- Profile 12 nải có tổng gốc `28.4kg`, dùng cho kịch bản `18kg` và `20kg`.
+- Profile 9 nải có tổng gốc `19.0kg`, dùng cho kịch bản `12kg`.
+- Khi tính một dải cắt, thuật toán cộng kg từng nải sau scale trong dải đó. Ví dụ `12 nải - 18kg`, `6H 5-7` ≈ `4.31kg/buồng`.
+
 **Quy cách hiện tại**
 | Mã hàng | Thị trường | Khoảng mẹ |
 |---|---|---|
@@ -149,6 +155,8 @@ Mục tiêu nghiệp vụ của máy tính này là **tính số buồng nguyên
 | 8H | Hàn | 1-4 |
 | 5/6H | Hàn | 5-9 |
 | 15CP | Hàn | 10-12 |
+
+Với buồng 9 nải, hệ thống dùng mapping suy luận theo vùng tương đối: `27CP Nhật 1-4`, `30CP Nhật 1-7`, `6H Nhật 4-5`, `5H Nhật 6-8`, `8H Hàn 1-3`, `5/6H Hàn 4-7`, `15CP Hàn 8-9`.
 
 Các khoảng trên là **khoảng mẹ**. Thuật toán được phép chọn mọi khoảng con liền kề trong khoảng mẹ. Một dòng đơn hàng cũng có thể được tách thành nhiều khoảng con nếu việc tách đó giúp giảm thiếu hàng hoặc giảm số buồng nguyên phải xẻ. Tuy nhiên số đoạn cắt là penalty vận hành đứng ngay sau `active_bunches_estimated`, nên thuật toán sẽ ưu tiên một dải liền kề duy nhất khi số buồng xẻ không đổi.
 
@@ -165,7 +173,7 @@ Khách hàng quyết định thị trường và danh sách mã hàng hợp lệ
 1. Giảm thiếu thùng theo thứ tự ưu tiên khách hàng, ưu tiên mã hàng trong khách hàng, thứ tự dòng.
 2. Với mức đáp ứng đã chốt, giảm số buồng nguyên cần xẻ (`active_bunches_estimated`).
 3. Giảm số đoạn cắt để tránh bẻ dòng đơn hàng không cần thiết.
-4. Giảm tổng nải-buồng tiêu thụ, kg dư do làm tròn.
+4. Giảm tổng kg/nải-buồng tiêu thụ, kg dư do làm tròn.
 5. Tie-break ổn định theo thứ tự khoảng con.
 
 Nếu nguồn buồng không đủ, thuật toán vẫn ưu tiên đáp ứng dòng ưu tiên cao nhất trước, sau đó báo thiếu thùng cho các dòng còn lại. Nếu nguồn dư, thuật toán không dùng hết nguồn mà báo số buồng xẻ tối thiểu.
@@ -254,11 +262,18 @@ Hệ thống tự động liên kết log entries (stage_logs, harvest_logs, des
 - Mỗi record `stage_logs` giờ có `base_lot_id` chính xác → phân biệt được chích bắp thuộc đợt nào.
 - Xem chi tiết thuật toán tại §4.2.
 
+### 5.2.1 Quy ước 3B / 3BF trong file Excel
+- Trong file "mặt bằng chích bắp", `3B` và `3BF` không phải 2 lô khác nhau. Cả hai cùng là `dim_lo.lo_name = "3B"`.
+- `3B` = 3B đợt 2, đang là F0 → gắn `base_lot_id = 7`.
+- `3BF` = 3B đợt 1, đang là F1 → gắn `base_lot_id = 25`.
+- Khi import dữ liệu có ký hiệu `3BF`, phải set `base_lot_id` thủ công. Không để FIFO tự chọn, vì FIFO theo đợt cũ nhất có thể gán sai ý nghĩa khi cùng lô có nhiều đợt/vụ.
+- Khi query kiểm tra, tránh join thẳng `stage_logs -> seasons` rồi cộng số lượng nếu không lọc `seasons.vu` hoặc không dedupe theo `stage_logs.id`. Một `base_lot_id` có thể có nhiều dòng `seasons` (F0, F1...), nên join như vậy sẽ nhân đôi record log.
+
 ### 5.3 Edge case: Lô F vụ cũ (không có base_lot)
 - Một số lô vẫn đang thu hoạch chuối Fn từ đợt trồng trước khi hệ thống được triển khai. Các lô này **không có record `base_lots`** trong database.
 - VD: Lô D3 Farm 126 — chích bắp 43 cây ngày 30/04/2026 nhưng không có đợt trồng nào.
-- **Xử lý**: Insert `stage_logs` với `base_lot_id = NULL`. Record vẫn được lưu để tracking nhưng **không ảnh hưởng forecast** (forecast chỉ tạo cho `loai_trong = 'Trồng mới'`).
-- **Lưu ý**: `base_lot_id` trong `stage_logs` là **nullable** (`is_nullable = YES`). FIFO trigger skip khi `base_lot_id IS NOT NULL`, và không auto-assign nếu không tìm thấy batch phù hợp.
+- **Xử lý hiện tại**: Không insert `Chích bắp`/`Cắt bắp` vào `stage_logs` nếu lô không có `base_lot_id` hợp lệ. Đây là dữ liệu ngoài phạm vi tracking hiện tại; nếu cần theo dõi legacy riêng thì phải có cơ chế/bảng riêng.
+- **DB guardrail**: Constraint `chk_stage_logs_active_stage_requires_base_lot` chặn mọi record active của `Chích bắp` hoặc `Cắt bắp` khi `base_lot_id IS NULL`. Điều này ngăn lỗi nhập trực tiếp SQL/API bỏ qua logic app.
 
 ---
 

@@ -2,6 +2,36 @@
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
 
+## [26/05/2026] - Profile khối lượng nải cho máy tính phân bổ container
+
+#### Feature: Scale kg từng nải theo kịch bản buồng (`container_allocation.py`, `app.py`)
+- **[Profile]**: Thêm profile gốc 12 nải tổng `28.4kg` và 9 nải tổng `19.0kg`; app scale theo tỷ lệ về `12 nải - 18kg`, `12 nải - 20kg`, hoặc `9 nải - 12kg`.
+- **[Optimizer]**: Dải cắt không còn dùng `kg/buồng / số nải`; kg của dải = tổng kg từng nải sau scale. Objective phụ giảm kg tiêu thụ thay cho nải-buồng thô.
+- **[9 nải]**: Thêm mapping suy luận theo vùng tương đối: `27CP 1-4`, `30CP 1-7`, `6H 4-5`, `5H 6-8`, `8H 1-3`, `5/6H 4-7`, `15CP 8-9`.
+- **[UI]**: Máy tính cho chọn `Loại buồng`; 12 nải chọn kịch bản 18/20kg, 9 nải dùng 12kg. Popover hiển thị bảng kg từng nải sau quy đổi.
+- **[Tests]**: Thêm tests cho tổng kg sau scale, range weight và phân bổ bằng profile scaled.
+
+---
+
+## [23/05/2026] - DB Guardrail: Stage Logs Require Base Lot
+
+#### Data Integrity: Chặn Chích bắp/Cắt bắp không có đợt trồng
+- **[DB Constraint]**: Thêm `chk_stage_logs_active_stage_requires_base_lot` trên `public.stage_logs`.
+- **[Rule]**: Record active của `Chích bắp` hoặc `Cắt bắp` bắt buộc có `base_lot_id`; dòng đã xóa mềm (`is_deleted = true`) được bỏ qua để không phá dữ liệu lịch sử.
+- **[Impact]**: Không thể insert dữ liệu kiểu lô cũ/chưa trồng vào `stage_logs` với `base_lot_id = NULL` nữa. Case D3 Farm 126 tuần 20 đã được xóa cứng và không tính vào dữ liệu hiện tại.
+
+---
+
+## [22/05/2026] - Data Note: Chích bắp Farm 157 tuần 20
+
+#### Documentation: Quy ước 3B/3BF và cảnh báo join `seasons`
+- **[Quy ước Excel]**: `3B` = lô 3B đợt 2/F0 (`base_lot_id=7`); `3BF` = lô 3B đợt 1/F1 (`base_lot_id=25`). Cả hai cùng thuộc `dim_lo.lo_name = "3B"`.
+- **[Import rule]**: Khi file Excel ghi rõ `3BF`, phải set `base_lot_id` thủ công; không để FIFO tự phân bổ vì FIFO có thể dồn vào đợt cũ nhất không đúng ý nghĩa file.
+- **[Query pitfall]**: Một `base_lot_id` có thể có nhiều dòng `seasons` (F0, F1...). Join `stage_logs -> seasons` theo `base_lot_id` mà không lọc `vu` hoặc không dedupe theo `stage_logs.id` sẽ nhân đôi số lượng khi kiểm tra.
+- **[Verification]**: Sau import tuần 20, dữ liệu chích bắp Farm 157 khớp Excel theo từng lô sau khi loại `8A`: tổng `7,560` cây.
+
+---
+
 ## [20/05/2026] - Chuẩn hóa mục tiêu máy tính phân bổ container
 
 #### Fix/Refactor: Tối ưu theo số buồng nguyên tối thiểu cần xẻ (`container_allocation.py`, `app.py`)
