@@ -149,13 +149,50 @@ except ImportError:
             "solver_backend": "legacy_fallback",
         }
 
+    _FALLBACK_BASE_HAND_WEIGHT_PROFILES = {
+        12: {
+            1: 1.3,
+            2: 1.5,
+            3: 1.7,
+            4: 2.0,
+            5: 2.0,
+            6: 2.3,
+            7: 2.5,
+            8: 2.6,
+            9: 2.7,
+            10: 3.0,
+            11: 3.3,
+            12: 3.5,
+        },
+        9: {
+            1: 1.4,
+            2: 1.5,
+            3: 1.7,
+            4: 1.9,
+            5: 2.1,
+            6: 2.3,
+            7: 2.5,
+            8: 2.7,
+            9: 2.9,
+        },
+    }
+
     def build_hand_weight_profile(hands_per_bunch, target_kg_per_bunch):
-        kg_per_hand = target_kg_per_bunch / hands_per_bunch if hands_per_bunch else 0
+        base_profile = _FALLBACK_BASE_HAND_WEIGHT_PROFILES.get(int(hands_per_bunch), {})
+        base_total = sum(base_profile.values())
+        if base_profile and base_total > 0:
+            scale = float(target_kg_per_bunch) / base_total
+            hand_weights = {hand: weight * scale for hand, weight in base_profile.items()}
+        else:
+            kg_per_hand = target_kg_per_bunch / hands_per_bunch if hands_per_bunch else 0
+            hand_weights = {hand: kg_per_hand for hand in range(1, hands_per_bunch + 1)}
+        kg_per_bunch = sum(hand_weights.values())
+        kg_per_hand = kg_per_bunch / len(hand_weights) if hand_weights else 0
         return {
-            "hands_per_bunch": hands_per_bunch,
-            "kg_per_bunch": target_kg_per_bunch,
+            "hands_per_bunch": len(hand_weights) or hands_per_bunch,
+            "kg_per_bunch": kg_per_bunch,
             "kg_per_hand": kg_per_hand,
-            "hand_weights": {hand: kg_per_hand for hand in range(1, hands_per_bunch + 1)},
+            "hand_weights": hand_weights,
         }
 
     def get_optimizer_sku_rules(hands_per_bunch):
@@ -5304,6 +5341,7 @@ def render_container_allocation_calculator():
         st.metric("Kg/nải TB", f"{hand_profile['kg_per_hand']:.2f}")
 
     with st.popover("Bảng kg từng nải"):
+        st.caption("Kg/nải TB chỉ là trung bình; bảng này và solver dùng kg từng nải sau quy đổi.")
         st.dataframe(
             pd.DataFrame([
                 {"Nải": hand, "Kg sau quy đổi": round(weight, 3)}
