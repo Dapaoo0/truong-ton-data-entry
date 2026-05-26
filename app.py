@@ -5185,6 +5185,223 @@ def _prepare_container_rows_for_allocation(order_rows: list, customer_order: lis
     return allocation_rows
 
 
+CONTAINER_SAVED_PLANS_KEY = "container_calc_saved_plans"
+
+
+def _container_json_safe(value):
+    try:
+        json.dumps(value)
+        return value
+    except TypeError:
+        return json.loads(json.dumps(value, default=str))
+
+
+def _container_saved_plans() -> list:
+    plans = st.session_state.get(CONTAINER_SAVED_PLANS_KEY)
+    if not isinstance(plans, list):
+        plans = []
+
+    legacy_plan = st.session_state.pop("container_calc_saved_plan", None)
+    if isinstance(legacy_plan, dict):
+        legacy_plan = dict(legacy_plan)
+        legacy_plan.setdefault("id", f"legacy_{uuid.uuid4().hex[:10]}")
+        legacy_plan.setdefault("name", _container_saved_plan_title(legacy_plan, len(plans)))
+        plans.insert(0, legacy_plan)
+
+    for idx, plan in enumerate(plans):
+        if isinstance(plan, dict):
+            plan.setdefault("id", f"plan_{idx}_{uuid.uuid4().hex[:8]}")
+            plan.setdefault("name", _container_saved_plan_title(plan, idx))
+    st.session_state[CONTAINER_SAVED_PLANS_KEY] = plans
+    return plans
+
+
+def _container_format_saved_at(saved_at: str) -> str:
+    try:
+        saved_dt = datetime.fromisoformat(str(saved_at))
+        return saved_dt.strftime("%H:%M - %d/%m/%Y")
+    except (TypeError, ValueError):
+        return "Chưa rõ thời gian"
+
+
+def _container_saved_plan_title(plan: dict, index: int = 0) -> str:
+    mode = _container_clean_text(plan.get("mode"), "Theo đơn hàng")
+    saved_at = _container_format_saved_at(plan.get("saved_at"))
+    return f"{mode} · {saved_at}" if saved_at else f"Kế hoạch {index + 1}"
+
+
+def _save_container_plan(plan: dict) -> None:
+    plans = _container_saved_plans()
+    plan = dict(plan)
+    plan["id"] = uuid.uuid4().hex
+    plan["saved_at"] = datetime.now().isoformat(timespec="seconds")
+    plan["name"] = _container_saved_plan_title(plan, len(plans))
+    plans.insert(0, plan)
+    st.session_state[CONTAINER_SAVED_PLANS_KEY] = plans
+
+
+def _container_plan_summary_rows(plan: dict) -> list:
+    result = plan.get("result", {}) if isinstance(plan.get("result"), dict) else {}
+    summary = result.get("summary", {}) if isinstance(result.get("summary"), dict) else {}
+    rows = [
+        {"Thông tin": "Chế độ", "Giá trị": plan.get("mode", "")},
+        {"Thông tin": "Nguồn", "Giá trị": plan.get("source", "")},
+        {"Thông tin": "Số buồng nguồn", "Giá trị": f"{int(plan.get('source_bunches', 0)):,}"},
+        {"Thông tin": "Loại buồng", "Giá trị": f"{int(plan.get('hands_per_bunch', 0))} nải"},
+        {"Thông tin": "Kg/buồng", "Giá trị": f"{float(plan.get('kg_per_bunch', 0)):.2f}"},
+        {"Thông tin": "Buồng xẻ tối thiểu", "Giá trị": f"{int(summary.get('active_bunches_estimated', 0)):,}"},
+        {"Thông tin": "Thùng đáp ứng", "Giá trị": f"{int(summary.get('fulfilled_boxes', 0)):,}"},
+        {"Thông tin": "Cont đáp ứng", "Giá trị": f"{float(summary.get('fulfilled_containers', 0)):,.2f}"},
+        {"Thông tin": "Thuật toán", "Giá trị": f"{summary.get('solver_status', '')} · {summary.get('solver_backend', '')}".strip(" ·")},
+        {"Thông tin": "Thời điểm lưu", "Giá trị": _container_format_saved_at(plan.get("saved_at"))},
+    ]
+    return rows
+
+
+def _container_plan_market_rows(plan: dict) -> pd.DataFrame:
+    result = plan.get("result", {}) if isinstance(plan.get("result"), dict) else {}
+    rows = result.get("rows", [])
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
+    if "market" not in df.columns:
+        return pd.DataFrame()
+
+    if "full_containers" in df.columns:
+        return pd.DataFrame([
+            {
+                "Thị trường": row.get("market", ""),
+                "Cont đủ": int(row.get("full_containers", 0)),
+                "Thùng chốt": int(row.get("boxes_allocated", 0)),
+                "Thùng lẻ": int(row.get("remaining_boxes_potential", 0)),
+                "Buồng dùng": int(row.get("active_bunches_used", row.get("bundles_used", 0))),
+                "Kg phân bổ": round(float(row.get("kg_allocated", 0)), 1),
+            }
+            for row in rows
+        ])
+
+    grouped = (
+        df.groupby("market", as_index=False)
+        .agg(
+            requested_boxes=("requested_boxes", "sum"),
+            boxes_fulfilled=("boxes_fulfilled", "sum"),
+            short_boxes=("short_boxes", "sum"),
+        )
+        .sort_values("market")
+    )
+    grouped["full_containers"] = grouped["boxes_fulfilled"] // BOXES_PER_CONTAINER
+    grouped["remaining_boxes"] = grouped["boxes_fulfilled"] % BOXES_PER_CONTAINER
+    return grouped.rename(columns={
+        "market": "Thị trường",
+        "requested_boxes": "Thùng yêu cầu",
+        "boxes_fulfilled": "Thùng đáp ứng",
+        "short_boxes": "Thiếu thùng",
+        "full_containers": "Cont đủ",
+        "remaining_boxes": "Thùng lẻ",
+    })
+
+
+@dialog_decorator("Chi tiết kế hoạch")
+def _render_container_saved_plan_dialog(plan_id: str):
+    plan = next(
+        (item for item in _container_saved_plans() if isinstance(item, dict) and item.get("id") == plan_id),
+        None,
+    )
+    if not plan:
+        st.warning("Kế hoạch này không còn tồn tại.")
+        return
+
+    st.markdown(f"#### {plan.get('name') or _container_saved_plan_title(plan)}")
+    st.dataframe(pd.DataFrame(_container_plan_summary_rows(plan)), use_container_width=True, hide_index=True)
+
+    hand_weights = plan.get("hand_weights", {})
+    if isinstance(hand_weights, dict) and hand_weights:
+        with st.expander("Kg từng nải", expanded=False):
+            st.dataframe(
+                pd.DataFrame([
+                    {"Nải": hand, "Kg sau quy đổi": round(float(weight), 3)}
+                    for hand, weight in hand_weights.items()
+                ]),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    if plan.get("sku_rows"):
+        with st.expander("Input đơn hàng", expanded=True):
+            st.dataframe(pd.DataFrame(plan.get("sku_rows", [])), use_container_width=True, hide_index=True)
+
+    priority_rows = []
+    for idx, customer in enumerate(plan.get("customer_order", []) or [], start=1):
+        priority_rows.append({"Nhóm ưu tiên": "Khách hàng", "Ưu tiên": idx, "Giá trị": customer})
+    for customer, skus in (plan.get("sku_orders_by_customer", {}) or {}).items():
+        for idx, sku in enumerate(skus or [], start=1):
+            priority_rows.append({"Nhóm ưu tiên": f"Loại hàng - {customer}", "Ưu tiên": idx, "Giá trị": sku})
+    for idx, market in enumerate(plan.get("market_order", []) or [], start=1):
+        priority_rows.append({"Nhóm ưu tiên": "Thị trường", "Ưu tiên": idx, "Giá trị": market})
+    if priority_rows:
+        with st.expander("Input ưu tiên", expanded=False):
+            st.dataframe(pd.DataFrame(priority_rows), use_container_width=True, hide_index=True)
+
+    market_df = _container_plan_market_rows(plan)
+    if not market_df.empty:
+        with st.expander("Output tổng theo thị trường", expanded=True):
+            st.dataframe(market_df, use_container_width=True, hide_index=True)
+
+    result = plan.get("result", {}) if isinstance(plan.get("result"), dict) else {}
+    if result.get("rows"):
+        with st.expander("Output theo mã hàng / thị trường", expanded=False):
+            st.dataframe(pd.DataFrame(result["rows"]), use_container_width=True, hide_index=True)
+    if result.get("detail_rows"):
+        with st.expander("Quá trình chọn nải chi tiết", expanded=False):
+            st.dataframe(pd.DataFrame(result["detail_rows"]), use_container_width=True, hide_index=True)
+    if result.get("remaining_hands"):
+        with st.expander("Tồn nải còn lại", expanded=False):
+            st.dataframe(
+                pd.DataFrame([
+                    {"Nải": hand, "Buồng còn lại": qty}
+                    for hand, qty in result["remaining_hands"].items()
+                ]),
+                use_container_width=True,
+                hide_index=True,
+            )
+    with st.expander("Dữ liệu đầy đủ", expanded=False):
+        st.json(_container_json_safe(plan), expanded=False)
+
+
+def _render_container_saved_plan_cards():
+    plans = _container_saved_plans()
+    if not plans:
+        return
+
+    st.divider()
+    st.markdown("##### Kế hoạch đã lưu")
+    for idx, plan in enumerate(plans):
+        if not isinstance(plan, dict):
+            continue
+        plan_id = plan.get("id") or f"plan_{idx}"
+        result = plan.get("result", {}) if isinstance(plan.get("result"), dict) else {}
+        summary = result.get("summary", {}) if isinstance(result.get("summary"), dict) else {}
+        with st.container(border=True):
+            title_col, b_col, box_col, action_col, delete_col = st.columns([3, 1, 1, 0.8, 0.7])
+            with title_col:
+                st.markdown(f"**{plan.get('name') or _container_saved_plan_title(plan, idx)}**")
+                st.caption(f"{plan.get('source', '')} · {int(plan.get('source_bunches', 0)):,} buồng · {int(plan.get('hands_per_bunch', 0))} nải · {float(plan.get('kg_per_bunch', 0)):.1f} kg/buồng")
+            with b_col:
+                st.metric("Buồng xẻ", f"{int(summary.get('active_bunches_estimated', 0)):,}")
+            with box_col:
+                st.metric("Thùng", f"{int(summary.get('fulfilled_boxes', 0)):,}")
+            with action_col:
+                if st.button("Xem", key=f"container_plan_open_{plan_id}", use_container_width=True):
+                    _render_container_saved_plan_dialog(plan_id)
+            with delete_col:
+                if st.button("Xóa", key=f"container_plan_delete_{plan_id}", use_container_width=True):
+                    st.session_state[CONTAINER_SAVED_PLANS_KEY] = [
+                        item for item in plans
+                        if not isinstance(item, dict) or item.get("id") != plan_id
+                    ]
+                    st.rerun()
+
+
 def _render_container_customer_priority_controls(key_prefix: str) -> list:
     priority_customer_options = [CONTAINER_EMPTY_OPTION] + CONTAINER_CUSTOMER_OPTIONS
     customer_order = []
@@ -5482,8 +5699,9 @@ def render_container_allocation_calculator():
                 st.dataframe(remaining_df, use_container_width=True, hide_index=True)
 
         if st.button("Lưu phương án trong phiên", use_container_width=True, type="secondary", key="container_save_max_session"):
-            st.session_state["container_calc_saved_plan"] = {
+            _save_container_plan({
                 "mode": calc_mode,
+                "source_mode": source_mode,
                 "source": source_label,
                 "source_bunches": source_bunches,
                 "kg_per_bunch": kg_per_bunch,
@@ -5491,13 +5709,10 @@ def render_container_allocation_calculator():
                 "hand_weights": hand_weights,
                 "market_order": market_order,
                 "result": max_result,
-                "saved_at": datetime.now().isoformat(),
-            }
-            st.success("Đã lưu phương án tạm trong phiên hiện tại.")
+            })
+            st.success("Đã lưu kế hoạch vào danh sách trong phiên hiện tại.")
 
-        saved_plan = st.session_state.get("container_calc_saved_plan")
-        if saved_plan:
-            st.caption(f"Phương án đã lưu gần nhất: {saved_plan.get('source')} · {saved_plan.get('source_bunches', 0):,} buồng")
+        _render_container_saved_plan_cards()
         return
 
     title_col, help_col = st.columns([10, 1])
@@ -5676,6 +5891,7 @@ def render_container_allocation_calculator():
     allocation_rows = _prepare_container_rows_for_allocation(order_rows, customer_order, sku_orders_by_customer)
     if not allocation_rows:
         st.info("Chọn khách hàng, mã hàng và nhập nhu cầu để bắt đầu tính phân bổ.")
+        _render_container_saved_plan_cards()
         return
 
     result = allocate_bunches_optimized(
@@ -5823,7 +6039,9 @@ def render_container_allocation_calculator():
             st.dataframe(remaining_df, use_container_width=True, hide_index=True)
 
     if st.button("Lưu phương án trong phiên", use_container_width=True, type="secondary", key="container_save_session"):
-        st.session_state["container_calc_saved_plan"] = {
+        _save_container_plan({
+            "mode": calc_mode,
+            "source_mode": source_mode,
             "source": source_label,
             "source_bunches": source_bunches,
             "kg_per_bunch": kg_per_bunch,
@@ -5833,13 +6051,10 @@ def render_container_allocation_calculator():
             "customer_order": customer_order,
             "sku_orders_by_customer": sku_orders_by_customer,
             "result": result,
-            "saved_at": datetime.now().isoformat(),
-        }
-        st.success("Đã lưu phương án tạm trong phiên hiện tại.")
+        })
+        st.success("Đã lưu kế hoạch vào danh sách trong phiên hiện tại.")
 
-    saved_plan = st.session_state.get("container_calc_saved_plan")
-    if saved_plan:
-        st.caption(f"Phương án đã lưu gần nhất: {saved_plan.get('source')} · {saved_plan.get('source_bunches', 0):,} buồng")
+    _render_container_saved_plan_cards()
 
 
 # =====================================================
