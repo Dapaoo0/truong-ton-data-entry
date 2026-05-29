@@ -2397,13 +2397,41 @@ def render_global_data_tab(c_farm):
                     df_filtered = df_filtered[df_filtered["lo"].isin(valid_lots)]
         return ["Tất cả"] + list(df_filtered["lo"].dropna().unique()) if not df_filtered.empty else ["Tất cả"]
 
+    def _int_id_set(series):
+        if series is None:
+            return set()
+        vals = pd.to_numeric(series.dropna(), errors="coerce").dropna()
+        return {int(v) for v in vals}
+
+    def _filter_by_base_lot_ids(df, valid_ids, name):
+        if not valid_ids or df.empty:
+            return df
+        if name == "lots" and "id" in df.columns:
+            ids = pd.to_numeric(df["id"], errors="coerce")
+            return df[ids.isin(valid_ids)]
+        if "base_lot_id" in df.columns:
+            ids = pd.to_numeric(df["base_lot_id"], errors="coerce")
+            return df[ids.isin(valid_ids)]
+        return df
+
     def apply_filters_local(f_farm, f_vu, f_team, f_lot, f_date, df_dict):
         """Helper function to apply filters locally to a set of dataframes"""
         res = {}
         # Apply Season format
         valid_lots_season = None
+        valid_base_lot_ids_season = None
+        season_start_by_base_lot = {}
         if f_vu != "Tất cả" and not df_seasons.empty:
-            valid_lots_season = df_seasons[df_seasons["vu"] == f_vu]["lo"].tolist()
+            season_scope = df_seasons[df_seasons["vu"] == f_vu]
+            valid_lots_season = season_scope["lo"].dropna().astype(str).tolist() if "lo" in season_scope.columns else []
+            valid_base_lot_ids_season = _int_id_set(season_scope["base_lot_id"]) if "base_lot_id" in season_scope.columns else set()
+            if "base_lot_id" in season_scope.columns and "ngay_bat_dau" in season_scope.columns:
+                for _, season_row in season_scope.iterrows():
+                    blid = season_row.get("base_lot_id")
+                    if pd.isna(blid):
+                        continue
+                    start_dt = pd.to_datetime(season_row.get("ngay_bat_dau"), errors="coerce")
+                    season_start_by_base_lot[int(blid)] = start_dt if pd.notna(start_dt) else None
 
         for name, df in df_dict.items():
             if df.empty:
@@ -2413,8 +2441,36 @@ def render_global_data_tab(c_farm):
             df_filtered = df.copy()
             if f_farm != "Tất cả" and "farm" in df_filtered.columns:
                 df_filtered = df_filtered[df_filtered["farm"] == f_farm]
-            if valid_lots_season is not None and "lot_id" in df_filtered.columns:
-                df_filtered = df_filtered[df_filtered["lot_id"].isin(valid_lots_season)]
+            if valid_base_lot_ids_season is not None:
+                before_season_filter = len(df_filtered)
+                df_filtered = _filter_by_base_lot_ids(df_filtered, valid_base_lot_ids_season, name)
+                if len(df_filtered) == before_season_filter and valid_lots_season is not None and "lot_id" in df_filtered.columns:
+                    df_filtered = df_filtered[df_filtered["lot_id"].isin(valid_lots_season)]
+            if (
+                f_vu != "Tất cả"
+                and valid_base_lot_ids_season
+                and season_start_by_base_lot
+                and "base_lot_id" in df_filtered.columns
+                and name in ["stg", "har", "des"]
+            ):
+                date_col_map = {
+                    "stg": "ngay_thuc_hien",
+                    "har": "ngay_thu_hoach",
+                    "des": "ngay_xuat_huy",
+                }
+                date_col = date_col_map.get(name)
+                if date_col in df_filtered.columns:
+                    ids = pd.to_numeric(df_filtered["base_lot_id"], errors="coerce")
+                    dates = pd.to_datetime(df_filtered[date_col], errors="coerce")
+                    keep = pd.Series(False, index=df_filtered.index)
+                    for blid, start_dt in season_start_by_base_lot.items():
+                        id_mask = ids == blid
+                        if start_dt is None:
+                            keep = keep | id_mask
+                            continue
+                        min_dt = start_dt + pd.Timedelta(weeks=18) if name == "har" and f_vu != "F0" else start_dt
+                        keep = keep | (id_mask & (dates >= min_dt))
+                    df_filtered = df_filtered[keep]
             if f_team != "Tất cả" and "team" in df_filtered.columns:
                 df_filtered = df_filtered[df_filtered["team"] == f_team]
             if f_lot != "Tất cả" and "lot_id" in df_filtered.columns:
@@ -2607,12 +2663,15 @@ def render_global_data_tab(c_farm):
     HARVEST_MIN_GROWTH_WEEKS = 18
 
     def compute_batch_stats(lo_name, base_lot_id, vu="F0", season_start=None,
-                            season_end=None, next_season_start=None, next_vu_producing=False):
+                            season_end=None, next_season_start=None, next_vu_producing=False,
+                            stage_df=None, harvest_df=None):
         """Tính (giai_doan, so_chich, so_cat, so_thu) cho 1 batch/season."""
         so_chich, so_cat, so_thu = 0, 0, 0
         season_start_ts = pd.Timestamp(season_start) if season_start is not None else None
-        if not df_stg_all.empty and "lo" in df_stg_all.columns and "base_lot_id" in df_stg_all.columns:
-            stg = df_stg_all[(df_stg_all["lo"] == lo_name) & (df_stg_all["base_lot_id"] == base_lot_id)]
+        stg_source = stage_df if stage_df is not None else df_stg_all
+        har_source = harvest_df if harvest_df is not None else df_har_all
+        if not stg_source.empty and "lo" in stg_source.columns and "base_lot_id" in stg_source.columns:
+            stg = stg_source[(stg_source["lo"] == lo_name) & (stg_source["base_lot_id"] == base_lot_id)]
             if season_start_ts is not None and not stg.empty and "ngay_thuc_hien" in stg.columns:
                 stg_dates = pd.to_datetime(stg["ngay_thuc_hien"], errors="coerce")
                 stg = stg[stg_dates >= season_start_ts]
@@ -2624,8 +2683,8 @@ def render_global_data_tab(c_farm):
                 k = stg[stg["giai_doan"] == "Cắt bắp"]
                 so_chich = int(c["so_luong"].sum()) if not c.empty else 0
                 so_cat = int(k["so_luong"].sum()) if not k.empty else 0
-        if not df_har_all.empty and "lo" in df_har_all.columns and "base_lot_id" in df_har_all.columns:
-            har = df_har_all[(df_har_all["lo"] == lo_name) & (df_har_all["base_lot_id"] == base_lot_id)]
+        if not har_source.empty and "lo" in har_source.columns and "base_lot_id" in har_source.columns:
+            har = har_source[(har_source["lo"] == lo_name) & (har_source["base_lot_id"] == base_lot_id)]
             if not har.empty and "ngay_thu_hoach" in har.columns:
                 har_dates = pd.to_datetime(har["ngay_thu_hoach"], errors="coerce")
                 if season_start_ts is not None:
@@ -4679,6 +4738,38 @@ def render_global_data_tab(c_farm):
     pipe_stg_df = filtered_pipe_dfs["stg"]
     pipe_har_df = filtered_pipe_dfs["har"]
     pipe_des_df = filtered_pipe_dfs["des"]
+    pipe_seasons_df = df_seasons.copy()
+    if not pipe_seasons_df.empty:
+        if pf_farm != "Tất cả" and "farm" in pipe_seasons_df.columns:
+            pipe_seasons_df = pipe_seasons_df[pipe_seasons_df["farm"] == pf_farm]
+        if pf_vu != "Tất cả" and "vu" in pipe_seasons_df.columns:
+            pipe_seasons_df = pipe_seasons_df[pipe_seasons_df["vu"] == pf_vu]
+        if pf_team != "Tất cả" and "team" in pipe_seasons_df.columns:
+            pipe_seasons_df = pipe_seasons_df[pipe_seasons_df["team"] == pf_team]
+        if pf_lot != "Tất cả" and "lo" in pipe_seasons_df.columns:
+            pipe_seasons_df = pipe_seasons_df[pipe_seasons_df["lo"] == pf_lot]
+
+    def _pipe_date_or_none(value):
+        if value is None or pd.isna(value):
+            return None
+        try:
+            return pd.Timestamp(value).date()
+        except Exception:
+            return None
+
+    def _sum_pipe_destruction(base_lot_id, season_start=None, next_season_start=None, next_vu_producing=False):
+        if pipe_des_df.empty or "base_lot_id" not in pipe_des_df.columns:
+            return 0
+        des = pipe_des_df[pd.to_numeric(pipe_des_df["base_lot_id"], errors="coerce") == int(base_lot_id)]
+        if des.empty or "ngay_xuat_huy" not in des.columns:
+            return int(des["so_luong"].sum()) if not des.empty else 0
+        des_dates = pd.to_datetime(des["ngay_xuat_huy"], errors="coerce")
+        if season_start is not None:
+            des = des[des_dates >= pd.Timestamp(season_start)]
+            des_dates = pd.to_datetime(des["ngay_xuat_huy"], errors="coerce")
+        if next_season_start is not None and next_vu_producing:
+            des = des[des_dates < pd.Timestamp(next_season_start)]
+        return int(des["so_luong"].sum()) if not des.empty else 0
 
     # Gom dữ liệu theo từng đợt trồng (base_lots.id) để vẽ grouped/stacked bar chart
     if not pipe_lots_df.empty:
@@ -4688,11 +4779,31 @@ def render_global_data_tab(c_farm):
         batch_ids = pipe_lots_merged["id"].unique()
         pipeline_data = []
         for bid in batch_ids:
+            bid_int = int(bid)
             batch_row = pipe_lots_merged[pipe_lots_merged["id"] == bid]
             lo_name = batch_row["lo"].iloc[0] if not batch_row.empty else str(bid)
             ngay_trong = batch_row["ngay_trong"].iloc[0] if "ngay_trong" in batch_row.columns and not batch_row.empty else ""
             # Dùng batch_label_map (đã build ở trên): "3B (đợt 1)" hoặc "3B" nếu chỉ 1 đợt
             label = batch_label_map.get(bid, lo_name)
+
+            season_start_date = None
+            next_s_date = None
+            next_producing = False
+            season_vu = pf_vu
+            if pf_vu != "Tất cả":
+                if pipe_seasons_df.empty or "base_lot_id" not in pipe_seasons_df.columns:
+                    continue
+                season_rows = pipe_seasons_df[
+                    pd.to_numeric(pipe_seasons_df["base_lot_id"], errors="coerce") == bid_int
+                ].sort_values("ngay_bat_dau")
+                if season_rows.empty:
+                    continue
+                season_row = season_rows.iloc[-1]
+                season_vu = season_row.get("vu", pf_vu)
+                season_start_date = _pipe_date_or_none(season_row.get("ngay_bat_dau"))
+                next_s = _map_next_season.get((bid_int, season_vu))
+                next_producing = next_s is not None
+                next_s_date = next_s.date() if next_s is not None else None
             
             # 1. Trồng mới và Trồng dặm — mỗi batch chỉ có 1 loại
             sl_trong_moi = batch_row[batch_row["loai_trong"] == "Trồng mới"]["so_luong"].sum()
@@ -4713,29 +4824,35 @@ def render_global_data_tab(c_farm):
             pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "1b. Trồng dặm", "Số lượng": sl_trong_dam, "hover": hover_base})
             
             # Stage/Harvest/Destruction match via base_lot_id == base_lots.id
-            # 2. Chích bắp
-            if not pipe_stg_df.empty and "base_lot_id" in pipe_stg_df.columns:
-                sl_cb = pipe_stg_df[(pipe_stg_df["base_lot_id"] == bid) & (pipe_stg_df["giai_doan"] == "Chích bắp")]["so_luong"].sum()
-                pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "2. Chích bắp", "Số lượng": sl_cb, "hover": hover_base})
-            else: pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "2. Chích bắp", "Số lượng": 0, "hover": hover_base})
-            
-            # 3. Cắt bắp
-            if not pipe_stg_df.empty and "base_lot_id" in pipe_stg_df.columns:
-                sl_cut = pipe_stg_df[(pipe_stg_df["base_lot_id"] == bid) & (pipe_stg_df["giai_doan"] == "Cắt bắp")]["so_luong"].sum()
-                pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "3. Cắt bắp", "Số lượng": sl_cut, "hover": hover_base})
-            else: pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "3. Cắt bắp", "Số lượng": 0, "hover": hover_base})
-            
-            # 4. Thu hoạch (Buồng ~ Cây)
-            if not pipe_har_df.empty and "base_lot_id" in pipe_har_df.columns:
-                sl_har = pipe_har_df[pipe_har_df["base_lot_id"] == bid]["so_luong"].sum()
-                pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "4. Thu hoạch", "Số lượng": sl_har, "hover": hover_base})
-            else: pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "4. Thu hoạch", "Số lượng": 0, "hover": hover_base})
-                
-            # 5. Xuất hủy
-            if not pipe_des_df.empty and "base_lot_id" in pipe_des_df.columns:
-                sl_des = pipe_des_df[pipe_des_df["base_lot_id"] == bid]["so_luong"].sum()
-                pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "5. Xuất hủy", "Số lượng": sl_des, "hover": hover_base})
-            else: pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "5. Xuất hủy", "Số lượng": 0, "hover": hover_base})
+            if pf_vu != "Tất cả":
+                _, sl_cb, sl_cut, sl_har = compute_batch_stats(
+                    lo_name, bid_int, vu=season_vu, season_start=season_start_date,
+                    next_season_start=next_s_date, next_vu_producing=next_producing,
+                    stage_df=pipe_stg_df, harvest_df=pipe_har_df,
+                )
+                sl_des = _sum_pipe_destruction(
+                    bid_int, season_start=season_start_date,
+                    next_season_start=next_s_date, next_vu_producing=next_producing,
+                )
+            else:
+                if not pipe_stg_df.empty and "base_lot_id" in pipe_stg_df.columns:
+                    pipe_bid_stg = pipe_stg_df[pd.to_numeric(pipe_stg_df["base_lot_id"], errors="coerce") == bid_int]
+                    sl_cb = pipe_bid_stg[pipe_bid_stg["giai_doan"] == "Chích bắp"]["so_luong"].sum()
+                    sl_cut = pipe_bid_stg[pipe_bid_stg["giai_doan"] == "Cắt bắp"]["so_luong"].sum()
+                else:
+                    sl_cb, sl_cut = 0, 0
+                if not pipe_har_df.empty and "base_lot_id" in pipe_har_df.columns:
+                    sl_har = pipe_har_df[
+                        pd.to_numeric(pipe_har_df["base_lot_id"], errors="coerce") == bid_int
+                    ]["so_luong"].sum()
+                else:
+                    sl_har = 0
+                sl_des = _sum_pipe_destruction(bid_int)
+
+            pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "2. Chích bắp", "Số lượng": int(sl_cb), "hover": hover_base})
+            pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "3. Cắt bắp", "Số lượng": int(sl_cut), "hover": hover_base})
+            pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "4. Thu hoạch", "Số lượng": int(sl_har), "hover": hover_base})
+            pipeline_data.append({"Đợt trồng": label, "Giai đoạn": "5. Xuất hủy", "Số lượng": int(sl_des), "hover": hover_base})
             
         df_pipeline = pd.DataFrame(pipeline_data)
         
