@@ -1,6 +1,6 @@
 """
 Reusable HTML/CSS/JS template for interactive farm maps.
-Used by app.py for both Farm 157 and Farm 195.
+Used by app.py for interactive farm map rendering.
 """
 
 

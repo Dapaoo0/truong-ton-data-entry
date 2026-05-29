@@ -284,6 +284,7 @@ DAYS_CHICH_TO_THU = F0_DAYS_TO_THU - F0_DAYS_TO_CHICH  # 84 ngày: chích bắp 
 DAYS_CAT_TO_THU   = F0_DAYS_TO_THU - F0_DAYS_TO_CAT    # 70 ngày: cắt bắp → thu hoạch
 CONVERGENCE_DAYS = 15      # Ngưỡng hội tụ: 2 đợt chênh ≤15d → coi như gộp
 MAX_GENERATION = 5         # Tính tối đa F0→F5
+HARVEST_MIN_GROWTH_WEEKS = 18  # F1+ chỉ tính thu hoạch sau khi vụ đã đủ tuổi
 
 # ── Micro-PDF cho Mốc ②③ (chích/cắt bắp → thu hoạch) ──
 # Spread hẹp hơn Mốc ① vì gần ngày thu hơn → sai số nhỏ hơn
@@ -336,6 +337,64 @@ _DESTRUCTION_STAGE_MAP = {
     "Trước cắt bắp": "Cắt bắp",
     "Trước thu hoạch": "Thu hoạch",
 }
+
+
+def build_next_season_maps(df_seasons: pd.DataFrame, df_stg_all: pd.DataFrame):
+    """Return next producing season boundaries keyed by (base_lot_id, vu)."""
+    next_season = {}
+    next_producing = set()
+    if df_seasons.empty or "base_lot_id" not in df_seasons.columns:
+        return next_season, next_producing
+
+    season_rows = df_seasons[df_seasons["base_lot_id"].notna()]
+    if (
+        not df_stg_all.empty
+        and "base_lot_id" in df_stg_all.columns
+        and "giai_doan" in df_stg_all.columns
+    ):
+        stg_chich_all = df_stg_all[df_stg_all["giai_doan"] == "Chích bắp"]
+        for _, s_row in season_rows.iterrows():
+            s_blid = int(s_row["base_lot_id"])
+            s_vu = s_row["vu"]
+            s_start = pd.to_datetime(s_row["ngay_bat_dau"])
+            chich_batch = stg_chich_all[stg_chich_all["base_lot_id"] == s_blid]
+            if not chich_batch.empty and "ngay_thuc_hien" in chich_batch.columns:
+                chich_in = chich_batch[
+                    pd.to_datetime(chich_batch["ngay_thuc_hien"], errors="coerce") >= s_start
+                ]
+                if not chich_in.empty:
+                    next_producing.add((s_blid, s_vu))
+
+    for blid, blid_grp in season_rows.groupby("base_lot_id"):
+        sorted_s = blid_grp.sort_values("ngay_bat_dau").drop_duplicates("vu")
+        vu_list = sorted_s[["vu", "ngay_bat_dau"]].values.tolist()
+        for i, (vu_val, _start_dt) in enumerate(vu_list):
+            if i + 1 < len(vu_list):
+                next_vu = vu_list[i + 1][0]
+                if (int(blid), next_vu) in next_producing:
+                    next_season[(int(blid), vu_val)] = pd.to_datetime(vu_list[i + 1][1])
+                else:
+                    next_season[(int(blid), vu_val)] = None
+            else:
+                next_season[(int(blid), vu_val)] = None
+    return next_season, next_producing
+
+
+def build_batch_label_map(df_lots_trong_moi: pd.DataFrame):
+    """Build display labels for lots with multiple planting batches."""
+    labels = {}
+    if df_lots_trong_moi.empty or "id" not in df_lots_trong_moi.columns or "lo" not in df_lots_trong_moi.columns:
+        return labels
+
+    for lo_name_grp, grp_df in df_lots_trong_moi.groupby("lo"):
+        if len(grp_df) > 1:
+            sorted_grp = grp_df.sort_values("ngay_trong") if "ngay_trong" in grp_df.columns else grp_df
+            for i, (_, b_row) in enumerate(sorted_grp.iterrows(), 1):
+                labels[b_row["id"]] = f"{lo_name_grp} (đợt {i})"
+        else:
+            for _, b_row in grp_df.iterrows():
+                labels[b_row["id"]] = lo_name_grp
+    return labels
 
 def get_current_season_destruction(bid: int, giai_doan: str = None) -> int:
     """Tổng xuất hủy thuộc vụ hiện tại (season mới nhất) cho một base_lot.
@@ -2420,7 +2479,7 @@ def render_global_data_tab(c_farm):
         # Apply Season format
         valid_lots_season = None
         valid_base_lot_ids_season = None
-        season_start_by_base_lot = {}
+        season_window_by_base_lot = {}
         if f_vu != "Tất cả" and not df_seasons.empty:
             season_scope = df_seasons[df_seasons["vu"] == f_vu]
             valid_lots_season = season_scope["lo"].dropna().astype(str).tolist() if "lo" in season_scope.columns else []
@@ -2430,8 +2489,17 @@ def render_global_data_tab(c_farm):
                     blid = season_row.get("base_lot_id")
                     if pd.isna(blid):
                         continue
+                    blid_int = int(blid)
                     start_dt = pd.to_datetime(season_row.get("ngay_bat_dau"), errors="coerce")
-                    season_start_by_base_lot[int(blid)] = start_dt if pd.notna(start_dt) else None
+                    next_start = None
+                    try:
+                        next_start = _map_next_season.get((blid_int, f_vu))
+                    except NameError:
+                        next_start = None
+                    season_window_by_base_lot[blid_int] = {
+                        "start": start_dt if pd.notna(start_dt) else None,
+                        "next_start": next_start,
+                    }
 
         for name, df in df_dict.items():
             if df.empty:
@@ -2449,7 +2517,7 @@ def render_global_data_tab(c_farm):
             if (
                 f_vu != "Tất cả"
                 and valid_base_lot_ids_season
-                and season_start_by_base_lot
+                and season_window_by_base_lot
                 and "base_lot_id" in df_filtered.columns
                 and name in ["stg", "har", "des"]
             ):
@@ -2463,13 +2531,54 @@ def render_global_data_tab(c_farm):
                     ids = pd.to_numeric(df_filtered["base_lot_id"], errors="coerce")
                     dates = pd.to_datetime(df_filtered[date_col], errors="coerce")
                     keep = pd.Series(False, index=df_filtered.index)
-                    for blid, start_dt in season_start_by_base_lot.items():
+                    for blid, window in season_window_by_base_lot.items():
+                        start_dt = window.get("start")
+                        next_start = window.get("next_start")
                         id_mask = ids == blid
                         if start_dt is None:
-                            keep = keep | id_mask
+                            date_mask = id_mask
+                        else:
+                            min_dt = start_dt + pd.Timedelta(weeks=HARVEST_MIN_GROWTH_WEEKS) if name == "har" and f_vu != "F0" else start_dt
+                            date_mask = id_mask & (dates >= min_dt)
+                        if next_start is not None:
+                            upper_dt = pd.Timestamp(next_start)
+                            if name == "har":
+                                upper_dt = upper_dt + pd.Timedelta(weeks=HARVEST_MIN_GROWTH_WEEKS)
+                            date_mask = date_mask & (dates < upper_dt)
+                        keep = keep | date_mask
+                    df_filtered = df_filtered[keep]
+            elif (
+                f_vu != "Tất cả"
+                and valid_lots_season
+                and season_window_by_base_lot
+                and "lot_id" in df_filtered.columns
+                and name in ["inv"]
+            ):
+                # Inventory is lot-level, not batch-level. Use all matching season windows
+                # for the lot as a best-effort date guard.
+                date_col = "ngay_kiem_ke" if "ngay_kiem_ke" in df_filtered.columns else None
+                if date_col:
+                    dates = pd.to_datetime(df_filtered[date_col], errors="coerce")
+                    keep = pd.Series(False, index=df_filtered.index)
+                    for _, season_row in season_scope.iterrows():
+                        lo_val = season_row.get("lo")
+                        if pd.isna(lo_val):
                             continue
-                        min_dt = start_dt + pd.Timedelta(weeks=18) if name == "har" and f_vu != "F0" else start_dt
-                        keep = keep | (id_mask & (dates >= min_dt))
+                        start_dt = pd.to_datetime(season_row.get("ngay_bat_dau"), errors="coerce")
+                        lot_mask = df_filtered["lot_id"].astype(str) == str(lo_val)
+                        date_mask = lot_mask
+                        if pd.notna(start_dt):
+                            date_mask = date_mask & (dates >= start_dt)
+                        blid = season_row.get("base_lot_id")
+                        next_start = None
+                        if pd.notna(blid):
+                            try:
+                                next_start = _map_next_season.get((int(blid), f_vu))
+                            except NameError:
+                                next_start = None
+                        if next_start is not None:
+                            date_mask = date_mask & (dates < pd.Timestamp(next_start))
+                        keep = keep | date_mask
                     df_filtered = df_filtered[keep]
             if f_team != "Tất cả" and "team" in df_filtered.columns:
                 df_filtered = df_filtered[df_filtered["team"] == f_team]
@@ -2659,9 +2768,7 @@ def render_global_data_tab(c_farm):
             return cx, cy
         return _map_pole_of_inaccessibility(pts)
 
-    # ─── Shared: compute_batch_stats (dùng cho Map 157, Map 195, Table) ───
-    HARVEST_MIN_GROWTH_WEEKS = 18
-
+    # ─── Shared: compute_batch_stats (dùng cho Map, Table và chart theo vụ) ───
     def compute_batch_stats(lo_name, base_lot_id, vu="F0", season_start=None,
                             season_end=None, next_season_start=None, next_vu_producing=False,
                             stage_df=None, harvest_df=None):
@@ -2706,45 +2813,8 @@ def render_global_data_tab(c_farm):
         elif so_chich > 0: gd = "Chích bắp"
         return gd, so_chich, so_cat, so_thu
 
-    # ─── Build next_season_map (dùng chung cho Map 157, 195, Table) ───
-    _map_next_season = {}
-    _map_next_producing = set()
-    if not df_seasons.empty and not df_stg_all.empty and "base_lot_id" in df_stg_all.columns:
-        stg_chich_all = df_stg_all[df_stg_all["giai_doan"] == "Chích bắp"]
-        for _, s_row in df_seasons[df_seasons["base_lot_id"].notna()].iterrows():
-            s_blid = int(s_row["base_lot_id"])
-            s_vu = s_row["vu"]
-            s_start = pd.to_datetime(s_row["ngay_bat_dau"])
-            chich_batch = stg_chich_all[stg_chich_all["base_lot_id"] == s_blid]
-            if not chich_batch.empty and "ngay_thuc_hien" in chich_batch.columns:
-                chich_in = chich_batch[pd.to_datetime(chich_batch["ngay_thuc_hien"], errors="coerce") >= s_start]
-                if not chich_in.empty:
-                    _map_next_producing.add((s_blid, s_vu))
-    if not df_seasons.empty and "base_lot_id" in df_seasons.columns:
-        for blid, blid_grp in df_seasons[df_seasons["base_lot_id"].notna()].groupby("base_lot_id"):
-            sorted_s = blid_grp.sort_values("ngay_bat_dau").drop_duplicates("vu")
-            vu_list = sorted_s[["vu", "ngay_bat_dau"]].values.tolist()
-            for i, (vu_val, start_dt) in enumerate(vu_list):
-                if i + 1 < len(vu_list):
-                    next_vu = vu_list[i + 1][0]
-                    if (int(blid), next_vu) in _map_next_producing:
-                        _map_next_season[(int(blid), vu_val)] = pd.to_datetime(vu_list[i + 1][1])
-                    else:
-                        _map_next_season[(int(blid), vu_val)] = None
-                else:
-                    _map_next_season[(int(blid), vu_val)] = None
-
-    # ─── Shared batch_label_map ───
-    batch_label_map = {}
-    if not df_lots_trong_moi.empty and "id" in df_lots_trong_moi.columns and "lo" in df_lots_trong_moi.columns:
-        for lo_name_grp, grp_df in df_lots_trong_moi.groupby("lo"):
-            if len(grp_df) > 1:
-                sorted_grp = grp_df.sort_values("ngay_trong") if "ngay_trong" in grp_df.columns else grp_df
-                for i, (_, b_row) in enumerate(sorted_grp.iterrows(), 1):
-                    batch_label_map[b_row["id"]] = f"{lo_name_grp} (đợt {i})"
-            else:
-                for _, b_row in grp_df.iterrows():
-                    batch_label_map[b_row["id"]] = lo_name_grp
+    _map_next_season, _map_next_producing = build_next_season_maps(df_seasons, df_stg_all)
+    batch_label_map = build_batch_label_map(df_lots_trong_moi)
 
     def _map_component_initial_height(img_w, img_h):
         aspect = img_h / img_w if img_w else 0.5625
@@ -2803,7 +2873,7 @@ def render_global_data_tab(c_farm):
             info_panel_html += f'<div class="info-row"><span class="info-label">{label}</span><span class="info-value" style="color:{color}">{value}</span></div>'
         return info_panel_html
 
-    def _render_generic_farm_map(farm_name, polygon_filename, default_width, default_height):
+    def _render_generic_farm_map(farm_name, polygon_filename, default_width, default_height, map_zoom=None):
         polygon_path = os.path.join(os.path.dirname(__file__), polygon_filename)
         if not os.path.exists(polygon_path) or c_farm not in [farm_name, "Admin", "Phòng Kinh doanh"]:
             return
@@ -2815,6 +2885,7 @@ def render_global_data_tab(c_farm):
             polygon_data = json.load(f)
 
         dim_lo_area_map = {}
+        total_farm_area = 0.0
         try:
             dim_lo_res = supabase.table("dim_lo").select("lo_name, lo_code, area_ha, dim_farm!inner(farm_name)").eq("is_active", True).eq("dim_farm.farm_name", farm_name).execute()
             if dim_lo_res.data:
@@ -2824,6 +2895,7 @@ def render_global_data_tab(c_farm):
                     area_ha = dl.get("area_ha")
                     if area_ha is not None:
                         area_val = float(area_ha)
+                        total_farm_area += area_val
                         if lo_code:
                             dim_lo_area_map[lo_code] = area_val
                         if lo_name_db:
@@ -2985,7 +3057,9 @@ def render_global_data_tab(c_farm):
             legend_html += f'<span class="legend-item"><span class="legend-dot" style="background:{color}"></span>{stage}</span>'
         legend_html += f'<span class="legend-item"><span class="legend-dot" style="background:{default_color}"></span>Chưa có dữ liệu</span>'
 
-        info_panel_html = _build_map_info_panel_html(_compute_map_area_metrics(lot_info_map))
+        info_panel_html = _build_map_info_panel_html(
+            _compute_map_area_metrics(lot_info_map, total_farm_area=total_farm_area or None)
+        )
 
         from map_template import build_farm_map_html
         html_content = build_farm_map_html(
@@ -2995,400 +3069,24 @@ def render_global_data_tab(c_farm):
             img_w=img_w,
             img_h=img_h,
             stage_colors_json=_MAP_STAGE_COLORS_JSON,
-            map_zoom=1.0,
+            map_zoom=map_zoom,
         )
 
         import streamlit.components.v1 as components
         components.html(html_content, height=_map_component_initial_height(img_w, img_h), scrolling=False)
 
-    _render_generic_farm_map("Farm 126", "farm_126_polygons.json", 2382, 1684)
-
-    # ═══════════════════════════════════════════════════════════════════
-    # 🗺️ BẢN ĐỒ TƯƠNG TÁC FARM 157
-    # ═══════════════════════════════════════════════════════════════════
-    POLYGON_JSON_PATH = os.path.join(os.path.dirname(__file__), "farm_157_polygons.json")
-    if os.path.exists(POLYGON_JSON_PATH) and c_farm in ["Farm 157", "Admin", "Phòng Kinh doanh"]:
-        st.markdown("#### 🗺️ Bản đồ Farm 157")
-        st.caption("Di chuột vào từng lô để xem thông tin chi tiết. Màu sắc thể hiện giai đoạn hiện tại. Lô có nhiều đợt trồng ở giai đoạn khác nhau sẽ ưu tiên hiển thị trạng thái của đợt trồng có nhiều cây nhất.")
-
-        with open(POLYGON_JSON_PATH, "r", encoding="utf-8") as f:
-            polygon_data = json.load(f)
-
-        # ── Query dim_lo.area_ha cho tất cả lô Farm 157 ──
-        _dim_lo_area_map = {}
-        try:
-            _dim_lo_all = supabase.table("dim_lo").select("lo_code, area_ha, dim_farm!inner(farm_name)").eq("is_active", True).eq("dim_farm.farm_name", "Farm 157").execute()
-            if _dim_lo_all.data:
-                for _dl in _dim_lo_all.data:
-                    _lc = _dl.get("lo_code")
-                    _ah = _dl.get("area_ha")
-                    if _lc and _ah is not None:
-                        _dim_lo_area_map[_lc] = float(_ah)
-        except Exception:
-            pass
-
-        # ── Build lot info từ DB data (per-batch tracking) ──
-        lot_info_map = {}
-
-        df_lots_trong_moi_157 = df_lots_trong_moi[df_lots_trong_moi["farm"] == "Farm 157"] if not df_lots_trong_moi.empty and "farm" in df_lots_trong_moi.columns else df_lots_trong_moi
-        df_seasons_157 = df_seasons[df_seasons["farm"] == "Farm 157"] if not df_seasons.empty and "farm" in df_seasons.columns else df_seasons
-
-        if not df_seasons_157.empty and not df_lots_trong_moi_157.empty:
-            for lo_name in df_lots_trong_moi_157["lo"].dropna().unique():
-                lo_lots = df_lots_trong_moi_157[df_lots_trong_moi_157["lo"] == lo_name]
-                dien_tich = lo_lots["dien_tich"].iloc[0] if "dien_tich" in lo_lots.columns and not lo_lots["dien_tich"].isna().all() else None
-                lo_seasons = df_seasons_157[
-                    (df_seasons_157["lo"] == lo_name) & (df_seasons_157["loai_trong"] != "Trồng dặm")
-                ].sort_values("ngay_bat_dau", ascending=False)
-                if lo_seasons.empty:
-                    continue
-
-                # Build per-batch info
-                batches = []
-                total_batches = len(lo_seasons)
-                for _, s_row in lo_seasons.iterrows():
-                    vu = s_row.get("vu", "?")
-                    ngay_bd_raw = s_row.get("ngay_bat_dau")
-                    ngay_bd = str(ngay_bd_raw)[:10] if ngay_bd_raw is not None else ""
-                    blid = s_row.get("base_lot_id")
-                    # Parse season_start
-                    season_start = None
-                    if ngay_bd_raw is not None:
-                        try:
-                            season_start = pd.Timestamp(ngay_bd_raw).date() if not isinstance(ngay_bd_raw, date) else ngay_bd_raw
-                        except Exception:
-                            pass
-                    # Số cây của đợt trồng này
-                    if blid and not df_lots_trong_moi_157.empty and "id" in df_lots_trong_moi_157.columns:
-                        batch_lot = df_lots_trong_moi_157[df_lots_trong_moi_157["id"] == blid]
-                        so_cay = int(batch_lot["so_luong"].sum()) if not batch_lot.empty else 0
-                        dt_trong = float(batch_lot["dien_tich_trong"].dropna().iloc[0]) if not batch_lot.empty and "dien_tich_trong" in batch_lot.columns and not batch_lot["dien_tich_trong"].dropna().empty else 0.0
-                    else:
-                        so_cay = 0
-                        dt_trong = 0.0
-                    # Dùng shared compute_batch_stats
-                    if blid:
-                        next_s = _map_next_season.get((int(blid), vu))
-                        next_prod = (int(blid), vu) in _map_next_producing if next_s else False
-                        # Chuyển next_s sang date nếu có
-                        next_s_date = next_s.date() if next_s is not None else None
-                        gd, chich, cat, thu = compute_batch_stats(
-                            lo_name, blid, vu=vu, season_start=season_start,
-                            next_season_start=next_s_date, next_vu_producing=next_prod
-                        )
-                    else:
-                        gd, chich, cat, thu = "Đang sinh trưởng", 0, 0, 0
-                    # Dùng batch_label_map chung (đã build ở trên) cho display label
-                    display_label = batch_label_map.get(blid, lo_name) if blid else lo_name
-                    is_multi = total_batches > 1
-                    # Đợt number: parse từ label "3B (đợt 2)" → 2
-                    dot_num = 0
-                    if is_multi and "đợt " in display_label:
-                        _n = display_label.split("đợt ")[-1].rstrip(")")
-                        dot_num = int(_n) if _n.isdigit() else 0
-                    batches.append({"base_lot_id": int(blid) if blid and pd.notna(blid) else None, "vu": vu, "ngay_bd": ngay_bd, "so_cay": so_cay, "dien_tich_trong": dt_trong, "gd": gd, "chich": chich, "cat": cat, "thu": thu, "dot": dot_num, "multi": is_multi})
-
-                # Dominant batch = nhiều cây nhất → quyết định màu polygon
-                dominant = max(batches, key=lambda b: b["so_cay"]) if batches else batches[0]
-                # Diện tích trồng = tổng dien_tich_trong của các batch F0 (tránh trùng F1/F2)
-                _dt_trong_total = 0.0
-                if not df_lots_trong_moi_157.empty and "dien_tich_trong" in df_lots_trong_moi_157.columns:
-                    _lo_batches_f0 = df_lots_trong_moi_157[
-                        (df_lots_trong_moi_157["lo"] == lo_name) & (df_lots_trong_moi_157["loai_trong"] != "Trồng dặm")
-                    ]
-                    _dt_vals = _lo_batches_f0["dien_tich_trong"].dropna()
-                    if not _dt_vals.empty:
-                        _dt_trong_total = float(_dt_vals.sum())
-                _area_ha = _dim_lo_area_map.get(lo_name)
-                if _area_ha is not None and _dt_trong_total > 0:
-                    _dt_trong_total = min(_dt_trong_total, float(_area_ha))
-                    _batch_dt_sum = sum(float(b.get("dien_tich_trong") or 0) for b in batches if b.get("base_lot_id") is not None)
-                    if _batch_dt_sum > float(_area_ha):
-                        _area_scale = float(_area_ha) / _batch_dt_sum
-                        for _b in batches:
-                            _b["dien_tich_trong"] = float(_b.get("dien_tich_trong") or 0) * _area_scale
-                lot_info_map[lo_name] = {
-                    "dominant_gd": dominant["gd"],
-                    "area_ha": _area_ha,
-                    "dien_tich_trong": _dt_trong_total,
-                    # Chỉ cộng F0: F1/F2 mọc từ cùng gốc F0 → không tính trùng
-                    "total_cay": sum(b["so_cay"] for b in batches if b["vu"] == "F0"),
-                    "batches": batches,
-                }
-
-        # ── Màu và helpers: dùng shared _MAP_* đã định nghĩa ở trên ──
-        stage_colors = _MAP_STAGE_COLORS
-        stage_colors_json = _MAP_STAGE_COLORS_JSON
-        default_color = _MAP_DEFAULT_COLOR
-
-        # ── Build SVG polygons ──
-        img_w = polygon_data.get("image_width", 4000)
-        img_h = polygon_data.get("image_height", 2250)
-
-        # ── Bổ sung lot_info_map cho các lô có polygon nhưng chưa có base_lots ──
-        for lot in polygon_data.get("lots", []):
-            name = lot["name"]
-            if name not in lot_info_map and name in _dim_lo_area_map:
-                lot_info_map[name] = {
-                    "dominant_gd": "Chưa có dữ liệu",
-                    "area_ha": _dim_lo_area_map.get(name),
-                    "dien_tich_trong": 0.0,
-                    "total_cay": 0,
-                    "batches": [],
-                }
-
-        svg_polygons = ""
-        for lot in polygon_data.get("lots", []):
-            name = lot["name"]
-            points_str = " ".join(f'{p["x"]},{p["y"]}' for p in lot["points"])
-            info = lot_info_map.get(name, {})
-            giai_doan = info.get("dominant_gd", "Chưa có dữ liệu")
-            fill = stage_colors.get(giai_doan, default_color)
-            # Diện tích lô từ dim_lo.area_ha
-            area_ha = info.get("area_ha")
-            area_ha_str = f'{area_ha:.2f} ha' if area_ha else "—"
-            # Diện tích trồng từ base_lots.dien_tich_trong
-            dt_trong = info.get("dien_tich_trong", 0)
-            dt_trong_str = f'{dt_trong:.2f} ha' if dt_trong > 0 else "—"
-            total_cay = info.get("total_cay", 0)
-            # Encode batches as JSON string for JS tooltip
-            batches_json = json.dumps(info.get("batches", []), ensure_ascii=False).replace('"', '&quot;')
-
-            # Hybrid label placement: geometric centroid → fallback pole of inaccessibility
-            poly_pts = [(p["x"], p["y"]) for p in lot["points"]]
-            cx, cy = _map_best_label_pos(poly_pts)
-
-            svg_polygons += f'''
-            <polygon class="lot-poly" points="{points_str}" fill="{fill}"
-                data-name="{name}" data-area-ha="{area_ha_str}" data-dt-trong="{dt_trong_str}" data-total="{total_cay}"
-                data-gd="{giai_doan}" data-batches="{batches_json}" />
-            <text x="{cx:.0f}" y="{cy:.0f}" class="lot-label">{name}</text>
-            '''
-
-        # ── Legend items ──
-        legend_html = ""
-        for stage, color in stage_colors.items():
-            legend_html += f'<span class="legend-item"><span class="legend-dot" style="background:{color}"></span>{stage}</span>'
-        legend_html += f'<span class="legend-item"><span class="legend-dot" style="background:{default_color}"></span>Chưa có dữ liệu</span>'
-
-        # ── Tính diện tích theo giai đoạn (dùng dien_tich_trong per-batch) ──
-        # 1. Tổng DT farm = sum(dim_lo.area_ha) cho TẤT CẢ lô active (không chỉ lô có polygon)
-        _all_lo_names = [entry.get("name") for entry in polygon_data.get("lots", []) if entry.get("name")]
-        _total_farm_area = 0.0
-        try:
-            _dim_lo_res = supabase.table("dim_lo").select("area_ha, dim_farm!inner(farm_name)").eq("is_active", True).eq("dim_farm.farm_name", "Farm 157").execute()
-            if _dim_lo_res.data:
-                for _dl_row in _dim_lo_res.data:
-                    _ah = _dl_row.get("area_ha")
-                    if _ah is not None:
-                        _total_farm_area += float(_ah)
-        except Exception:
-            # Fallback: dùng df_lots_all nếu query dim_lo thất bại
-            if not df_lots_all.empty and "lo" in df_lots_all.columns and "dien_tich" in df_lots_all.columns:
-                _unique_lo_dt = df_lots_all.drop_duplicates("lo").set_index("lo")["dien_tich"]
-                for _ln in _all_lo_names:
-                    _v = _unique_lo_dt.get(_ln)
-                    if pd.notna(_v):
-                        _total_farm_area += float(_v)
-
-        info_panel_html = _build_map_info_panel_html(
-            _compute_map_area_metrics(lot_info_map, total_farm_area=_total_farm_area)
+    for _farm_name, _polygon_file, _default_w, _default_h, _map_zoom in [
+        ("Farm 126", "farm_126_polygons.json", 2382, 1684, 1.0),
+        ("Farm 157", "farm_157_polygons.json", 4000, 2250, None),
+        ("Farm 195", "farm_195_polygons.json", 1683, 1190, None),
+    ]:
+        _render_generic_farm_map(
+            _farm_name,
+            _polygon_file,
+            _default_w,
+            _default_h,
+            map_zoom=_map_zoom,
         )
-
-        from map_template import build_farm_map_html
-        html_content = build_farm_map_html(
-            svg_polygons=svg_polygons,
-            legend_html=legend_html,
-            info_panel_html=info_panel_html,
-            img_w=img_w,
-            img_h=img_h,
-            stage_colors_json=stage_colors_json,
-        )
-
-        import streamlit.components.v1 as components
-        components.html(html_content, height=_map_component_initial_height(img_w, img_h), scrolling=False)
-
-    # ═══════════════════════════════════════════════════════════════════
-    # 🗺️ BẢN ĐỒ TƯƠNG TÁC FARM 195
-    # ═══════════════════════════════════════════════════════════════════
-    POLYGON_195_PATH = os.path.join(os.path.dirname(__file__), "farm_195_polygons.json")
-    if os.path.exists(POLYGON_195_PATH) and c_farm in ["Farm 195", "Admin", "Phòng Kinh doanh"]:
-        st.markdown("#### 🗺️ Bản đồ Farm 195")
-        st.caption("Di chuột vào từng lô để xem thông tin chi tiết. Màu sắc thể hiện giai đoạn hiện tại.")
-
-        with open(POLYGON_195_PATH, "r", encoding="utf-8") as f:
-            polygon_data_195 = json.load(f)
-
-        # ── Query dim_lo.area_ha cho tất cả lô Farm 195 ──
-        _dim_lo_area_map_195 = {}
-        try:
-            _dim_lo_195 = supabase.table("dim_lo").select("lo_code, area_ha, dim_farm!inner(farm_name)").eq("is_active", True).eq("dim_farm.farm_name", "Farm 195").execute()
-            if _dim_lo_195.data:
-                for _dl in _dim_lo_195.data:
-                    _lc = _dl.get("lo_code")
-                    _ah = _dl.get("area_ha")
-                    if _lc and _ah is not None:
-                        _dim_lo_area_map_195[_lc] = float(_ah)
-        except Exception:
-            pass
-
-        # ── Build lot info từ DB data (per-batch tracking) ──
-        lot_info_map_195 = {}
-
-        df_lots_trong_moi_195 = df_lots_trong_moi[df_lots_trong_moi["farm"] == "Farm 195"] if not df_lots_trong_moi.empty and "farm" in df_lots_trong_moi.columns else df_lots_trong_moi
-        df_seasons_195 = df_seasons[df_seasons["farm"] == "Farm 195"] if not df_seasons.empty and "farm" in df_seasons.columns else df_seasons
-
-        if not df_seasons_195.empty and not df_lots_trong_moi_195.empty:
-            for lo_name_195 in df_lots_trong_moi_195[df_lots_trong_moi_195["lo"].isin(
-                [lot["name"] for lot in polygon_data_195.get("lots", [])]
-            )]["lo"].dropna().unique():
-                lo_lots_195 = df_lots_trong_moi_195[df_lots_trong_moi_195["lo"] == lo_name_195]
-                lo_seasons_195 = df_seasons_195[
-                    (df_seasons_195["lo"] == lo_name_195) & (df_seasons_195["loai_trong"] != "Trồng dặm")
-                ].sort_values("ngay_bat_dau", ascending=False)
-                if lo_seasons_195.empty:
-                    continue
-
-                batches_195 = []
-                total_batches_195 = len(lo_seasons_195)
-                for _, s_row in lo_seasons_195.iterrows():
-                    vu = s_row.get("vu", "?")
-                    ngay_bd_raw = s_row.get("ngay_bat_dau")
-                    ngay_bd = str(ngay_bd_raw)[:10] if ngay_bd_raw is not None else ""
-                    blid = s_row.get("base_lot_id")
-                    season_start = None
-                    if ngay_bd_raw is not None:
-                        try:
-                            season_start = pd.Timestamp(ngay_bd_raw).date() if not isinstance(ngay_bd_raw, date) else ngay_bd_raw
-                        except Exception:
-                            pass
-                    if blid and not df_lots_trong_moi_195.empty and "id" in df_lots_trong_moi_195.columns:
-                        batch_lot = df_lots_trong_moi_195[df_lots_trong_moi_195["id"] == blid]
-                        so_cay = int(batch_lot["so_luong"].sum()) if not batch_lot.empty else 0
-                        dt_trong = float(batch_lot["dien_tich_trong"].dropna().iloc[0]) if not batch_lot.empty and "dien_tich_trong" in batch_lot.columns and not batch_lot["dien_tich_trong"].dropna().empty else 0.0
-                    else:
-                        so_cay = 0
-                        dt_trong = 0.0
-                    if blid:
-                        next_s = _map_next_season.get((int(blid), vu))
-                        next_prod = (int(blid), vu) in _map_next_producing if next_s else False
-                        next_s_date = next_s.date() if next_s is not None else None
-                        gd, chich, cat, thu = compute_batch_stats(
-                            lo_name_195, blid, vu=vu, season_start=season_start,
-                            next_season_start=next_s_date, next_vu_producing=next_prod
-                        )
-                    else:
-                        gd, chich, cat, thu = "Đang sinh trưởng", 0, 0, 0
-                    display_label = batch_label_map.get(blid, lo_name_195) if blid else lo_name_195
-                    is_multi = total_batches_195 > 1
-                    dot_num = 0
-                    if is_multi and "đợt " in display_label:
-                        _n = display_label.split("đợt ")[-1].rstrip(")")
-                        dot_num = int(_n) if _n.isdigit() else 0
-                    batches_195.append({"base_lot_id": int(blid) if blid and pd.notna(blid) else None, "vu": vu, "ngay_bd": ngay_bd, "so_cay": so_cay, "dien_tich_trong": dt_trong, "gd": gd, "chich": chich, "cat": cat, "thu": thu, "dot": dot_num, "multi": is_multi})
-
-                dominant = max(batches_195, key=lambda b: b["so_cay"]) if batches_195 else batches_195[0]
-                _dt_trong_total_195 = 0.0
-                if not df_lots_trong_moi_195.empty and "dien_tich_trong" in df_lots_trong_moi_195.columns:
-                    _lo_batches_f0 = df_lots_trong_moi_195[
-                        (df_lots_trong_moi_195["lo"] == lo_name_195) & (df_lots_trong_moi_195["loai_trong"] != "Trồng dặm")
-                    ]
-                    _dt_vals = _lo_batches_f0["dien_tich_trong"].dropna()
-                    if not _dt_vals.empty:
-                        _dt_trong_total_195 = float(_dt_vals.sum())
-                _area_ha_195 = _dim_lo_area_map_195.get(lo_name_195)
-                if _area_ha_195 is not None and _dt_trong_total_195 > 0:
-                    _dt_trong_total_195 = min(_dt_trong_total_195, float(_area_ha_195))
-                    _batch_dt_sum_195 = sum(float(b.get("dien_tich_trong") or 0) for b in batches_195 if b.get("base_lot_id") is not None)
-                    if _batch_dt_sum_195 > float(_area_ha_195):
-                        _area_scale_195 = float(_area_ha_195) / _batch_dt_sum_195
-                        for _b in batches_195:
-                            _b["dien_tich_trong"] = float(_b.get("dien_tich_trong") or 0) * _area_scale_195
-                lot_info_map_195[lo_name_195] = {
-                    "dominant_gd": dominant["gd"],
-                    "area_ha": _area_ha_195,
-                    "dien_tich_trong": _dt_trong_total_195,
-                    "total_cay": sum(b["so_cay"] for b in batches_195 if b["vu"] == "F0"),
-                    "batches": batches_195,
-                }
-
-        # ── Màu và helpers ──
-        stage_colors_195 = _MAP_STAGE_COLORS
-        stage_colors_json_195 = _MAP_STAGE_COLORS_JSON
-        default_color_195 = _MAP_DEFAULT_COLOR
-
-        # ── Build SVG polygons ──
-        img_w_195 = polygon_data_195.get("image_width", 1683)
-        img_h_195 = polygon_data_195.get("image_height", 1190)
-
-        for lot in polygon_data_195.get("lots", []):
-            name = lot["name"]
-            if name not in lot_info_map_195 and name in _dim_lo_area_map_195:
-                lot_info_map_195[name] = {
-                    "dominant_gd": "Chưa có dữ liệu",
-                    "area_ha": _dim_lo_area_map_195.get(name),
-                    "dien_tich_trong": 0.0,
-                    "total_cay": 0,
-                    "batches": [],
-                }
-
-        svg_polygons_195 = ""
-        for lot in polygon_data_195.get("lots", []):
-            name = lot["name"]
-            points_str = " ".join(f'{p["x"]},{p["y"]}' for p in lot["points"])
-            info = lot_info_map_195.get(name, {})
-            giai_doan = info.get("dominant_gd", "Chưa có dữ liệu")
-            fill = stage_colors_195.get(giai_doan, default_color_195)
-            area_ha = info.get("area_ha")
-            area_ha_str = f'{area_ha:.2f} ha' if area_ha else "—"
-            dt_trong = info.get("dien_tich_trong", 0)
-            dt_trong_str = f'{dt_trong:.2f} ha' if dt_trong > 0 else "—"
-            total_cay = info.get("total_cay", 0)
-            batches_json = json.dumps(info.get("batches", []), ensure_ascii=False).replace('"', '&quot;')
-            poly_pts = [(p["x"], p["y"]) for p in lot["points"]]
-            cx, cy = _map_best_label_pos(poly_pts)
-            svg_polygons_195 += f'''
-            <polygon class="lot-poly" points="{points_str}" fill="{fill}"
-                data-name="{name}" data-area-ha="{area_ha_str}" data-dt-trong="{dt_trong_str}" data-total="{total_cay}"
-                data-gd="{giai_doan}" data-batches="{batches_json}" />
-            <text x="{cx:.0f}" y="{cy:.0f}" class="lot-label">{name}</text>
-            '''
-
-        # ── Legend ──
-        legend_html_195 = ""
-        for stage, color in stage_colors_195.items():
-            legend_html_195 += f'<span class="legend-item"><span class="legend-dot" style="background:{color}"></span>{stage}</span>'
-        legend_html_195 += f'<span class="legend-item"><span class="legend-dot" style="background:{default_color_195}"></span>Chưa có dữ liệu</span>'
-
-        # ── Tính diện tích theo giai đoạn ──
-        _all_lo_names_195 = [entry.get("name") for entry in polygon_data_195.get("lots", []) if entry.get("name")]
-        _total_farm_area_195 = 0.0
-        try:
-            _dim_lo_res_195 = supabase.table("dim_lo").select("area_ha, dim_farm!inner(farm_name)").eq("is_active", True).eq("dim_farm.farm_name", "Farm 195").execute()
-            if _dim_lo_res_195.data:
-                for _dl_row in _dim_lo_res_195.data:
-                    _ah = _dl_row.get("area_ha")
-                    if _ah is not None:
-                        _total_farm_area_195 += float(_ah)
-        except Exception:
-            pass
-
-        info_panel_html_195 = _build_map_info_panel_html(
-            _compute_map_area_metrics(lot_info_map_195, total_farm_area=_total_farm_area_195)
-        )
-
-        from map_template import build_farm_map_html
-        html_content_195 = build_farm_map_html(
-            svg_polygons=svg_polygons_195,
-            legend_html=legend_html_195,
-            info_panel_html=info_panel_html_195,
-            img_w=img_w_195,
-            img_h=img_h_195,
-            stage_colors_json=stage_colors_json_195,
-        )
-
-        import streamlit.components.v1 as components
-        components.html(html_content_195, height=_map_component_initial_height(img_w_195, img_h_195), scrolling=False)
 
     st.divider()
 
@@ -3442,43 +3140,6 @@ def render_global_data_tab(c_farm):
         df_dt_seasons = df_dt_seasons.sort_values(["_has_end", "ngay_bat_dau"], ascending=[False, False])
         seen_vu_blid = set()
         
-        # ─── Build next_season_start + kiểm tra vụ kế có sản xuất chưa ───
-        _next_season_map = {}  # (base_lot_id, vu) → ngày bắt đầu vụ kế tiếp (hoặc None)
-        _next_vu_producing = set()  # set of (base_lot_id, vu) đã có chích bắp
-        
-        # Pre-build: (base_lot_id, vu) nào đã có chích bắp?
-        if not df_stg_all.empty and "base_lot_id" in df_stg_all.columns:
-            stg_chich = df_stg_all[df_stg_all["giai_doan"] == "Chích bắp"]
-            if not stg_chich.empty:
-                # Cần xác định chích bắp thuộc vụ nào → dùng season date range
-                for _, s_row in df_dt_seasons[df_dt_seasons["base_lot_id"].notna()].iterrows():
-                    s_blid = int(s_row["base_lot_id"])
-                    s_vu = s_row["vu"]
-                    s_start = pd.to_datetime(s_row["ngay_bat_dau"])
-                    chich_for_blid = stg_chich[stg_chich["base_lot_id"] == s_blid]
-                    if not chich_for_blid.empty:
-                        chich_in_range = chich_for_blid[
-                            pd.to_datetime(chich_for_blid["ngay_thuc_hien"]).dt.date >= s_start.date()
-                        ]
-                        if not chich_in_range.empty:
-                            _next_vu_producing.add((s_blid, s_vu))
-        
-        if "base_lot_id" in df_dt_seasons.columns:
-            for blid, blid_grp in df_dt_seasons[df_dt_seasons["base_lot_id"].notna()].groupby("base_lot_id"):
-                sorted_seasons = blid_grp.sort_values("ngay_bat_dau").drop_duplicates("vu")
-                vu_list = sorted_seasons[["vu", "ngay_bat_dau"]].values.tolist()
-                for i, (vu_val, start_dt) in enumerate(vu_list):
-                    if i + 1 < len(vu_list):
-                        next_vu = vu_list[i + 1][0]
-                        next_blid = int(blid)
-                        # Chỉ set upper bound nếu vụ KẾ TIẾP đã có chích bắp
-                        if (next_blid, next_vu) in _next_vu_producing:
-                            _next_season_map[(int(blid), vu_val)] = pd.to_datetime(vu_list[i + 1][1])
-                        else:
-                            _next_season_map[(int(blid), vu_val)] = None
-                    else:
-                        _next_season_map[(int(blid), vu_val)] = None
-
         for idx, row in df_dt_seasons.iterrows():
             f_vu = row.get("vu")
             lo_name = row.get("lo")
@@ -3531,10 +3192,8 @@ def render_global_data_tab(c_farm):
 
             # ─── Dùng shared compute_batch_stats (đồng bộ logic với Map) ───
             if pd.notna(season_blid) and lo_name:
-                next_start = _next_season_map.get((int(season_blid), f_vu))
-                next_prod_key = (int(season_blid), f_vu)
-                # Nếu vụ kế chưa sản xuất nhưng có next_start → vẫn không giới hạn
-                next_producing = next_prod_key in _next_vu_producing if next_start is not None else False
+                next_start = _map_next_season.get((int(season_blid), f_vu))
+                next_producing = next_start is not None
                 next_s_date = next_start.date() if next_start is not None else None
                 season_start_date = start.date() if pd.notna(start) else None
                 _, so_chich_bap, so_cat_bap, so_thu_hoach = compute_batch_stats(
