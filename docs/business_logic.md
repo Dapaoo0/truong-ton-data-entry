@@ -142,7 +142,7 @@ Mục tiêu nghiệp vụ của máy tính này là **tính số buồng nguyên
 **Profile khối lượng nải**
 - Bảng kg từng nải là profile tỷ trọng, không dùng trực tiếp như kg/buồng. App scale profile theo kịch bản: `kg_nải = kg_profile_gốc * target_kg_buồng / tổng_profile_gốc`.
 - Profile 12 nải có tổng gốc `28.4kg`, dùng cho kịch bản `18kg` và `20kg`.
-- Profile 9 nải có tổng gốc `19.0kg`, dùng cho kịch bản `12kg`.
+- Profile 9 nải có tổng gốc `19.0kg`, dùng làm tỷ trọng và scale về kịch bản `15.6kg`.
 - Khi tính một dải cắt, thuật toán cộng kg từng nải sau scale trong dải đó. Ví dụ `12 nải - 18kg`, `6H 5-7` ≈ `4.31kg/buồng`.
 
 **Quy cách hiện tại**

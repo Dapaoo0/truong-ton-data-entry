@@ -5550,8 +5550,8 @@ def render_container_allocation_calculator():
                 key="container_12_hand_kg_scenario",
             )
         else:
-            target_kg_per_bunch = 12.0
-            st.metric("Kịch bản kg/buồng", "12 kg")
+            target_kg_per_bunch = 15.6
+            st.metric("Kịch bản kg/buồng", "15.6 kg")
     with cfg3:
         hand_profile = build_hand_weight_profile(bunch_type, target_kg_per_bunch)
         hands_per_bunch = int(hand_profile["hands_per_bunch"])

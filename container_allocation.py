@@ -74,10 +74,10 @@ HAND_WEIGHT_SCENARIOS = {
         "hands_per_bunch": 12,
         "target_kg_per_bunch": 20.0,
     },
-    "9_12": {
-        "label": "9 nải - 12 kg",
+    "9_156": {
+        "label": "9 nải - 15.6 kg",
         "hands_per_bunch": 9,
-        "target_kg_per_bunch": 12.0,
+        "target_kg_per_bunch": 15.6,
     },
 }
 

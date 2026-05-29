@@ -31,14 +31,14 @@ def _first_result(total_bunches, kg_per_bunch, row):
 def test_scaled_hand_weight_profiles_match_target_kg():
     profile_12_18 = build_hand_weight_profile(12, 18)
     profile_12_20 = build_hand_weight_profile(12, 20)
-    profile_9_12 = build_hand_weight_profile(9, 12)
+    profile_9_156 = build_hand_weight_profile(9, 15.6)
 
     assert round(sum(profile_12_18["hand_weights"].values()), 6) == 18
     assert round(sum(profile_12_20["hand_weights"].values()), 6) == 20
-    assert round(sum(profile_9_12["hand_weights"].values()), 6) == 12
+    assert round(sum(profile_9_156["hand_weights"].values()), 6) == 15.6
     assert round(range_weight(5, 7, profile_12_18["hand_weights"]), 2) == 4.31
     assert round(range_weight(5, 7, profile_12_20["hand_weights"]), 2) == 4.79
-    assert round(range_weight(8, 9, profile_9_12["hand_weights"]), 2) == 3.54
+    assert round(range_weight(8, 9, profile_9_156["hand_weights"]), 2) == 4.60
 
 
 def test_allocation_can_use_scaled_hand_weight_profile():
