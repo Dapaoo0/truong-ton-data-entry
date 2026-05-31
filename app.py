@@ -26,6 +26,7 @@ try:
         OPTIMIZER_SKU_RULES,
         allocate_bunches_optimized,
         build_hand_weight_profile,
+        calculate_min_bunches_for_container_plan,
         calculate_max_containers_by_market,
         get_optimizer_sku_rules,
     )
@@ -73,6 +74,18 @@ except ImportError:
             "markets": ["Hàn"],
             "group": "Phần Đuôi",
             "description": "Mã tận dụng chiến lược, gom vét các nải nhỏ cuối buồng.",
+            "ranges": [(10, 12)],
+        },
+        "12CP": {
+            "markets": ["Hàn"],
+            "group": "Phần Đuôi",
+            "description": "Cùng nhóm quy cách Hàn với 15CP.",
+            "ranges": [(10, 12)],
+        },
+        "10CP": {
+            "markets": ["Hàn"],
+            "group": "Phần Đuôi",
+            "description": "Cùng nhóm quy cách Hàn với 15CP.",
             "ranges": [(10, 12)],
         },
     }
@@ -194,6 +207,94 @@ except ImportError:
             "kg_per_hand": kg_per_hand,
             "hand_weights": hand_weights,
         }
+
+    def calculate_min_bunches_for_container_plan(
+        sku_rows,
+        kg_per_bunch,
+        hands_per_bunch,
+        kg_per_box=13,
+        boxes_per_container=1320,
+        hand_weights=None,
+    ):
+        requested_boxes = sum(int(float(row.get("demand", 0) or 0)) for row in sku_rows)
+        high = 1
+        best_result = None
+        while high <= 1_000_000:
+            result = allocate_bunches_optimized(
+                high,
+                kg_per_bunch,
+                hands_per_bunch,
+                sku_rows,
+                kg_per_box=kg_per_box,
+                boxes_per_container=boxes_per_container,
+                hand_weights=hand_weights,
+            )
+            summary = result.get("summary", {})
+            if int(summary.get("short_boxes", 0)) == 0 and int(summary.get("fulfilled_boxes", 0)) >= requested_boxes:
+                best_result = result
+                break
+            high *= 2
+        if best_result is None:
+            return {
+                "rows": [],
+                "detail_rows": [],
+                "remaining_hands": {},
+                "summary": {
+                    "total_bunches": 0,
+                    "target_containers": requested_boxes // boxes_per_container,
+                    "requested_boxes": requested_boxes,
+                    "source_kg": 0,
+                    "kg_per_hand": 0,
+                    "hand_weights": hand_weights or {},
+                    "source_boxes_capacity": 0,
+                    "source_cont_capacity": 0,
+                    "fulfilled_boxes": 0,
+                    "fulfilled_containers": 0,
+                    "short_boxes": requested_boxes,
+                    "active_bunches_estimated": 0,
+                    "segment_count": 0,
+                    "kg_allocated": 0,
+                    "extra_kg_from_rounding": 0,
+                    "solver_status": "NO_SOLUTION",
+                    "solver_backend": "legacy_fallback",
+                },
+                "solver_status": "NO_SOLUTION",
+                "solver_backend": "legacy_fallback",
+            }
+
+        low = 0
+        while low <= high:
+            mid = (low + high) // 2
+            result = allocate_bunches_optimized(
+                mid,
+                kg_per_bunch,
+                hands_per_bunch,
+                sku_rows,
+                kg_per_box=kg_per_box,
+                boxes_per_container=boxes_per_container,
+                hand_weights=hand_weights,
+            )
+            summary = result.get("summary", {})
+            if int(summary.get("short_boxes", 0)) == 0 and int(summary.get("fulfilled_boxes", 0)) >= requested_boxes:
+                best_result = result
+                high = mid - 1
+            else:
+                low = mid + 1
+        active_bunches = int(best_result["summary"].get("active_bunches_estimated", best_result["summary"].get("total_bunches", 0)))
+        kg_allocated = sum(float(row.get("kg_allocated", 0) or 0) for row in best_result.get("rows", []))
+        best_result["summary"].update({
+            "total_bunches": active_bunches,
+            "target_containers": requested_boxes // boxes_per_container,
+            "requested_boxes": requested_boxes,
+            "source_kg": active_bunches * kg_per_bunch,
+            "kg_allocated": kg_allocated,
+            "extra_kg_from_rounding": max(0, kg_allocated - requested_boxes * kg_per_box),
+            "solver_status": "APPROXIMATE",
+            "solver_backend": "fallback_binary_search",
+        })
+        best_result["solver_status"] = "APPROXIMATE"
+        best_result["solver_backend"] = "fallback_binary_search"
+        return best_result
 
     def get_optimizer_sku_rules(hands_per_bunch):
         return OPTIMIZER_SKU_RULES
@@ -4876,6 +4977,19 @@ def _default_container_sku_editor_rows() -> list:
     }]
 
 
+def _default_container_target_rows() -> list:
+    return [{
+        "_cont_id": "target_cont_0",
+        "Khách hàng": "",
+        "Thị trường": "",
+        "items": [{
+            "_item_id": "target_item_0",
+            "Mã hàng": "",
+            "Số thùng": 0,
+        }],
+    }]
+
+
 def _unique_keep_order(values: list) -> list:
     result = []
     for value in values:
@@ -4923,6 +5037,102 @@ def _container_priority_map(values: list, fallback_values: list) -> dict:
         if text and text not in ordered:
             ordered.append(text)
     return {value: index + 1 for index, value in enumerate(ordered)}
+
+
+def _normalize_container_target_rows(container_rows: list, hands_per_bunch: int) -> list:
+    normalized_conts = []
+    for cont_idx, cont in enumerate(container_rows or []):
+        cont_id = cont.get("_cont_id") or f"target_cont_{cont_idx}"
+        customer = _container_clean_text(cont.get("Khách hàng"))
+        if customer not in CONTAINER_CUSTOMER_OPTIONS:
+            customer = ""
+        market = _container_customer_market(customer)
+        sku_options = _container_sku_options_for_market(market, hands_per_bunch) if market else []
+        normalized_items = []
+        for item_idx, item in enumerate(cont.get("items") or []):
+            item_id = item.get("_item_id") or f"{cont_id}_item_{item_idx}"
+            sku = _container_clean_text(item.get("Mã hàng")).upper()
+            if sku not in sku_options:
+                sku = ""
+            normalized_items.append({
+                "_item_id": item_id,
+                "Mã hàng": sku,
+                "Số thùng": max(0, _container_clean_int(item.get("Số thùng"))),
+            })
+        if not normalized_items:
+            normalized_items = [{
+                "_item_id": f"{cont_id}_item_0",
+                "Mã hàng": "",
+                "Số thùng": 0,
+            }]
+        normalized_conts.append({
+            "_cont_id": cont_id,
+            "Khách hàng": customer,
+            "Thị trường": market,
+            "items": normalized_items,
+        })
+    return normalized_conts or _default_container_target_rows()
+
+
+def _prepare_container_rows_from_container_targets(container_rows: list, hands_per_bunch: int) -> tuple[list, list]:
+    errors = []
+    grouped_rows = {}
+    row_order = {}
+    order_counter = 0
+    for cont_idx, cont in enumerate(container_rows or [], start=1):
+        customer = _container_clean_text(cont.get("Khách hàng"))
+        market = _container_clean_text(cont.get("Thị trường")) or _container_customer_market(customer)
+        if not customer:
+            errors.append(f"Cont #{cont_idx}: chưa chọn khách hàng.")
+        if not market:
+            errors.append(f"Cont #{cont_idx}: chưa xác định được thị trường.")
+
+        allowed_skus = _container_sku_options_for_market(market, hands_per_bunch) if market else []
+        item_total = 0
+        has_positive_item = False
+        for item_idx, item in enumerate(cont.get("items") or [], start=1):
+            sku = _container_clean_text(item.get("Mã hàng")).upper()
+            boxes = max(0, _container_clean_int(item.get("Số thùng")))
+            item_total += boxes
+            if boxes <= 0 and not sku:
+                continue
+            has_positive_item = True
+            if boxes <= 0:
+                errors.append(f"Cont #{cont_idx}, dòng {item_idx}: số thùng phải lớn hơn 0.")
+                continue
+            if not sku:
+                errors.append(f"Cont #{cont_idx}, dòng {item_idx}: chưa chọn mã hàng.")
+                continue
+            if sku not in allowed_skus:
+                errors.append(f"Cont #{cont_idx}, dòng {item_idx}: mã {sku} không hợp lệ cho thị trường {market}.")
+                continue
+            key = (customer, market, sku)
+            if key not in grouped_rows:
+                order_counter += 1
+                grouped_rows[key] = {
+                    "customer_priority": order_counter,
+                    "customer": customer,
+                    "market_priority": order_counter,
+                    "market": market,
+                    "sku_priority": order_counter,
+                    "sku": sku,
+                    "demand": 0,
+                    "unit": "Thùng",
+                }
+                row_order[key] = order_counter
+            grouped_rows[key]["demand"] += boxes
+
+        if not has_positive_item:
+            errors.append(f"Cont #{cont_idx}: chưa có dòng mã hàng hợp lệ.")
+        if item_total != BOXES_PER_CONTAINER:
+            diff = BOXES_PER_CONTAINER - item_total
+            if diff > 0:
+                errors.append(f"Cont #{cont_idx}: còn thiếu {diff:,} thùng để đủ 1 cont.")
+            else:
+                errors.append(f"Cont #{cont_idx}: đang vượt {-diff:,} thùng so với 1 cont.")
+
+    allocation_rows = sorted(grouped_rows.values(), key=lambda row: row_order[(row["customer"], row["market"], row["sku"])])
+    return allocation_rows, errors
 
 
 def _prepare_container_rows_for_allocation(order_rows: list, customer_order: list, sku_orders_by_customer: dict) -> list:
@@ -5064,6 +5274,7 @@ def _save_container_plan(plan: dict) -> bool:
         "hands_per_bunch": plan.get("hands_per_bunch"),
         "hand_weights": plan.get("hand_weights"),
         "sku_rows": plan.get("sku_rows"),
+        "container_targets": plan.get("container_targets"),
         "customer_order": plan.get("customer_order"),
         "sku_orders_by_customer": plan.get("sku_orders_by_customer"),
         "market_order": plan.get("market_order"),
@@ -5112,6 +5323,20 @@ def _delete_container_plan(plan_id: str) -> bool:
 def _container_plan_summary_rows(plan: dict) -> list:
     result = plan.get("result", {}) if isinstance(plan.get("result"), dict) else {}
     summary = result.get("summary", {}) if isinstance(result.get("summary"), dict) else {}
+    if _container_clean_text(plan.get("mode")) == "Từ cont -> số buồng":
+        rows = [
+            {"Thông tin": "Chế độ", "Giá trị": plan.get("mode", "")},
+            {"Thông tin": "Cont mục tiêu", "Giá trị": f"{int(summary.get('target_containers', 0)):,}"},
+            {"Thông tin": "Tổng thùng", "Giá trị": f"{int(summary.get('requested_boxes', summary.get('fulfilled_boxes', 0))):,}"},
+            {"Thông tin": "Loại buồng", "Giá trị": f"{int(plan.get('hands_per_bunch', 0))} nải"},
+            {"Thông tin": "Kg/buồng", "Giá trị": f"{float(plan.get('kg_per_bunch', 0)):.2f}"},
+            {"Thông tin": "Buồng xẻ tối thiểu", "Giá trị": f"{int(summary.get('active_bunches_estimated', 0)):,}"},
+            {"Thông tin": "Kg cần xẻ", "Giá trị": f"{float(summary.get('source_kg', 0)):,.1f}"},
+            {"Thông tin": "Kg dư", "Giá trị": f"{float(summary.get('extra_kg_from_rounding', 0)):,.1f}"},
+            {"Thông tin": "Thuật toán", "Giá trị": f"{summary.get('solver_status', '')} · {summary.get('solver_backend', '')}".strip(" ·")},
+            {"Thông tin": "Thời điểm lưu", "Giá trị": _container_format_saved_at(plan.get("saved_at"))},
+        ]
+        return rows
     rows = [
         {"Thông tin": "Chế độ", "Giá trị": plan.get("mode", "")},
         {"Thông tin": "Nguồn", "Giá trị": plan.get("source", "")},
@@ -5309,6 +5534,27 @@ def _container_plan_order_input_rows(plan: dict) -> pd.DataFrame:
     return df[columns] if columns else df
 
 
+def _container_plan_container_input_rows(plan: dict) -> pd.DataFrame:
+    container_targets = plan.get("container_targets") or []
+    output_rows = []
+    for cont_idx, cont in enumerate(container_targets, start=1):
+        customer = _container_clean_text(cont.get("Khách hàng"))
+        market = _container_clean_text(cont.get("Thị trường"))
+        for item in cont.get("items") or []:
+            sku = _container_clean_text(item.get("Mã hàng")).upper()
+            boxes = _container_clean_int(item.get("Số thùng"))
+            if not sku and boxes <= 0:
+                continue
+            output_rows.append({
+                "Cont": f"Cont #{cont_idx}",
+                "Khách hàng": customer,
+                "Thị trường": market,
+                "Mã hàng": sku,
+                "Số thùng": boxes,
+            })
+    return pd.DataFrame(output_rows)
+
+
 @dialog_decorator("Chi tiết kế hoạch")
 def _render_container_saved_plan_dialog(plan_id: str):
     plan = next(
@@ -5334,9 +5580,13 @@ def _render_container_saved_plan_dialog(plan_id: str):
                 hide_index=True,
             )
 
-    if plan.get("sku_rows"):
+    if plan.get("sku_rows") and not plan.get("container_targets"):
         with st.expander("Input đơn hàng", expanded=True):
             st.dataframe(_container_plan_order_input_rows(plan), use_container_width=True, hide_index=True)
+
+    if plan.get("container_targets"):
+        with st.expander("Input cont", expanded=True):
+            st.dataframe(_container_plan_container_input_rows(plan), use_container_width=True, hide_index=True)
 
     priority_rows = []
     for idx, customer in enumerate(plan.get("customer_order", []) or [], start=1):
@@ -5392,7 +5642,14 @@ def _render_container_saved_plan_cards():
             title_col, b_col, box_col, action_col, delete_col = st.columns([3, 1, 1, 0.8, 0.7])
             with title_col:
                 st.markdown(f"**{plan.get('name') or _container_saved_plan_title(plan, idx)}**")
-                st.caption(f"{plan.get('source', '')} · {int(plan.get('source_bunches', 0)):,} buồng · {int(plan.get('hands_per_bunch', 0))} nải · {float(plan.get('kg_per_bunch', 0)):.1f} kg/buồng")
+                if _container_clean_text(plan.get("mode")) == "Từ cont -> số buồng":
+                    st.caption(
+                        f"{int(summary.get('target_containers', 0)):,} cont mục tiêu · "
+                        f"{int(plan.get('hands_per_bunch', 0))} nải · "
+                        f"{float(plan.get('kg_per_bunch', 0)):.1f} kg/buồng"
+                    )
+                else:
+                    st.caption(f"{plan.get('source', '')} · {int(plan.get('source_bunches', 0)):,} buồng · {int(plan.get('hands_per_bunch', 0))} nải · {float(plan.get('kg_per_bunch', 0)):.1f} kg/buồng")
             with b_col:
                 st.metric("Buồng xẻ", f"{int(summary.get('active_bunches_estimated', 0)):,}")
             with box_col:
@@ -5404,6 +5661,152 @@ def _render_container_saved_plan_cards():
                 if st.button("Xóa", key=f"container_plan_delete_{plan_id}", use_container_width=True):
                     if _delete_container_plan(plan_id):
                         st.rerun()
+
+
+def _render_container_target_controls(hands_per_bunch: int) -> list:
+    state_key = "container_calc_target_conts"
+    if state_key not in st.session_state:
+        st.session_state[state_key] = _default_container_target_rows()
+
+    current_conts = _normalize_container_target_rows(st.session_state.get(state_key), hands_per_bunch)
+    rendered_conts = []
+    delete_cont_index = None
+
+    for cont_idx, cont in enumerate(current_conts):
+        cont_id = cont["_cont_id"]
+        with st.container(border=True):
+            title_col, customer_col, delete_col = st.columns([1.2, 3, 0.8])
+            with title_col:
+                st.markdown(f"###### Cont #{cont_idx + 1}")
+            with customer_col:
+                customer_options = [CONTAINER_EMPTY_OPTION] + CONTAINER_CUSTOMER_OPTIONS
+                customer_key = f"container_target_customer_{cont_id}"
+                if st.session_state.get(customer_key) not in customer_options:
+                    st.session_state[customer_key] = cont["Khách hàng"] if cont["Khách hàng"] in CONTAINER_CUSTOMER_OPTIONS else None
+                customer = st.selectbox(
+                    "Khách hàng",
+                    options=customer_options,
+                    index=None,
+                    placeholder="Chọn khách hàng",
+                    key=customer_key,
+                )
+                if customer == CONTAINER_EMPTY_OPTION:
+                    customer = ""
+                market = _container_customer_market(customer)
+                if market:
+                    st.caption(f"Thị trường: {market}")
+            with delete_col:
+                st.markdown("")
+                if st.button("Xóa cont", key=f"container_target_delete_cont_{cont_id}", disabled=len(current_conts) <= 1, use_container_width=True):
+                    delete_cont_index = cont_idx
+
+            item_rows = []
+            delete_item_index = None
+            sku_options = _container_sku_options_for_market(market, hands_per_bunch) if market else []
+            item_header = st.columns([2, 1.2, 0.7])
+            item_header[0].caption("Mã hàng")
+            item_header[1].caption("Số thùng")
+            for item_idx, item in enumerate(cont.get("items") or []):
+                item_id = item["_item_id"]
+                item_cols = st.columns([2, 1.2, 0.7])
+                with item_cols[0]:
+                    sku_select_options = [CONTAINER_EMPTY_OPTION] + sku_options
+                    sku_key = f"container_target_sku_{cont_id}_{item_id}"
+                    if st.session_state.get(sku_key) not in sku_select_options:
+                        st.session_state[sku_key] = item["Mã hàng"] if item["Mã hàng"] in sku_options else None
+                    sku = st.selectbox(
+                        "Mã hàng",
+                        options=sku_select_options,
+                        index=None,
+                        placeholder="Chọn mã hàng" if market else "Chọn khách hàng trước",
+                        key=sku_key,
+                        label_visibility="collapsed",
+                        disabled=not bool(market),
+                    )
+                    if sku == CONTAINER_EMPTY_OPTION:
+                        sku = ""
+                with item_cols[1]:
+                    boxes = st.number_input(
+                        "Số thùng",
+                        min_value=0,
+                        value=max(0, _container_clean_int(item.get("Số thùng"))),
+                        step=1,
+                        key=f"container_target_boxes_{cont_id}_{item_id}",
+                        label_visibility="collapsed",
+                    )
+                with item_cols[2]:
+                    if st.button("Xóa", key=f"container_target_delete_item_{cont_id}_{item_id}", disabled=len(cont.get("items") or []) <= 1, use_container_width=True):
+                        delete_item_index = item_idx
+                item_rows.append({
+                    "_item_id": item_id,
+                    "Mã hàng": sku or "",
+                    "Số thùng": boxes,
+                })
+
+            if delete_item_index is not None:
+                item_rows = [item for idx, item in enumerate(item_rows) if idx != delete_item_index]
+                st.session_state[state_key] = rendered_conts + [{
+                    "_cont_id": cont_id,
+                    "Khách hàng": customer or "",
+                    "Thị trường": market,
+                    "items": item_rows,
+                }] + current_conts[cont_idx + 1:]
+                st.rerun()
+
+            add_cols = st.columns([1, 4])
+            with add_cols[0]:
+                if st.button("Thêm mã", key=f"container_target_add_item_{cont_id}", use_container_width=True):
+                    item_rows.append({
+                        "_item_id": f"target_item_{datetime.now().timestamp()}",
+                        "Mã hàng": "",
+                        "Số thùng": 0,
+                    })
+                    st.session_state[state_key] = rendered_conts + [{
+                        "_cont_id": cont_id,
+                        "Khách hàng": customer or "",
+                        "Thị trường": market,
+                        "items": item_rows,
+                    }] + current_conts[cont_idx + 1:]
+                    st.rerun()
+
+            total_boxes = sum(_container_clean_int(item.get("Số thùng")) for item in item_rows)
+            if total_boxes == BOXES_PER_CONTAINER:
+                st.success(f"Cont #{cont_idx + 1}: đủ {BOXES_PER_CONTAINER:,} thùng.")
+            elif total_boxes < BOXES_PER_CONTAINER:
+                st.warning(f"Cont #{cont_idx + 1}: còn thiếu {BOXES_PER_CONTAINER - total_boxes:,} thùng để đủ 1 cont.")
+            else:
+                st.error(f"Cont #{cont_idx + 1}: vượt {total_boxes - BOXES_PER_CONTAINER:,} thùng so với 1 cont.")
+
+            rendered_conts.append({
+                "_cont_id": cont_id,
+                "Khách hàng": customer or "",
+                "Thị trường": market,
+                "items": item_rows,
+            })
+
+    if delete_cont_index is not None:
+        rendered_conts = [cont for idx, cont in enumerate(rendered_conts) if idx != delete_cont_index]
+        st.session_state[state_key] = rendered_conts or _default_container_target_rows()
+        st.rerun()
+
+    add_cont_cols = st.columns([1, 5])
+    with add_cont_cols[0]:
+        if st.button("Thêm cont", key="container_target_add_cont", use_container_width=True):
+            rendered_conts.append({
+                "_cont_id": f"target_cont_{datetime.now().timestamp()}",
+                "Khách hàng": "",
+                "Thị trường": "",
+                "items": [{
+                    "_item_id": f"target_item_{datetime.now().timestamp()}",
+                    "Mã hàng": "",
+                    "Số thùng": 0,
+                }],
+            })
+            st.session_state[state_key] = rendered_conts
+            st.rerun()
+
+    st.session_state[state_key] = rendered_conts
+    return rendered_conts
 
 
 def _render_container_customer_priority_controls(key_prefix: str) -> list:
@@ -5468,15 +5871,34 @@ def render_container_allocation_calculator():
     if "container_calc_sku_rows" not in st.session_state:
         st.session_state["container_calc_sku_rows"] = _default_container_sku_editor_rows()
 
-    source_mode = st.radio(
-        "Nguồn số buồng",
-        ["Dự báo từ cắt bắp", "Nhập tay"],
-        horizontal=True,
-        key="container_source_mode",
+    calc_mode_options = ["Theo đơn hàng", "Tối đa cont theo thị trường", "Từ cont -> số buồng"]
+    calc_mode = _persisted_segmented_control(
+        "Chế độ tính",
+        calc_mode_options,
+        key="container_calculation_mode",
+        query_key="container_calc_mode",
+        slugs={
+            calc_mode_options[0]: "orders",
+            calc_mode_options[1]: "max_by_market",
+            calc_mode_options[2]: "containers_to_bunches",
+        },
+        default=calc_mode_options[0],
+        label_visibility="visible",
     )
 
     source_bunches = 0
     source_label = "Chưa chọn nguồn"
+    if calc_mode == "Từ cont -> số buồng":
+        source_mode = "Từ cont -> số buồng"
+        source_label = "Tính ngược từ cơ cấu cont"
+    else:
+        source_mode = st.radio(
+            "Nguồn số buồng",
+            ["Dự báo từ cắt bắp", "Nhập tay"],
+            horizontal=True,
+            key="container_source_mode",
+        )
+
     if source_mode == "Dự báo từ cắt bắp":
         df_stg_all = fetch_table_data("stage_logs", "Phòng Kinh doanh")
         lead_col, f_col, y_col, w_col = st.columns([1.2, 1.6, 1.6, 1.6])
@@ -5528,8 +5950,9 @@ def render_container_allocation_calculator():
                 f"+{selected_forecast_weeks} tuần tính cả tuần cắt bắp. Ví dụ +8: cắt tuần 20 thì rơi vào tuần thu hoạch dự báo 27."
             )
     else:
-        source_bunches = int(st.number_input("Số buồng thu hoạch / dự kiến", min_value=0, value=0, step=100, key="container_manual_bunches"))
-        source_label = "Nhập tay"
+        if calc_mode != "Từ cont -> số buồng":
+            source_bunches = int(st.number_input("Số buồng thu hoạch / dự kiến", min_value=0, value=0, step=100, key="container_manual_bunches"))
+            source_label = "Nhập tay"
 
     st.divider()
     cfg1, cfg2, cfg3, cfg4 = st.columns([1.2, 1.3, 1, 1])
@@ -5572,19 +5995,143 @@ def render_container_allocation_calculator():
             hide_index=True,
         )
 
-    calc_mode_options = ["Theo đơn hàng", "Tối đa cont theo thị trường"]
-    calc_mode = _persisted_segmented_control(
-        "Chế độ tính",
-        calc_mode_options,
-        key="container_calculation_mode",
-        query_key="container_calc_mode",
-        slugs={
-            calc_mode_options[0]: "orders",
-            calc_mode_options[1]: "max_by_market",
-        },
-        default=calc_mode_options[0],
-        label_visibility="visible",
-    )
+    if calc_mode == "Từ cont -> số buồng":
+        st.markdown("##### Cấu hình cont mục tiêu")
+        container_targets = _render_container_target_controls(hands_per_bunch)
+        allocation_rows, validation_errors = _prepare_container_rows_from_container_targets(
+            container_targets,
+            hands_per_bunch,
+        )
+        if validation_errors:
+            for error in validation_errors:
+                st.warning(error)
+            st.info("Hoàn tất từng cont đúng 1,320 thùng và chọn đủ khách hàng/mã hàng để chạy tính số buồng.")
+            _render_container_saved_plan_cards()
+            return
+
+        if not allocation_rows:
+            st.info("Thêm ít nhất một cont hợp lệ để tính số buồng xẻ tối thiểu.")
+            _render_container_saved_plan_cards()
+            return
+
+        result = calculate_min_bunches_for_container_plan(
+            allocation_rows,
+            kg_per_bunch,
+            hands_per_bunch,
+            kg_per_box=KG_PER_BOX,
+            boxes_per_container=BOXES_PER_CONTAINER,
+            hand_weights=hand_weights,
+        )
+        summary = result["summary"]
+
+        st.markdown("##### Kết quả tổng")
+        solver_status = summary.get("solver_status", result.get("solver_status", "APPROXIMATE"))
+        solver_backend = summary.get("solver_backend", result.get("solver_backend", "unknown"))
+        if solver_status == "APPROXIMATE":
+            st.warning("Kết quả xấp xỉ do thiếu solver tối ưu hoặc đang dùng fallback.")
+        elif solver_status == "NO_SOLUTION":
+            st.error("Không tìm được phương án xẻ hợp lệ cho cơ cấu cont đã nhập.")
+        else:
+            st.caption(f"Thuật toán tối ưu: {solver_status} · {solver_backend}")
+
+        target_containers = len(container_targets)
+        target_boxes = target_containers * BOXES_PER_CONTAINER
+        kg_allocated = float(summary.get("kg_allocated", 0))
+        extra_kg = float(summary.get("extra_kg_from_rounding", 0))
+        m1, m2, m3, m4, m5, m6 = st.columns(6)
+        with m1:
+            st.metric("Cont mục tiêu", f"{target_containers:,}")
+        with m2:
+            st.metric("Tổng thùng", f"{target_boxes:,}")
+        with m3:
+            st.metric("Buồng xẻ tối thiểu", f"{int(summary.get('active_bunches_estimated', 0)):,}")
+        with m4:
+            st.metric("Kg cần xẻ", f"{float(summary.get('source_kg', 0)):,.0f}")
+        with m5:
+            st.metric("Kg phân bổ", f"{kg_allocated:,.0f}")
+        with m6:
+            st.metric("Kg dư", f"{extra_kg:,.1f}")
+
+        if result["rows"]:
+            st.success(
+                f"Kết luận: cần xẻ tối thiểu {int(summary.get('active_bunches_estimated', 0)):,} buồng "
+                f"để đáp ứng {target_containers:,} cont ({target_boxes:,} thùng)."
+            )
+            result_df = pd.DataFrame(result["rows"])
+            sort_cols = [
+                col for col in ("customer_priority", "sku_priority", "processing_order")
+                if col in result_df.columns
+            ]
+            if sort_cols:
+                result_df = result_df.sort_values(sort_cols)
+            compact_rows = []
+            for _, sku_row in result_df.iterrows():
+                compact_rows.append({
+                    "Khách hàng": sku_row.get("customer", ""),
+                    "Thị trường": sku_row.get("market", ""),
+                    "Mã hàng": sku_row.get("sku", ""),
+                    "Thùng cần": int(sku_row.get("requested_boxes", 0)),
+                    "Thùng đáp ứng": int(sku_row.get("boxes_fulfilled", 0)),
+                    "Buồng dùng": int(sku_row.get("bunches_allocated", 0)),
+                    "Kg phân bổ": f"{float(sku_row.get('kg_allocated', 0)):,.0f}",
+                })
+            st.dataframe(pd.DataFrame(compact_rows), use_container_width=True, hide_index=True)
+
+            process_rows = []
+            detail_result_df = pd.DataFrame(result.get("detail_rows") or result["rows"])
+            if not detail_result_df.empty:
+                detail_sort_cols = [
+                    col for col in ("customer_priority", "sku_priority", "processing_order")
+                    if col in detail_result_df.columns
+                ]
+                if detail_sort_cols:
+                    detail_result_df = detail_result_df.sort_values(detail_sort_cols)
+                for _, sku_row in detail_result_df.iterrows():
+                    process_rows.append({
+                        "Bước": int(sku_row["processing_order"]),
+                        "Thị trường": sku_row["market"],
+                        "Khách hàng": sku_row.get("customer", ""),
+                        "Mã hàng": sku_row["sku"],
+                        "Nải chọn": sku_row["range_label"],
+                        "Cách tính": (
+                            f"{int(sku_row['bunches_allocated']):,} buồng x "
+                            f"({_container_range_formula(sku_row['hand_from'], sku_row['hand_to'], hand_weights)}) "
+                            f"= {float(sku_row['kg_allocated']):,.1f} kg"
+                        ),
+                        "Kết quả": (
+                            f"~{float(sku_row.get('boxes_equivalent', sku_row['kg_allocated'] / KG_PER_BOX)):,.2f} thùng quy đổi; "
+                            "tổng thùng chốt xem ở dòng mã hàng"
+                        ),
+                    })
+            if process_rows:
+                with st.expander("Quá trình chọn nải chi tiết", expanded=False):
+                    st.dataframe(pd.DataFrame(process_rows), use_container_width=True, hide_index=True)
+
+        remaining_df = pd.DataFrame([
+            {"Nải": hand, "Buồng còn lại": qty}
+            for hand, qty in result.get("remaining_hands", {}).items()
+        ])
+        if not remaining_df.empty:
+            with st.expander("Tồn nải còn lại sau phân bổ", expanded=False):
+                st.dataframe(remaining_df, use_container_width=True, hide_index=True)
+
+        if st.button("Lưu kế hoạch", use_container_width=True, type="secondary", key="container_save_min_bunch_session"):
+            if _save_container_plan({
+                "mode": calc_mode,
+                "source_mode": source_mode,
+                "source": f"{target_containers:,} cont mục tiêu",
+                "source_bunches": int(summary.get("active_bunches_estimated", 0)),
+                "kg_per_bunch": kg_per_bunch,
+                "hands_per_bunch": hands_per_bunch,
+                "hand_weights": hand_weights,
+                "container_targets": container_targets,
+                "sku_rows": allocation_rows,
+                "result": result,
+            }):
+                st.success("Đã lưu kế hoạch vào account hiện tại.")
+
+        _render_container_saved_plan_cards()
+        return
 
     if calc_mode == "Tối đa cont theo thị trường":
         st.markdown("##### Ưu tiên thị trường")

@@ -4,6 +4,7 @@ from container_allocation import (
     allocate_bunches_by_hands,
     allocate_bunches_optimized,
     build_hand_weight_profile,
+    calculate_min_bunches_for_container_plan,
     calculate_max_containers_by_market,
     range_weight,
     _valid_optimizer_ranges,
@@ -193,8 +194,11 @@ def test_nine_hand_profile_uses_inferred_parent_ranges():
     ranges_15cp = _valid_optimizer_ranges(_optimizer_row(1, 1, "15CP", 100, market="Hàn"), 9)
 
     assert (1, 7) in ranges_30cp
+    assert (6, 9) in ranges_15cp
+    assert (6, 6) in ranges_15cp
+    assert (7, 9) in ranges_15cp
     assert (8, 9) in ranges_15cp
-    assert (8, 8) in ranges_15cp
+    assert (5, 5) not in ranges_15cp
     assert (10, 10) not in ranges_15cp
 
 
@@ -203,9 +207,30 @@ def test_fixed_specs_are_parent_ranges_too():
         ("5H", "Nhật", 6),
         ("6H", "Nhật", 6),
         ("15CP", "Hàn", 6),
+        ("12CP", "Hàn", 6),
+        ("10CP", "Hàn", 6),
     ]:
         ranges = _valid_optimizer_ranges(_optimizer_row(1, 1, sku, 100, market=market), 12)
         assert len(ranges) == expected_count
+
+
+def test_korea_cp_skus_use_six_to_nine_parent_range_for_nine_hand_bunches():
+    for sku in ["15CP", "12CP", "10CP"]:
+        ranges = _valid_optimizer_ranges(_optimizer_row(1, 1, sku, 100, market="Hàn"), 9)
+
+        assert (6, 9) in ranges
+        assert (6, 6) in ranges
+        assert (9, 9) in ranges
+        assert (5, 9) not in ranges
+        assert (10, 10) not in ranges
+        assert len(ranges) == 10
+
+
+def test_korea_cp_skus_are_not_available_for_japan():
+    for sku in ["15CP", "12CP", "10CP"]:
+        ranges = _valid_optimizer_ranges(_optimizer_row(1, 1, sku, 100, market="Nhật"), 9)
+
+        assert ranges == []
 
 
 def test_27cp_is_not_available_for_korea():
@@ -342,16 +367,28 @@ def test_optimizer_expands_30cp_to_needed_subrange_when_shorter_ranges_are_not_e
 
 
 def test_optimizer_supports_korea_skus_from_spec():
-    result = allocate_bunches_optimized(1000, 18, 12, [
+    result = allocate_bunches_optimized(2000, 18, 12, [
         _optimizer_row(1, 1, "8H", 300, market="Hàn"),
         _optimizer_row(1, 2, "5/6H", 600, market="Hàn"),
         _optimizer_row(1, 3, "15CP", 300, market="Hàn"),
+        _optimizer_row(1, 4, "12CP", 100, market="Hàn"),
+        _optimizer_row(1, 5, "10CP", 100, market="Hàn"),
     ])
 
     by_sku = {row["sku"]: row for row in result["rows"]}
-    assert by_sku["8H"]["range_label"] == "1-4"
-    assert by_sku["5/6H"]["range_label"] == "5-9"
-    assert by_sku["15CP"]["range_label"] == "10-12"
+    parent_ranges = {
+        "8H": (1, 4),
+        "5/6H": (5, 9),
+        "15CP": (10, 12),
+        "12CP": (10, 12),
+        "10CP": (10, 12),
+    }
+    for sku, parent_range in parent_ranges.items():
+        assert by_sku[sku]["boxes_fulfilled"] > 0
+        detail_rows = [row for row in result["detail_rows"] if row["sku"] == sku]
+        assert detail_rows
+        for detail_row in detail_rows:
+            assert parent_range[0] <= detail_row["hand_from"] <= detail_row["hand_to"] <= parent_range[1]
 
 
 def test_optimizer_does_not_allocate_sku_to_wrong_market():
@@ -385,3 +422,92 @@ def test_max_container_mode_matches_15kg_4000_bunch_scenario():
 
     assert by_market["Nhật"]["full_containers"] == 2
     assert by_market["Hàn"]["full_containers"] == 1
+
+
+def test_min_bunch_mode_satisfies_one_fixed_container():
+    result = calculate_min_bunches_for_container_plan(
+        [
+            _optimizer_customer_row(1, "Wismettac (Nhật 1)", 1, "27CP", 660, "Nhật"),
+            _optimizer_customer_row(1, "Wismettac (Nhật 1)", 2, "6H", 660, "Nhật"),
+        ],
+        18,
+        12,
+    )
+
+    summary = result["summary"]
+    assert summary["solver_status"] in {"OPTIMAL", "FEASIBLE"}
+    assert summary["requested_boxes"] == 1320
+    assert summary["fulfilled_boxes"] == 1320
+    assert summary["short_boxes"] == 0
+    assert summary["active_bunches_estimated"] == summary["total_bunches"]
+    assert summary["active_bunches_estimated"] > 0
+
+
+def test_min_bunch_mode_handles_multiple_container_demands():
+    result = calculate_min_bunches_for_container_plan(
+        [
+            _optimizer_customer_row(1, "Wismettac (Nhật 1)", 1, "27CP", 1320, "Nhật"),
+            _optimizer_customer_row(2, "Uone", 1, "8H", 660, "Hàn"),
+            _optimizer_customer_row(2, "Uone", 2, "15CP", 660, "Hàn"),
+        ],
+        18,
+        12,
+    )
+
+    by_sku = {row["sku"]: row for row in result["rows"]}
+    assert result["summary"]["requested_boxes"] == 2640
+    assert result["summary"]["fulfilled_boxes"] == 2640
+    assert by_sku["27CP"]["boxes_fulfilled"] == 1320
+    assert by_sku["8H"]["boxes_fulfilled"] == 660
+    assert by_sku["15CP"]["boxes_fulfilled"] == 660
+    assert result["summary"]["short_boxes"] == 0
+
+
+def test_min_bunch_mode_rejects_wrong_market_sku():
+    result = calculate_min_bunches_for_container_plan(
+        [_optimizer_customer_row(1, "Wismettac (Nhật 1)", 1, "15CP", 1320, "Nhật")],
+        18,
+        12,
+    )
+
+    assert result["rows"] == []
+    assert result["summary"]["solver_status"] == "NO_SOLUTION"
+
+
+def test_min_bunch_mode_allows_split_when_it_reduces_opened_bunches():
+    result = calculate_min_bunches_for_container_plan(
+        [
+            _optimizer_row(1, 1, "6H", 34),
+            _optimizer_row(1, 2, "30CP", 69),
+        ],
+        18,
+        12,
+    )
+
+    by_sku = {row["sku"]: row for row in result["rows"]}
+    selected_30cp_ranges = {
+        range_label.strip()
+        for range_label in by_sku["30CP"]["range_label"].split(",")
+    }
+    assert by_sku["6H"]["range_label"] == "5-7"
+    assert selected_30cp_ranges == {"1-4", "8-9"}
+    assert result["summary"]["active_bunches_estimated"] == 100
+
+
+def test_min_bunch_mode_uses_korea_cp_skus_on_six_to_nine_for_nine_hand_profile():
+    profile = build_hand_weight_profile(9, 15.6)
+    result = calculate_min_bunches_for_container_plan(
+        [
+            _optimizer_row(1, 1, "15CP", 440, market="Hàn"),
+            _optimizer_row(1, 2, "12CP", 440, market="Hàn"),
+            _optimizer_row(1, 3, "10CP", 440, market="Hàn"),
+        ],
+        profile["kg_per_bunch"],
+        profile["hands_per_bunch"],
+        hand_weights=profile["hand_weights"],
+    )
+
+    assert result["summary"]["fulfilled_boxes"] == 1320
+    assert result["summary"]["short_boxes"] == 0
+    for detail_row in result["detail_rows"]:
+        assert 6 <= detail_row["hand_from"] <= detail_row["hand_to"] <= 9

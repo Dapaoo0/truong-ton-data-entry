@@ -2,6 +2,25 @@
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
 
+## [31/05/2026] - Mode Từ cont -> số buồng
+
+#### Feature: Tính ngược số buồng xẻ từ cơ cấu container (`container_allocation.py`, `app.py`)
+- **[UI]**: Máy tính phân bổ cont có thêm mode `Từ cont -> số buồng`; người dùng nhập từng cont riêng với khách hàng, mã hàng và số thùng.
+- **[Validation]**: Mỗi cont bắt buộc tổng đúng `1,320 thùng`; SKU được lọc theo thị trường suy ra từ khách hàng.
+- **[Optimizer]**: Thêm `calculate_min_bunches_for_container_plan()` dùng CP-SAT để đáp ứng đủ demand và tối thiểu hóa số buồng xẻ nguyên.
+- **[Saved plans]**: Kế hoạch đã lưu hiển thị lại input cont và output bằng cột tiếng Việt.
+
+---
+
+## [31/05/2026] - Cập nhật quy cách Hàn cho profile 9 nải
+
+#### Update: 15CP/12CP/10CP Hàn (`container_allocation.py`, `app.py`)
+- **[9 nải]**: Đổi vùng mẹ của `15CP Hàn` từ `8-9` sang `6-9`.
+- **[SKU]**: Thêm `12CP` và `10CP` cho thị trường Hàn; buồng 9 nải dùng vùng mẹ `6-9`, buồng 12 nải dùng cùng nhóm với `15CP` là `10-12`.
+- **[Tests]**: Bổ sung test sinh khoảng con liền kề cho `15CP/12CP/10CP` và kiểm tra không cho các mã Hàn này lọt sang thị trường Nhật.
+
+---
+
 ## [26/05/2026] - Lưu kế hoạch phân bổ container theo account
 
 #### Feature: Persist kế hoạch máy tính phân bổ cont (`app.py`, DB)
