@@ -4939,12 +4939,17 @@ def build_weekly_cat_forecast(df_stg: pd.DataFrame, forecast_weeks_inclusive: in
 CONTAINER_SKU_DEFINITIONS = OPTIMIZER_SKU_RULES
 CONTAINER_MARKET_OPTIONS = ["Nhật", "Hàn"]
 CONTAINER_EMPTY_OPTION = "Không chọn"
-CONTAINER_MODE_ORDERS = "Buồng -> Đơn hàng"
-CONTAINER_MODE_MAX_CONTS = "Buồng -> Tối đa cont"
-CONTAINER_MODE_CONTS_TO_BUNCHES = "Cont -> Số buồng"
+CONTAINER_MODE_ORDERS = "Tính số hàng từ số buồng"
+CONTAINER_MODE_MAX_CONTS = "Tính số cont tối đa từ số buồng"
+CONTAINER_MODE_CONTS_TO_BUNCHES = "Tính số buồng từ số cont"
 CONTAINER_LEGACY_MODE_ORDERS = "Theo đơn hàng"
+CONTAINER_LEGACY_MODE_ORDERS_ARROW = "Buồng -> Đơn hàng"
 CONTAINER_LEGACY_MODE_MAX_CONTS = "Tối đa cont theo thị trường"
+CONTAINER_LEGACY_MODE_MAX_CONTS_ARROW = "Buồng -> Tối đa cont"
+CONTAINER_LEGACY_MODE_MAX_CONTS_BUNCHES_FIRST = "Buồng -> Số cont tối đa"
 CONTAINER_LEGACY_MODE_CONTS_TO_BUNCHES = "Từ cont -> số buồng"
+CONTAINER_LEGACY_MODE_CONTS_TO_BUNCHES_ARROW = "Cont -> Số buồng"
+CONTAINER_LEGACY_MODE_CONTS_TO_BUNCHES_TARGET = "Cont mục tiêu -> Buồng cần xẻ"
 CONTAINER_CUSTOMER_MARKETS = {
     "Wismettac (Nhật 1)": "Nhật",
     "Advance (Nhật 2)": "Nhật",
@@ -4977,7 +4982,23 @@ def _container_is_cont_to_bunch_mode(mode: str) -> bool:
     return _container_clean_text(mode) in {
         CONTAINER_MODE_CONTS_TO_BUNCHES,
         CONTAINER_LEGACY_MODE_CONTS_TO_BUNCHES,
+        CONTAINER_LEGACY_MODE_CONTS_TO_BUNCHES_ARROW,
+        CONTAINER_LEGACY_MODE_CONTS_TO_BUNCHES_TARGET,
     }
+
+
+def _container_display_mode_label(mode: str) -> str:
+    mode = _container_clean_text(mode, CONTAINER_MODE_ORDERS)
+    return {
+        CONTAINER_LEGACY_MODE_ORDERS: CONTAINER_MODE_ORDERS,
+        CONTAINER_LEGACY_MODE_ORDERS_ARROW: CONTAINER_MODE_ORDERS,
+        CONTAINER_LEGACY_MODE_MAX_CONTS: CONTAINER_MODE_MAX_CONTS,
+        CONTAINER_LEGACY_MODE_MAX_CONTS_ARROW: CONTAINER_MODE_MAX_CONTS,
+        CONTAINER_LEGACY_MODE_MAX_CONTS_BUNCHES_FIRST: CONTAINER_MODE_MAX_CONTS,
+        CONTAINER_LEGACY_MODE_CONTS_TO_BUNCHES: CONTAINER_MODE_CONTS_TO_BUNCHES,
+        CONTAINER_LEGACY_MODE_CONTS_TO_BUNCHES_ARROW: CONTAINER_MODE_CONTS_TO_BUNCHES,
+        CONTAINER_LEGACY_MODE_CONTS_TO_BUNCHES_TARGET: CONTAINER_MODE_CONTS_TO_BUNCHES,
+    }.get(mode, mode)
 
 
 def _default_container_sku_editor_rows() -> list:
@@ -5267,7 +5288,7 @@ def _container_format_saved_at(saved_at: str) -> str:
 
 
 def _container_saved_plan_title(plan: dict, index: int = 0) -> str:
-    mode = _container_clean_text(plan.get("mode"), CONTAINER_MODE_ORDERS)
+    mode = _container_display_mode_label(plan.get("mode"))
     saved_at = _container_format_saved_at(plan.get("saved_at"))
     return f"{mode} · {saved_at}" if saved_at else f"Kế hoạch {index + 1}"
 
@@ -5338,7 +5359,7 @@ def _container_plan_summary_rows(plan: dict) -> list:
     summary = result.get("summary", {}) if isinstance(result.get("summary"), dict) else {}
     if _container_is_cont_to_bunch_mode(plan.get("mode")):
         rows = [
-            {"Thông tin": "Chế độ", "Giá trị": plan.get("mode", "")},
+            {"Thông tin": "Chế độ", "Giá trị": _container_display_mode_label(plan.get("mode"))},
             {"Thông tin": "Cont mục tiêu", "Giá trị": f"{int(summary.get('target_containers', 0)):,}"},
             {"Thông tin": "Tổng thùng", "Giá trị": f"{int(summary.get('requested_boxes', summary.get('fulfilled_boxes', 0))):,}"},
             {"Thông tin": "Loại buồng", "Giá trị": f"{int(plan.get('hands_per_bunch', 0))} nải"},
@@ -5351,7 +5372,7 @@ def _container_plan_summary_rows(plan: dict) -> list:
         ]
         return rows
     rows = [
-        {"Thông tin": "Chế độ", "Giá trị": plan.get("mode", "")},
+        {"Thông tin": "Chế độ", "Giá trị": _container_display_mode_label(plan.get("mode"))},
         {"Thông tin": "Nguồn", "Giá trị": plan.get("source", "")},
         {"Thông tin": "Số buồng nguồn", "Giá trị": f"{int(plan.get('source_bunches', 0)):,}"},
         {"Thông tin": "Loại buồng", "Giá trị": f"{int(plan.get('hands_per_bunch', 0))} nải"},
@@ -5889,6 +5910,19 @@ def render_container_allocation_calculator():
         CONTAINER_MODE_MAX_CONTS,
         CONTAINER_MODE_CONTS_TO_BUNCHES,
     ]
+    legacy_calc_mode_map = {
+        CONTAINER_LEGACY_MODE_ORDERS: CONTAINER_MODE_ORDERS,
+        CONTAINER_LEGACY_MODE_ORDERS_ARROW: CONTAINER_MODE_ORDERS,
+        CONTAINER_LEGACY_MODE_MAX_CONTS: CONTAINER_MODE_MAX_CONTS,
+        CONTAINER_LEGACY_MODE_MAX_CONTS_ARROW: CONTAINER_MODE_MAX_CONTS,
+        CONTAINER_LEGACY_MODE_MAX_CONTS_BUNCHES_FIRST: CONTAINER_MODE_MAX_CONTS,
+        CONTAINER_LEGACY_MODE_CONTS_TO_BUNCHES: CONTAINER_MODE_CONTS_TO_BUNCHES,
+        CONTAINER_LEGACY_MODE_CONTS_TO_BUNCHES_ARROW: CONTAINER_MODE_CONTS_TO_BUNCHES,
+        CONTAINER_LEGACY_MODE_CONTS_TO_BUNCHES_TARGET: CONTAINER_MODE_CONTS_TO_BUNCHES,
+    }
+    current_mode = st.session_state.get("container_calculation_mode")
+    if current_mode in legacy_calc_mode_map:
+        st.session_state["container_calculation_mode"] = legacy_calc_mode_map[current_mode]
     calc_mode = _persisted_segmented_control(
         "Chế độ tính",
         calc_mode_options,
