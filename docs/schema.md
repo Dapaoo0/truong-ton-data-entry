@@ -534,7 +534,7 @@ Tài liệu này ghi lại chi tiết toàn bộ cấu trúc cơ sở dữ liệ
 | account_farm | text | Có | Farm/account đăng nhập, ví dụ `Phòng Kinh doanh` |
 | account_team | text | Có | Team/account đăng nhập, ví dụ `Kinh doanh` |
 | plan_name | text | Có | Tên thẻ kế hoạch hiển thị trên UI |
-| mode | text | Có | Chế độ tính: `Theo đơn hàng` hoặc `Tối đa cont theo thị trường` |
+| mode | text | Có | Chế độ tính: `Buồng -> Đơn hàng`, `Buồng -> Tối đa cont`, hoặc `Cont -> Số buồng` |
 | source_mode | text | Không | Nguồn số buồng: dự báo từ cắt bắp hoặc nhập tay |
 | source_label | text | Không | Nhãn nguồn dữ liệu đã chọn |
 | source_bunches | integer | Có | Số buồng nguồn tại thời điểm lưu |

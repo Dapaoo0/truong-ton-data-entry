@@ -162,7 +162,7 @@ Với buồng 9 nải, hệ thống dùng mapping suy luận theo vùng tương 
 
 Các khoảng trên là **khoảng mẹ**. Thuật toán được phép chọn mọi khoảng con liền kề trong khoảng mẹ. Một dòng đơn hàng cũng có thể được tách thành nhiều khoảng con nếu việc tách đó giúp giảm thiếu hàng hoặc giảm số buồng nguyên phải xẻ. Tuy nhiên số đoạn cắt là penalty vận hành đứng ngay sau `active_bunches_estimated`, nên thuật toán sẽ ưu tiên một dải liền kề duy nhất khi số buồng xẻ không đổi.
 
-**Khách hàng trong mode Theo đơn hàng**
+**Khách hàng trong mode Buồng -> Đơn hàng**
 | Khách hàng | Thị trường vận chuyển |
 |---|---|
 | Wismettac (Nhật 1) | Nhật |
@@ -171,7 +171,7 @@ Các khoảng trên là **khoảng mẹ**. Thuật toán được phép chọn m
 
 Khách hàng quyết định thị trường và danh sách mã hàng hợp lệ. Khi người dùng chưa chọn khách hàng/mã hàng/ưu tiên, UI giữ trạng thái trống; các dòng chưa đủ `Khách hàng + Mã hàng + Nhu cầu` không được gửi vào optimizer.
 
-**Thứ tự tối ưu trong mode Theo đơn hàng**
+**Thứ tự tối ưu trong mode Buồng -> Đơn hàng**
 1. Giảm thiếu thùng theo thứ tự ưu tiên khách hàng, ưu tiên mã hàng trong khách hàng, thứ tự dòng.
 2. Với mức đáp ứng đã chốt, giảm số buồng nguyên cần xẻ (`active_bunches_estimated`).
 3. Giảm số đoạn cắt để tránh bẻ dòng đơn hàng không cần thiết.
@@ -180,11 +180,11 @@ Khách hàng quyết định thị trường và danh sách mã hàng hợp lệ
 
 Nếu nguồn buồng không đủ, thuật toán vẫn ưu tiên đáp ứng dòng ưu tiên cao nhất trước, sau đó báo thiếu thùng cho các dòng còn lại. Nếu nguồn dư, thuật toán không dùng hết nguồn mà báo số buồng xẻ tối thiểu.
 
-**Mode Tối đa cont theo thị trường**
+**Mode Buồng -> Tối đa cont**
 - Mục tiêu chính là tối đa số container nguyên theo thứ tự ưu tiên thị trường.
 - Sau khi số container đã chốt, thuật toán tiếp tục giảm số buồng nguyên cần xẻ và số đoạn cắt.
 
-**Mode Từ cont -> số buồng**
+**Mode Cont -> Số buồng**
 - Người dùng nhập từng container mục tiêu riêng. Mỗi cont bắt buộc chọn khách hàng và khai báo các dòng mã hàng + số thùng.
 - Khách hàng quyết định thị trường: `Wismettac (Nhật 1)` và `Advance (Nhật 2)` thuộc Nhật, `Uone` thuộc Hàn. SKU dropdown chỉ cho mã hợp lệ với thị trường đó.
 - Mỗi cont phải có tổng đúng `1,320 thùng`. Nếu thiếu hoặc vượt, hệ thống cảnh báo ngay tại input và không chạy solver.

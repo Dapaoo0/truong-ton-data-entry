@@ -4939,6 +4939,12 @@ def build_weekly_cat_forecast(df_stg: pd.DataFrame, forecast_weeks_inclusive: in
 CONTAINER_SKU_DEFINITIONS = OPTIMIZER_SKU_RULES
 CONTAINER_MARKET_OPTIONS = ["Nhật", "Hàn"]
 CONTAINER_EMPTY_OPTION = "Không chọn"
+CONTAINER_MODE_ORDERS = "Buồng -> Đơn hàng"
+CONTAINER_MODE_MAX_CONTS = "Buồng -> Tối đa cont"
+CONTAINER_MODE_CONTS_TO_BUNCHES = "Cont -> Số buồng"
+CONTAINER_LEGACY_MODE_ORDERS = "Theo đơn hàng"
+CONTAINER_LEGACY_MODE_MAX_CONTS = "Tối đa cont theo thị trường"
+CONTAINER_LEGACY_MODE_CONTS_TO_BUNCHES = "Từ cont -> số buồng"
 CONTAINER_CUSTOMER_MARKETS = {
     "Wismettac (Nhật 1)": "Nhật",
     "Advance (Nhật 2)": "Nhật",
@@ -4965,6 +4971,13 @@ def _container_sku_options_for_market(market: str, hands_per_bunch: int = 12) ->
 
 def _container_customer_market(customer: str) -> str:
     return CONTAINER_CUSTOMER_MARKETS.get(_container_clean_text(customer), "")
+
+
+def _container_is_cont_to_bunch_mode(mode: str) -> bool:
+    return _container_clean_text(mode) in {
+        CONTAINER_MODE_CONTS_TO_BUNCHES,
+        CONTAINER_LEGACY_MODE_CONTS_TO_BUNCHES,
+    }
 
 
 def _default_container_sku_editor_rows() -> list:
@@ -5254,7 +5267,7 @@ def _container_format_saved_at(saved_at: str) -> str:
 
 
 def _container_saved_plan_title(plan: dict, index: int = 0) -> str:
-    mode = _container_clean_text(plan.get("mode"), "Theo đơn hàng")
+    mode = _container_clean_text(plan.get("mode"), CONTAINER_MODE_ORDERS)
     saved_at = _container_format_saved_at(plan.get("saved_at"))
     return f"{mode} · {saved_at}" if saved_at else f"Kế hoạch {index + 1}"
 
@@ -5323,7 +5336,7 @@ def _delete_container_plan(plan_id: str) -> bool:
 def _container_plan_summary_rows(plan: dict) -> list:
     result = plan.get("result", {}) if isinstance(plan.get("result"), dict) else {}
     summary = result.get("summary", {}) if isinstance(result.get("summary"), dict) else {}
-    if _container_clean_text(plan.get("mode")) == "Từ cont -> số buồng":
+    if _container_is_cont_to_bunch_mode(plan.get("mode")):
         rows = [
             {"Thông tin": "Chế độ", "Giá trị": plan.get("mode", "")},
             {"Thông tin": "Cont mục tiêu", "Giá trị": f"{int(summary.get('target_containers', 0)):,}"},
@@ -5642,7 +5655,7 @@ def _render_container_saved_plan_cards():
             title_col, b_col, box_col, action_col, delete_col = st.columns([3, 1, 1, 0.8, 0.7])
             with title_col:
                 st.markdown(f"**{plan.get('name') or _container_saved_plan_title(plan, idx)}**")
-                if _container_clean_text(plan.get("mode")) == "Từ cont -> số buồng":
+                if _container_is_cont_to_bunch_mode(plan.get("mode")):
                     st.caption(
                         f"{int(summary.get('target_containers', 0)):,} cont mục tiêu · "
                         f"{int(plan.get('hands_per_bunch', 0))} nải · "
@@ -5871,7 +5884,11 @@ def render_container_allocation_calculator():
     if "container_calc_sku_rows" not in st.session_state:
         st.session_state["container_calc_sku_rows"] = _default_container_sku_editor_rows()
 
-    calc_mode_options = ["Theo đơn hàng", "Tối đa cont theo thị trường", "Từ cont -> số buồng"]
+    calc_mode_options = [
+        CONTAINER_MODE_ORDERS,
+        CONTAINER_MODE_MAX_CONTS,
+        CONTAINER_MODE_CONTS_TO_BUNCHES,
+    ]
     calc_mode = _persisted_segmented_control(
         "Chế độ tính",
         calc_mode_options,
@@ -5888,8 +5905,8 @@ def render_container_allocation_calculator():
 
     source_bunches = 0
     source_label = "Chưa chọn nguồn"
-    if calc_mode == "Từ cont -> số buồng":
-        source_mode = "Từ cont -> số buồng"
+    if calc_mode == CONTAINER_MODE_CONTS_TO_BUNCHES:
+        source_mode = CONTAINER_MODE_CONTS_TO_BUNCHES
         source_label = "Tính ngược từ cơ cấu cont"
     else:
         source_mode = st.radio(
@@ -5950,7 +5967,7 @@ def render_container_allocation_calculator():
                 f"+{selected_forecast_weeks} tuần tính cả tuần cắt bắp. Ví dụ +8: cắt tuần 20 thì rơi vào tuần thu hoạch dự báo 27."
             )
     else:
-        if calc_mode != "Từ cont -> số buồng":
+        if calc_mode != CONTAINER_MODE_CONTS_TO_BUNCHES:
             source_bunches = int(st.number_input("Số buồng thu hoạch / dự kiến", min_value=0, value=0, step=100, key="container_manual_bunches"))
             source_label = "Nhập tay"
 
@@ -5995,7 +6012,7 @@ def render_container_allocation_calculator():
             hide_index=True,
         )
 
-    if calc_mode == "Từ cont -> số buồng":
+    if calc_mode == CONTAINER_MODE_CONTS_TO_BUNCHES:
         st.markdown("##### Cấu hình cont mục tiêu")
         container_targets = _render_container_target_controls(hands_per_bunch)
         allocation_rows, validation_errors = _prepare_container_rows_from_container_targets(
@@ -6133,7 +6150,7 @@ def render_container_allocation_calculator():
         _render_container_saved_plan_cards()
         return
 
-    if calc_mode == "Tối đa cont theo thị trường":
+    if calc_mode == CONTAINER_MODE_MAX_CONTS:
         st.markdown("##### Ưu tiên thị trường")
         market_order = _render_container_market_priority_controls("container_max_market_priority")
         max_result = calculate_max_containers_by_market(
