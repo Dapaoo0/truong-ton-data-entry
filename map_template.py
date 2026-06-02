@@ -174,8 +174,10 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
         }}
         .map-tooltip .tt-cost-btn {{
             display: block;
+            width: 100%;
             margin-top: 10px;
             padding: 7px 10px;
+            border: 0;
             border-radius: 7px;
             background: #2e7d32;
             color: #fff;
@@ -183,6 +185,8 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
             text-decoration: none;
             font-weight: 700;
             font-size: 12px;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            cursor: pointer;
         }}
         .map-tooltip .tt-cost-btn:hover {{
             background: #1b5e20;
@@ -424,9 +428,38 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
                 html += '<div class="tt-hint">Click lô khác hoặc vùng trống để bỏ ghim</div>';
             }}
             if (showPin && d.costUrl) {{
-                html += '<a class="tt-cost-btn" href="' + d.costUrl + '" target="_parent">Xem chi ph&iacute;/c&acirc;y</a>';
+                html += '<button class="tt-cost-btn" type="button" data-url="' + d.costUrl + '">Xem chi ph&iacute;/c&acirc;y</button>';
             }}
             return html;
+        }}
+
+        function openCostDashboard(rawUrl) {{
+            if (!rawUrl) return;
+            var targetUrl = rawUrl;
+            try {{
+                targetUrl = new URL(rawUrl, window.parent.location.href).toString();
+            }} catch(e) {{}}
+
+            // components.html runs inside an iframe. On some browsers, anchor
+            // target navigation is blocked, so mutate the parent URL directly
+            // when same-origin access is available, then force a Streamlit rerun.
+            try {{
+                if (window.parent && window.parent !== window && window.parent.history) {{
+                    window.parent.history.pushState({{}}, "", targetUrl);
+                    window.parent.dispatchEvent(new PopStateEvent("popstate", {{ state: {{}} }}));
+                    window.parent.location.reload();
+                    return;
+                }}
+            }} catch(e) {{}}
+
+            try {{
+                window.top.location.href = targetUrl;
+                return;
+            }} catch(e) {{}}
+
+            try {{
+                window.location.href = targetUrl;
+            }} catch(e) {{}}
         }}
 
         function unpin() {{
@@ -500,6 +533,11 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
 
         tooltip.addEventListener('click', function(e) {{
             e.stopPropagation();
+            const costButton = e.target.closest('.tt-cost-btn');
+            if (costButton) {{
+                e.preventDefault();
+                openCostDashboard(costButton.dataset.url);
+            }}
         }});
 
         // ── Auto-fit iframe height to content ──
