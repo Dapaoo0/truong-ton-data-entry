@@ -20,6 +20,8 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 import json
 import html
+import re
+import unicodedata
 from urllib.parse import urlencode
 
 try:
@@ -743,6 +745,41 @@ def get_farm_id_from_name(farm_name: str):
 
 MAP_COST_QUERY_KEYS = ("cost_farm", "cost_lot")
 
+FARM_157_LOT_TEAM_OVERRIDES = {
+    "NT1": {
+        "1A", "1B", "2A", "2B", "3A", "3B", "4", "5", "6",
+        "7A", "7B", "A1",
+    },
+    "NT2": {
+        "8A", "8B", "9", "10", "12", "12A", "12B",
+        "14A", "14B", "15A", "15B",
+    },
+}
+
+GENERAL_COST_SCOPE_KEYWORDS = (
+    "FARM",
+    "VUONUOM",
+    "UOM",
+    "NHADOI",
+    "NHA",
+    "COGIOI",
+    "DIENNUOC",
+    "DIEN",
+    "NUOC",
+    "BVTV",
+    "THUHOACH",
+    "TRONGMOI",
+    "DUAN",
+    "CONGTRINH",
+    "HATANG",
+    "XUONG",
+    "TRAM",
+    "XECUOC",
+    "XECAY",
+    "XEBEN",
+    "XEXUC",
+)
+
 
 def _money(value) -> float:
     try:
@@ -789,6 +826,90 @@ def _fetch_paginated_rows(table_name: str, select_cols: str, filter_fn=None, ord
     return rows
 
 
+def _normalize_cost_label(value) -> str:
+    text = str(value or "").strip().replace("Đ", "D").replace("đ", "d")
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return re.sub(r"[^A-Z0-9+]+", "", text.upper())
+
+
+def _lot_display_label(row: dict) -> str:
+    if not isinstance(row, dict):
+        return ""
+    return str(row.get("lo_code") or row.get("lo_name") or "").strip()
+
+
+def _team_group_from_scope_label(farm_name: str, label: str):
+    norm = _normalize_cost_label(label)
+    if not norm or farm_name == "Farm 195":
+        return None
+
+    if farm_name == "Farm 157":
+        if norm in {"NT3", "NT4", "NT3+NT4", "NT3+4", "NT34", "NT3NT4", "NT2"}:
+            return "NT2"
+        if norm in {"NT1", "NT1+NT2", "NT1+2", "NT12", "NT1NT2"}:
+            return "NT1"
+
+    if norm in {"NT1", "NT1A", "NT1B"}:
+        return "NT1"
+    if norm in {"NT2", "NT2A", "NT2B"}:
+        return "NT2"
+    return None
+
+
+def _is_general_cost_scope_label(label: str) -> bool:
+    norm = _normalize_cost_label(label)
+    if not norm:
+        return True
+    return any(keyword in norm for keyword in GENERAL_COST_SCOPE_KEYWORDS)
+
+
+def _is_physical_lot_row(row: dict) -> bool:
+    if not isinstance(row, dict) or not row.get("is_active", True):
+        return False
+    label = _lot_display_label(row)
+    if not label:
+        return False
+    lo_type_norm = _normalize_cost_label(row.get("lo_type"))
+    if "LOTHUC" in lo_type_norm:
+        return True
+    if row.get("area_ha") is None:
+        return False
+    if _team_group_from_scope_label("", label) or _is_general_cost_scope_label(label):
+        return False
+    return True
+
+
+def _team_group_for_physical_lot(farm_name: str, lot_row: dict, doi_map: dict) -> str:
+    label_norm = _normalize_cost_label(_lot_display_label(lot_row))
+    if farm_name == "Farm 195":
+        return ""
+    if farm_name == "Farm 157":
+        for team_group, lot_labels in FARM_157_LOT_TEAM_OVERRIDES.items():
+            if label_norm in {_normalize_cost_label(x) for x in lot_labels}:
+                return team_group
+    doi = doi_map.get(lot_row.get("doi_id"), {})
+    doi_label = doi.get("doi_code") or doi.get("doi_name") or ""
+    return _team_group_from_scope_label(farm_name, doi_label) or ""
+
+
+def _lot_weight_on_date(lot_id, cost_dt, plantings_by_lot: dict, lot_meta_by_id: dict) -> float:
+    if pd.isna(cost_dt):
+        return 0.0
+    active_rows = [
+        row for row in plantings_by_lot.get(lot_id, [])
+        if row.get("ngay_trong_ts") is not None
+        and not pd.isna(row.get("ngay_trong_ts"))
+        and row.get("ngay_trong_ts") <= cost_dt
+    ]
+    if not active_rows:
+        return 0.0
+    planted_area = sum(_money(row.get("dien_tich_trong")) for row in active_rows)
+    if planted_area > 0:
+        return planted_area
+    return _money((lot_meta_by_id.get(lot_id) or {}).get("area_ha"))
+
+
 def _fetch_dimension_map(table_name: str, id_col: str, select_cols: str, ids):
     ids = sorted({int(x) for x in ids if x is not None and not pd.isna(x)})
     if not ids:
@@ -814,7 +935,7 @@ def _clear_cost_query_params():
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
+def _calculate_lot_cost_per_tree_direct_only(farm_name: str, lo_name: str) -> dict:
     farm_id = get_farm_id_from_name(farm_name)
     dim_lo_id = get_dim_lo_id(farm_name, lo_name)
     if not farm_id or not dim_lo_id:
@@ -958,6 +1079,319 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
                 "amount": share,
                 "category": cost["category"],
                 "detail": cost["detail"],
+            })
+
+    for batch in batch_rows:
+        season = seasons_by_batch.get(batch["base_lot_id"], {})
+        batch["vu"] = season.get("vu", "")
+        batch["total_cost"] = batch["labor_cost"] + batch["material_cost"]
+        batch["cost_per_tree"] = batch["total_cost"] / batch["so_cay"] if batch["so_cay"] > 0 else 0.0
+
+    cost_df = pd.DataFrame(cost_rows)
+    allocation_df = pd.DataFrame(allocation_rows)
+    unallocated_df = pd.DataFrame(unallocated_rows)
+    batch_df = pd.DataFrame(batch_rows)
+
+    allocated_cost = float(batch_df["total_cost"].sum()) if not batch_df.empty else 0.0
+    allocated_tree_denominator = int(batch_df.loc[batch_df["total_cost"] > 0, "so_cay"].sum()) if not batch_df.empty else 0
+    if allocated_tree_denominator <= 0 and not batch_df.empty:
+        allocated_tree_denominator = int(batch_df["so_cay"].sum())
+    total_labor = sum(_money(r.get("amount")) for r in cost_rows if r.get("source") == "Nhân công")
+    total_material = sum(_money(r.get("amount")) for r in cost_rows if r.get("source") == "Vật tư")
+    warnings = []
+    if len(batch_rows) > 1:
+        warnings.append("Lô có nhiều đợt trồng: chi phí từng ngày được chia theo tỷ lệ số cây của các đợt đang active.")
+    if not unallocated_df.empty:
+        warnings.append(f"Có {len(unallocated_df):,} dòng chi phí trước ngày trồng hoặc thiếu ngày nên chưa phân bổ vào đợt nào.")
+
+    return {
+        "farm_name": farm_name,
+        "lo_name": lo_name,
+        "area_ha": lot_meta.get("area_ha"),
+        "batches": batch_df,
+        "costs": cost_df,
+        "allocations": allocation_df,
+        "unallocated": unallocated_df,
+        "summary": {
+            "total_labor": total_labor,
+            "total_material": total_material,
+            "total_cost": total_labor + total_material,
+            "allocated_cost": allocated_cost,
+            "unallocated_cost": float(unallocated_df["amount"].sum()) if not unallocated_df.empty else 0.0,
+            "avg_cost_per_tree": allocated_cost / allocated_tree_denominator if allocated_tree_denominator > 0 else 0.0,
+        },
+        "warnings": warnings,
+    }
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
+    farm_id = get_farm_id_from_name(farm_name)
+    dim_lo_id = get_dim_lo_id(farm_name, lo_name)
+    if not farm_id or not dim_lo_id:
+        return {"error": "Không tìm thấy farm/lô trong dim_farm/dim_lo."}
+
+    today_iso = date.today().isoformat()
+    dim_lot_rows = _fetch_paginated_rows(
+        "dim_lo",
+        "lo_id, farm_id, lo_name, lo_code, area_ha, lo_type, doi_id, is_active",
+        lambda q: q.eq("farm_id", farm_id).eq("is_active", True),
+    )
+    lot_meta_by_id = {row.get("lo_id"): row for row in dim_lot_rows}
+    lot_meta = lot_meta_by_id.get(dim_lo_id, {})
+    if not lot_meta:
+        return {"error": "Không tìm thấy farm/lô trong dim_lo."}
+
+    doi_ids = [row.get("doi_id") for row in dim_lot_rows]
+    doi_map = _fetch_dimension_map("dim_doi", "doi_id", "doi_id, doi_name, doi_code", doi_ids)
+    physical_lot_rows = [row for row in dim_lot_rows if _is_physical_lot_row(row)]
+    physical_lot_by_id = {row.get("lo_id"): row for row in physical_lot_rows}
+    physical_lot_by_label = {}
+    for row in physical_lot_rows:
+        for label in (row.get("lo_code"), row.get("lo_name")):
+            norm = _normalize_cost_label(label)
+            if norm:
+                physical_lot_by_label[norm] = row
+
+    target_team_group = _team_group_for_physical_lot(farm_name, lot_meta, doi_map)
+    lot_team_group_by_id = {
+        row.get("lo_id"): _team_group_for_physical_lot(farm_name, row, doi_map)
+        for row in physical_lot_rows
+    }
+
+    physical_ids = list(physical_lot_by_id.keys()) or [dim_lo_id]
+    all_planting_rows = _fetch_paginated_rows(
+        "base_lots",
+        "id, ngay_trong, so_luong, dien_tich_trong, loai_trong, is_deleted, dim_lo_id",
+        lambda q: q.in_("dim_lo_id", physical_ids)
+                   .eq("is_deleted", False)
+                   .eq("loai_trong", "Trồng mới"),
+        order_col="ngay_trong",
+    )
+    plantings_by_lot = {}
+    for row in all_planting_rows:
+        row = dict(row)
+        row["ngay_trong_ts"] = pd.to_datetime(row.get("ngay_trong"), errors="coerce")
+        plantings_by_lot.setdefault(row.get("dim_lo_id"), []).append(row)
+
+    planting_rows = sorted(
+        plantings_by_lot.get(dim_lo_id, []),
+        key=lambda row: str(row.get("ngay_trong") or ""),
+    )
+    if not planting_rows:
+        return {
+            "farm_name": farm_name,
+            "lo_name": lo_name,
+            "area_ha": lot_meta.get("area_ha"),
+            "batches": pd.DataFrame(),
+            "costs": pd.DataFrame(),
+            "allocations": pd.DataFrame(),
+            "unallocated": pd.DataFrame(),
+            "summary": {
+                "total_labor": 0,
+                "total_material": 0,
+                "total_cost": 0,
+                "allocated_cost": 0,
+                "avg_cost_per_tree": 0,
+            },
+            "warnings": ["Lô này chưa có đợt trồng mới nên chưa thể tính chi phí/cây."],
+        }
+
+    batch_rows = []
+    for idx, row in enumerate(planting_rows, start=1):
+        ngay_trong = row.get("ngay_trong_ts")
+        trees = int(_money(row.get("so_luong")))
+        batch_rows.append({
+            "base_lot_id": int(row.get("id")),
+            "dot": idx,
+            "ngay_trong": ngay_trong.date() if not pd.isna(ngay_trong) else None,
+            "ngay_trong_ts": ngay_trong,
+            "so_cay": trees,
+            "dien_tich_trong": _money(row.get("dien_tich_trong")),
+            "labor_cost": 0.0,
+            "material_cost": 0.0,
+        })
+
+    base_lot_ids = [b["base_lot_id"] for b in batch_rows]
+    seasons_by_batch = {}
+    if base_lot_ids:
+        try:
+            season_res = supabase.table("seasons").select("base_lot_id, vu, ngay_bat_dau, ngay_ket_thuc_thuc_te") \
+                .eq("is_deleted", False).in_("base_lot_id", base_lot_ids).order("ngay_bat_dau", desc=True).execute()
+            for row in season_res.data or []:
+                blid = row.get("base_lot_id")
+                if blid not in seasons_by_batch:
+                    seasons_by_batch[blid] = row
+                if row.get("ngay_ket_thuc_thuc_te") is None:
+                    seasons_by_batch[blid] = row
+        except Exception:
+            seasons_by_batch = {}
+
+    labor_rows = _fetch_paginated_rows(
+        "fact_nhat_ky_san_xuat",
+        "ngay, thanh_tien, cong_viec_id, hang_muc_du_toan_cong, ma_cv_chuan, lo_id, lo_2",
+        lambda q: q.eq("farm_id", farm_id).lte("ngay", today_iso),
+        order_col="ngay",
+    )
+    material_rows = _fetch_paginated_rows(
+        "fact_vat_tu",
+        "ngay, thanh_tien, vat_tu_id, cong_viec_id, hang_muc_du_toan_vat_tu, ma_khoan_muc_cp, ma_cv_chuan, lo_id, lo_2",
+        lambda q: q.eq("farm_id", farm_id).lte("ngay", today_iso),
+        order_col="ngay",
+    )
+
+    cong_viec_ids = [r.get("cong_viec_id") for r in labor_rows + material_rows]
+    vat_tu_ids = [r.get("vat_tu_id") for r in material_rows]
+    row_lot_ids = [r.get("lo_id") for r in labor_rows + material_rows]
+    global_lot_map = _fetch_dimension_map(
+        "dim_lo", "lo_id", "lo_id, farm_id, lo_name, lo_code, area_ha, lo_type, doi_id, is_active", row_lot_ids
+    )
+    cong_viec_map = _fetch_dimension_map(
+        "dim_cong_viec", "cong_viec_id", "cong_viec_id, ma_cv, ten_cong_viec, cong_doan", cong_viec_ids
+    )
+    vat_tu_map = _fetch_dimension_map(
+        "dim_vat_tu", "vat_tu_id", "vat_tu_id, ma_vat_tu, ten_vat_tu, loai_vat_tu", vat_tu_ids
+    )
+
+    def classify_cost_scope(row):
+        row_lo_id = row.get("lo_id")
+        local_lot = lot_meta_by_id.get(row_lo_id)
+        global_lot = global_lot_map.get(row_lo_id)
+        fallback_label = row.get("lo_2")
+        fallback_norm = _normalize_cost_label(fallback_label)
+
+        if local_lot and local_lot.get("lo_id") in physical_lot_by_id:
+            return {
+                "scope": "direct",
+                "target_lot_id": local_lot.get("lo_id"),
+                "scope_label": _lot_display_label(local_lot),
+            }
+
+        if not local_lot and fallback_norm in physical_lot_by_label:
+            fallback_lot = physical_lot_by_label[fallback_norm]
+            return {
+                "scope": "direct",
+                "target_lot_id": fallback_lot.get("lo_id"),
+                "scope_label": _lot_display_label(fallback_lot),
+            }
+
+        scope_label = _lot_display_label(local_lot) or _lot_display_label(global_lot) or str(fallback_label or "")
+        team_group = _team_group_from_scope_label(farm_name, scope_label)
+        if team_group:
+            return {"scope": "team", "team_group": team_group, "scope_label": scope_label}
+
+        if row_lo_id is None or _is_general_cost_scope_label(scope_label):
+            return {"scope": "farm", "scope_label": scope_label or farm_name}
+        return {"scope": "unallocated", "scope_label": scope_label or farm_name}
+
+    def share_cost_to_target_lot(cost, cost_dt):
+        amount = _money(cost.get("amount"))
+        scope = cost.get("scope")
+        if amount == 0:
+            return None
+        if scope == "unallocated":
+            return None
+
+        if scope == "direct":
+            if cost.get("target_lot_id") != dim_lo_id:
+                return None
+            shared = dict(cost)
+            shared["amount"] = amount
+            shared["original_amount"] = amount
+            return shared
+
+        if scope == "team":
+            if not target_team_group or cost.get("team_group") != target_team_group:
+                return None
+            recipient_ids = [
+                lot_id for lot_id, team_group in lot_team_group_by_id.items()
+                if team_group == cost.get("team_group")
+            ]
+        else:
+            recipient_ids = list(physical_lot_by_id.keys())
+
+        weights = {
+            lot_id: _lot_weight_on_date(lot_id, cost_dt, plantings_by_lot, lot_meta_by_id)
+            for lot_id in recipient_ids
+        }
+        total_weight = sum(weight for weight in weights.values() if weight > 0)
+        target_weight = weights.get(dim_lo_id, 0.0)
+        if total_weight <= 0 or target_weight <= 0:
+            return None
+
+        shared = dict(cost)
+        shared["original_amount"] = amount
+        shared["amount"] = amount * target_weight / total_weight
+        return shared
+
+    raw_cost_rows = []
+    for row in labor_rows:
+        cv = cong_viec_map.get(row.get("cong_viec_id"), {})
+        ten_cv = cv.get("ten_cong_viec") or row.get("ma_cv_chuan") or row.get("hang_muc_du_toan_cong") or f"CV {row.get('cong_viec_id')}"
+        cost = {
+            "source": "Nhân công",
+            "ngay": row.get("ngay"),
+            "amount": _money(row.get("thanh_tien")),
+            "category": row.get("hang_muc_du_toan_cong") or cv.get("cong_doan") or row.get("ma_cv_chuan") or "Khác",
+            "detail": ten_cv,
+        }
+        cost.update(classify_cost_scope(row))
+        raw_cost_rows.append(cost)
+    for row in material_rows:
+        vt = vat_tu_map.get(row.get("vat_tu_id"), {})
+        cv = cong_viec_map.get(row.get("cong_viec_id"), {})
+        ten_vt = vt.get("ten_vat_tu") or row.get("ma_khoan_muc_cp") or row.get("ma_cv_chuan") or f"VT {row.get('vat_tu_id')}"
+        cost = {
+            "source": "Vật tư",
+            "ngay": row.get("ngay"),
+            "amount": _money(row.get("thanh_tien")),
+            "category": row.get("hang_muc_du_toan_vat_tu") or vt.get("loai_vat_tu") or row.get("ma_khoan_muc_cp") or cv.get("ten_cong_viec") or "Khác",
+            "detail": ten_vt,
+        }
+        cost.update(classify_cost_scope(row))
+        raw_cost_rows.append(cost)
+
+    cost_rows = []
+    for cost in raw_cost_rows:
+        cost_dt = pd.to_datetime(cost.get("ngay"), errors="coerce")
+        shared_cost = share_cost_to_target_lot(cost, cost_dt)
+        if shared_cost and _money(shared_cost.get("amount")) != 0:
+            cost_rows.append(shared_cost)
+
+    cost_rows.sort(key=lambda r: (str(r.get("ngay") or ""), r.get("source") or ""))
+    allocation_rows = []
+    unallocated_rows = []
+    for cost in cost_rows:
+        amount = _money(cost.get("amount"))
+        if amount == 0:
+            continue
+        cost_dt = pd.to_datetime(cost.get("ngay"), errors="coerce")
+        active_batches = [
+            b for b in batch_rows
+            if b["ngay_trong_ts"] is not None and not pd.isna(b["ngay_trong_ts"])
+            and not pd.isna(cost_dt) and b["ngay_trong_ts"] <= cost_dt
+            and int(b.get("so_cay") or 0) > 0
+        ]
+        active_trees = sum(int(b.get("so_cay") or 0) for b in active_batches)
+        if active_trees <= 0:
+            unallocated_rows.append(cost)
+            continue
+        for batch in active_batches:
+            share = amount * int(batch["so_cay"]) / active_trees
+            if cost["source"] == "Nhân công":
+                batch["labor_cost"] += share
+            else:
+                batch["material_cost"] += share
+            allocation_rows.append({
+                "base_lot_id": batch["base_lot_id"],
+                "dot": batch["dot"],
+                "source": cost["source"],
+                "ngay": cost["ngay"],
+                "amount": share,
+                "category": cost["category"],
+                "detail": cost["detail"],
+                "scope": cost.get("scope"),
+                "scope_label": cost.get("scope_label"),
             })
 
     for batch in batch_rows:

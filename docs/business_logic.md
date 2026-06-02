@@ -402,11 +402,17 @@ Hệ thống phân biệt **2 loại diện tích**:
 Dashboard chi phí/cây được mở từ tooltip của bản đồ Farm 126/157/195.
 
 - **Nguồn chi phí**: cộng `fact_nhat_ky_san_xuat.thanh_tien` và `fact_vat_tu.thanh_tien`.
-- **Phạm vi lô**: chỉ tính dòng có `farm_id` và `lo_id` khớp với lô đang xem; dòng không map được lô không được đưa vào dashboard lô.
+- **Phạm vi lô**: cột lô (`lo_id`/tên lô nguồn) quyết định chi phí thuộc đâu; `doi_id` chỉ là đội thực hiện, không dùng để suy ra lô chịu chi phí.
+- **Lô cụ thể**: nếu dòng chi phí ghi lô thật (`A8`, `D4`, `3B`, `8A`...) thì cộng 100% vào lô đó, bất kể đội nào thực hiện.
+- **Lô chung theo đội**: nếu dòng ghi `NT1`, `NT2` hoặc tên cũ `NT3+NT4` thì chia cho các lô thuộc nhóm đó theo tỷ lệ diện tích. Farm 157: `8A` thuộc nhóm `NT2` (tên cũ `NT3+NT4`).
+- **Chi phí chung toàn farm**: nếu dòng ghi `Farm xxx`, `Vườn Ươm`, `Nhà Đội`, `Cơ giới`, `Điện nước`, `BVTV`, `Thu hoạch`, `Trồng mới`, hoặc `lo_id` rỗng/mô tả chung farm thì chia toàn farm theo tỷ lệ diện tích. Farm 195 hiện chưa lập đội NT nên mọi chi phí chung không phải lô cụ thể đều chia toàn farm.
+- **Không xác định**: nhãn lô không phải lô thật, không phải đội, và không phải phạm vi chung farm thì không tự động chia toàn farm để tránh làm lệch chi phí/cây.
 - **Giữ dữ liệu gốc**: không loại trừ dòng gộp/rollup như `Chăm sóc vườn`, `Chăm sóc buồng`, `Điện, Phân, và Nước`; số liệu phản ánh tổng hiện có trong fact table.
 - **Mẫu số**: tính theo từng đợt `base_lots.loai_trong = "Trồng mới"`. Trồng dặm không tạo đợt chi phí riêng trong v1.
+- **Trọng số phân bổ lô**: ưu tiên `base_lots.dien_tich_trong` tại ngày phát sinh chi phí; nếu thiếu thì fallback `dim_lo.area_ha`. Chỉ lô đã có đợt trồng active tại ngày chi phí (`ngay_trong <= ngay`) mới nhận phần chia.
 - **Phân bổ nhiều đợt**: vì fact chi phí hiện chỉ có `lo_id`, không có `base_lot_id`, mỗi dòng chi phí theo ngày được chia cho các đợt trồng đang active tại ngày đó (`ngay_trong <= ngay`) theo tỷ lệ `so_luong` của từng đợt.
 - **Công thức**:
+  - `chi_phi_lot = chi_phi_dong * dien_tich_lot_active / tong_dien_tich_scope_active`
   - `chi_phi_phan_bo_dot = chi_phi_dong * so_cay_dot / tong_so_cay_cac_dot_active`
   - `chi_phi_cay_dot = tong_chi_phi_phan_bo_dot / so_cay_dot`
 - **Không phân bổ**: dòng chi phí trước mọi ngày trồng hoặc thiếu ngày được đưa vào nhóm "Chi phí chưa phân bổ" để user kiểm tra.
