@@ -32,7 +32,7 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
     Returns
     -------
     str
-        Complete HTML document string (for st.components.html).
+        Complete HTML document string rendered inside the farm map component.
     """
     # Scale font size relative to image width. Farm 157 (img_w=4000) used 47px.
     label_font_size = max(10, int(img_w * 47 / 4000))
@@ -427,38 +427,22 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
             }} else {{
                 html += '<div class="tt-hint">Click lô khác hoặc vùng trống để bỏ ghim</div>';
             }}
-            if (showPin && d.costUrl) {{
-                html += '<button class="tt-cost-btn" type="button" data-url="' + d.costUrl + '">Xem chi ph&iacute;/c&acirc;y</button>';
+            if (showPin && d.costFarm && d.costLot) {{
+                html += '<button class="tt-cost-btn" type="button" data-farm="' + d.costFarm + '" data-lot="' + d.costLot + '">Xem chi ph&iacute;/c&acirc;y</button>';
             }}
             return html;
         }}
 
-        function openCostDashboard(rawUrl) {{
-            if (!rawUrl) return;
-            var targetUrl = rawUrl;
+        function openCostDashboard(farm, lot) {{
+            if (!farm || !lot) return;
             try {{
-                targetUrl = new URL(rawUrl, window.parent.location.href).toString();
-            }} catch(e) {{}}
-
-            // components.html runs inside an iframe. On some browsers, anchor
-            // target navigation is blocked, so mutate the parent URL directly
-            // when same-origin access is available, then force a Streamlit rerun.
-            try {{
-                if (window.parent && window.parent !== window && window.parent.history) {{
-                    window.parent.history.pushState({{}}, "", targetUrl);
-                    window.parent.dispatchEvent(new PopStateEvent("popstate", {{ state: {{}} }}));
-                    window.parent.location.reload();
-                    return;
-                }}
-            }} catch(e) {{}}
-
-            try {{
-                window.top.location.href = targetUrl;
-                return;
-            }} catch(e) {{}}
-
-            try {{
-                window.location.href = targetUrl;
+                window.parent.postMessage({{
+                    type: "farm-map:costClick",
+                    payload: {{
+                        farm: farm,
+                        lot: lot
+                    }}
+                }}, "*");
             }} catch(e) {{}}
         }}
 
@@ -536,7 +520,7 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
             const costButton = e.target.closest('.tt-cost-btn');
             if (costButton) {{
                 e.preventDefault();
-                openCostDashboard(costButton.dataset.url);
+                openCostDashboard(costButton.dataset.farm, costButton.dataset.lot);
             }}
         }});
 

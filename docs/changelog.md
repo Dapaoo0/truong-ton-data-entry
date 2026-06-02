@@ -2,6 +2,15 @@
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
 
+## [03/06/2026] - Mở dashboard chi phí/cây không reload trình duyệt
+
+#### Fix: Nút chi phí/cây trên bản đồ dùng Streamlit Custom Component (`app.py`, `map_template.py`, `components/farm_map/index.html`)
+- **[Trước]**: Nút `Xem chi phí/cây` đổi query params rồi gọi `window.location.reload()`, nên nhìn như cả session bị tải lại.
+- **[Sau]**: Bản đồ Farm 126/157/195 render qua custom component `farm_map_component`; nút gửi event `farm-map:costClick` về Python và mở `@st.dialog` bằng `st.session_state`.
+- **[Fallback]**: Query params `cost_farm/cost_lot` vẫn được đọc để URL cũ không bị hỏng, nhưng luồng click chính không reload trình duyệt.
+
+---
+
 ## [01/06/2026] - Làm rõ tên mode máy tính cont
 
 #### Update: Đổi nhãn chế độ để tránh hiểu nhầm chiều tính (`app.py`)

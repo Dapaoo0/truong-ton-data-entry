@@ -7,6 +7,7 @@
 
 import streamlit as st
 import pandas as pd
+import streamlit.components.v1 as components
 from datetime import date, datetime, timezone, timedelta
 import os
 from dotenv import load_dotenv
@@ -22,7 +23,9 @@ import json
 import html
 import re
 import unicodedata
-from urllib.parse import urlencode
+
+FARM_MAP_COMPONENT_PATH = os.path.join(os.path.dirname(__file__), "components", "farm_map")
+farm_map_component = components.declare_component("farm_map_component", path=FARM_MAP_COMPONENT_PATH)
 
 try:
     from container_allocation import (
@@ -921,17 +924,29 @@ def _fetch_dimension_map(table_name: str, id_col: str, select_cols: str, ids):
         return {}
 
 
-def _current_query_params_with_cost(farm_name: str, lo_name: str) -> str:
-    params = {k: _query_param_value(k) for k in st.query_params.keys()}
-    params["cost_farm"] = farm_name
-    params["cost_lot"] = lo_name
-    return "?" + urlencode({k: v for k, v in params.items() if v is not None})
-
-
 def _clear_cost_query_params():
     for key in MAP_COST_QUERY_KEYS:
         if key in st.query_params:
             del st.query_params[key]
+    for key in ("cost_dialog_farm", "cost_dialog_lot"):
+        if key in st.session_state:
+            del st.session_state[key]
+
+
+def _handle_map_cost_event(event):
+    if not isinstance(event, dict) or event.get("type") != "costClick":
+        return
+    event_id = event.get("eventId")
+    if event_id and st.session_state.get("_last_map_cost_event_id") == event_id:
+        return
+    if event_id:
+        st.session_state["_last_map_cost_event_id"] = event_id
+    farm_name = str(event.get("farm") or "").strip()
+    lo_name = str(event.get("lot") or "").strip()
+    if not farm_name or not lo_name:
+        return
+    st.session_state["cost_dialog_farm"] = farm_name
+    st.session_state["cost_dialog_lot"] = lo_name
 
 
 @st.cache_data(ttl=120, show_spinner=False)
@@ -1534,8 +1549,8 @@ def _render_lot_cost_dialog(farm_name: str, lo_name: str):
 
 
 def _maybe_render_lot_cost_dialog(current_farm: str):
-    farm_name = _query_param_value("cost_farm")
-    lo_name = _query_param_value("cost_lot")
+    farm_name = st.session_state.get("cost_dialog_farm") or _query_param_value("cost_farm")
+    lo_name = st.session_state.get("cost_dialog_lot") or _query_param_value("cost_lot")
     if not farm_name or not lo_name:
         return
     if current_farm not in ["Admin", "Phòng Kinh doanh", farm_name]:
@@ -3208,8 +3223,6 @@ def render_global_data_tab(c_farm):
     df_tree_inv_all = fetch_table_data("tree_inventory_logs", c_farm)
     df_seasons = fetch_table_data("seasons", c_farm)
 
-    _maybe_render_lot_cost_dialog(c_farm)
-
     # ─── Phân loại Trồng mới vs Trồng dặm ───
     # loai_trong nằm trực tiếp trong base_lots (sau migration add_loai_trong_to_base_lots)
     # Trồng dặm KHÔNG phải đợt trồng độc lập → tách riêng khỏi forecast & bảng chi tiết
@@ -3953,13 +3966,14 @@ def render_global_data_tab(c_farm):
             dt_trong_str = f'{dt_trong:.2f} ha' if dt_trong > 0 else "—"
             total_cay = info.get("total_cay", 0)
             batches_json = json.dumps(info.get("batches", []), ensure_ascii=False).replace('"', '&quot;')
-            cost_url = html.escape(_current_query_params_with_cost(farm_name, name), quote=True)
+            cost_farm = html.escape(farm_name, quote=True)
+            cost_lot = html.escape(name, quote=True)
             poly_pts = [(p["x"], p["y"]) for p in lot["points"]]
             cx, cy = _map_best_label_pos(poly_pts)
             svg_polygons += f'''
             <polygon class="lot-poly" points="{points_str}" fill="{fill}"
                 data-name="{name}" data-area-ha="{area_ha_str}" data-dt-trong="{dt_trong_str}" data-total="{total_cay}"
-                data-gd="{giai_doan}" data-batches="{batches_json}" data-cost-url="{cost_url}" />
+                data-gd="{giai_doan}" data-batches="{batches_json}" data-cost-farm="{cost_farm}" data-cost-lot="{cost_lot}" />
             <text x="{cx:.0f}" y="{cy:.0f}" class="lot-label">{name}</text>
             '''
 
@@ -3983,8 +3997,13 @@ def render_global_data_tab(c_farm):
             map_zoom=map_zoom,
         )
 
-        import streamlit.components.v1 as components
-        components.html(html_content, height=_map_component_initial_height(img_w, img_h), scrolling=False)
+        map_event = farm_map_component(
+            html=html_content,
+            initial_height=_map_component_initial_height(img_w, img_h),
+            key=f"farm_map_component_{farm_name}",
+            default=None,
+        )
+        _handle_map_cost_event(map_event)
 
     for _farm_name, _polygon_file, _default_w, _default_h, _map_zoom in [
         ("Farm 126", "farm_126_polygons.json", 2382, 1684, 1.0),
@@ -3998,6 +4017,8 @@ def render_global_data_tab(c_farm):
             _default_h,
             map_zoom=_map_zoom,
         )
+
+    _maybe_render_lot_cost_dialog(c_farm)
 
     st.divider()
 
