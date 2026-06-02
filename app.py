@@ -307,7 +307,7 @@ elif hasattr(st, "experimental_dialog"):
     dialog_decorator = st.experimental_dialog
 else:
     # Fallback to function if strictly not supported
-    def dialog_decorator(title):
+    def dialog_decorator(title, *args, **kwargs):
         def decorator(func):
             return func
         return decorator
@@ -757,6 +757,16 @@ def _format_money(value) -> str:
     return f"{_money(value):,.0f} đ"
 
 
+def _format_money_compact(value) -> str:
+    amount = _money(value)
+    abs_amount = abs(amount)
+    if abs_amount >= 1_000_000_000:
+        return f"{amount / 1_000_000_000:,.1f} tỷ đ"
+    if abs_amount >= 1_000_000:
+        return f"{amount / 1_000_000:,.1f} triệu đ"
+    return _format_money(amount)
+
+
 def _fetch_paginated_rows(table_name: str, select_cols: str, filter_fn=None, order_col: str = None, page_size: int = 1000):
     rows = []
     start = 0
@@ -989,8 +999,17 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
     }
 
 
-@dialog_decorator("Dashboard chi phí/cây")
+@dialog_decorator("Dashboard chi phí/cây", width="large")
 def _render_lot_cost_dialog(farm_name: str, lo_name: str):
+    st.markdown("""
+    <style>
+    div[role="dialog"][aria-modal="true"] {
+        width: min(92vw, 1400px) !important;
+        max-width: 92vw !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     result = calculate_lot_cost_per_tree(farm_name, lo_name)
     if result.get("error"):
         st.error(result["error"])
@@ -1012,10 +1031,10 @@ def _render_lot_cost_dialog(farm_name: str, lo_name: str):
 
     summary = result.get("summary", {})
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Nhân công", _format_money(summary.get("total_labor", 0)))
-    m2.metric("Vật tư", _format_money(summary.get("total_material", 0)))
-    m3.metric("Tổng chi phí", _format_money(summary.get("total_cost", 0)))
-    m4.metric("Chi phí/cây TB", _format_money(summary.get("avg_cost_per_tree", 0)))
+    m1.metric("Nhân công", _format_money_compact(summary.get("total_labor", 0)))
+    m2.metric("Vật tư", _format_money_compact(summary.get("total_material", 0)))
+    m3.metric("Tổng chi phí", _format_money_compact(summary.get("total_cost", 0)))
+    m4.metric("Chi phí/cây TB", _format_money_compact(summary.get("avg_cost_per_tree", 0)))
 
     if not isinstance(batch_df, pd.DataFrame) or batch_df.empty:
         st.info("Lô này chưa có đợt trồng mới để tính chi phí/cây.")
