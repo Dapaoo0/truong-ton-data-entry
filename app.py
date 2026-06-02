@@ -23,6 +23,7 @@ import json
 import html
 import re
 import unicodedata
+import inspect
 
 FARM_MAP_COMPONENT_PATH = os.path.join(os.path.dirname(__file__), "components", "farm_map")
 farm_map_component = components.declare_component("farm_map_component", path=FARM_MAP_COMPONENT_PATH)
@@ -316,6 +317,16 @@ else:
         def decorator(func):
             return func
         return decorator
+
+def configured_dialog_decorator(title, *args, **kwargs):
+    try:
+        params = inspect.signature(dialog_decorator).parameters
+        supports_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+        if not supports_kwargs:
+            kwargs = {key: value for key, value in kwargs.items() if key in params}
+    except (TypeError, ValueError):
+        pass
+    return dialog_decorator(title, *args, **kwargs)
 
 # =====================================================
 # CẤU HÌNH BAN ĐẦU
@@ -934,6 +945,10 @@ def _clear_cost_query_params():
             del st.session_state[key]
 
 
+def _on_lot_cost_dialog_dismiss():
+    _clear_cost_query_params()
+
+
 def _handle_map_cost_event(event, rerun_on_open: bool = False):
     if not isinstance(event, dict) or event.get("type") != "costClick":
         return False
@@ -1493,7 +1508,7 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
     }
 
 
-@dialog_decorator("Dashboard chi phí/cây", width="large")
+@configured_dialog_decorator("Dashboard chi phí/cây", width="large", on_dismiss=_on_lot_cost_dialog_dismiss)
 def _render_lot_cost_dialog(farm_name: str, lo_name: str):
     st.markdown("""
     <style>
