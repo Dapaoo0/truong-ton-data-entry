@@ -393,6 +393,19 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
         let pinned = false;
         let pinnedPoly = null;
 
+        function getLotData(poly) {{
+            return {{
+                name: poly.getAttribute('data-name') || '',
+                areaHa: poly.getAttribute('data-area-ha') || '',
+                dtTrong: poly.getAttribute('data-dt-trong') || '',
+                total: poly.getAttribute('data-total') || '0',
+                gd: poly.getAttribute('data-gd') || '',
+                batches: poly.getAttribute('data-batches') || '[]',
+                costFarm: poly.getAttribute('data-cost-farm') || '',
+                costLot: poly.getAttribute('data-cost-lot') || ''
+            }};
+        }}
+
         function buildHTML(d, showPin) {{
             let batches = [];
             try {{ batches = JSON.parse(d.batches || '[]'); }} catch(e) {{}}
@@ -459,7 +472,7 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
         polys.forEach(poly => {{
             poly.addEventListener('mouseenter', function(e) {{
                 if (pinned) return;
-                tooltip.innerHTML = buildHTML(this.dataset, false);
+                tooltip.innerHTML = buildHTML(getLotData(this), false);
                 tooltip.style.display = 'block';
             }});
 
@@ -492,7 +505,7 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
                 pinned = true;
                 pinnedPoly = this;
                 this.classList.add('pinned');
-                tooltip.innerHTML = buildHTML(this.dataset, true);
+                tooltip.innerHTML = buildHTML(getLotData(this), true);
                 tooltip.classList.add('pinned');
                 tooltip.style.display = 'block';
                 tooltip.scrollTop = 0;
@@ -520,7 +533,10 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
             const costButton = e.target.closest('.tt-cost-btn');
             if (costButton) {{
                 e.preventDefault();
-                openCostDashboard(costButton.dataset.farm, costButton.dataset.lot);
+                openCostDashboard(
+                    costButton.getAttribute('data-farm'),
+                    costButton.getAttribute('data-lot')
+                );
             }}
         }});
 
