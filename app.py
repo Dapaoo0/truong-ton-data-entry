@@ -747,6 +747,7 @@ def get_farm_id_from_name(farm_name: str):
 
 
 MAP_COST_QUERY_KEYS = ("cost_farm", "cost_lot")
+LOT_COST_CACHE_TTL_SECONDS = 900
 
 FARM_157_LOT_TEAM_OVERRIDES = {
     "NT1": {
@@ -933,23 +934,26 @@ def _clear_cost_query_params():
             del st.session_state[key]
 
 
-def _handle_map_cost_event(event):
+def _handle_map_cost_event(event, rerun_on_open: bool = False):
     if not isinstance(event, dict) or event.get("type") != "costClick":
-        return
+        return False
     event_id = event.get("eventId")
     if event_id and st.session_state.get("_last_map_cost_event_id") == event_id:
-        return
+        return False
     if event_id:
         st.session_state["_last_map_cost_event_id"] = event_id
     farm_name = str(event.get("farm") or "").strip()
     lo_name = str(event.get("lot") or "").strip()
     if not farm_name or not lo_name:
-        return
+        return False
     st.session_state["cost_dialog_farm"] = farm_name
     st.session_state["cost_dialog_lot"] = lo_name
+    if rerun_on_open:
+        st.rerun()
+    return True
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=LOT_COST_CACHE_TTL_SECONDS, show_spinner=False)
 def _calculate_lot_cost_per_tree_direct_only(farm_name: str, lo_name: str) -> dict:
     farm_id = get_farm_id_from_name(farm_name)
     dim_lo_id = get_dim_lo_id(farm_name, lo_name)
@@ -1139,7 +1143,68 @@ def _calculate_lot_cost_per_tree_direct_only(farm_name: str, lo_name: str) -> di
     }
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=LOT_COST_CACHE_TTL_SECONDS, show_spinner=False)
+def _fetch_lot_cost_context(farm_id, today_iso: str) -> dict:
+    dim_lot_rows = _fetch_paginated_rows(
+        "dim_lo",
+        "lo_id, farm_id, lo_name, lo_code, area_ha, lo_type, doi_id, is_active",
+        lambda q: q.eq("farm_id", farm_id).eq("is_active", True),
+    )
+    doi_ids = [row.get("doi_id") for row in dim_lot_rows]
+    doi_map = _fetch_dimension_map("dim_doi", "doi_id", "doi_id, doi_name, doi_code", doi_ids)
+
+    physical_lot_rows = [row for row in dim_lot_rows if _is_physical_lot_row(row)]
+    physical_ids = [row.get("lo_id") for row in physical_lot_rows if row.get("lo_id") is not None]
+    all_planting_rows = []
+    if physical_ids:
+        all_planting_rows = _fetch_paginated_rows(
+            "base_lots",
+            "id, ngay_trong, so_luong, dien_tich_trong, loai_trong, is_deleted, dim_lo_id",
+            lambda q: q.in_("dim_lo_id", physical_ids)
+                       .eq("is_deleted", False)
+                       .eq("loai_trong", "Trồng mới"),
+            order_col="ngay_trong",
+        )
+
+    labor_rows = _fetch_paginated_rows(
+        "fact_nhat_ky_san_xuat",
+        "ngay, thanh_tien, cong_viec_id, hang_muc_du_toan_cong, ma_cv_chuan, lo_id, lo_2",
+        lambda q: q.eq("farm_id", farm_id).lte("ngay", today_iso),
+        order_col="ngay",
+    )
+    material_rows = _fetch_paginated_rows(
+        "fact_vat_tu",
+        "ngay, thanh_tien, vat_tu_id, cong_viec_id, hang_muc_du_toan_vat_tu, ma_khoan_muc_cp, ma_cv_chuan, lo_id, lo_2",
+        lambda q: q.eq("farm_id", farm_id).lte("ngay", today_iso),
+        order_col="ngay",
+    )
+
+    cong_viec_ids = [r.get("cong_viec_id") for r in labor_rows + material_rows]
+    vat_tu_ids = [r.get("vat_tu_id") for r in material_rows]
+    row_lot_ids = [r.get("lo_id") for r in labor_rows + material_rows]
+    global_lot_map = _fetch_dimension_map(
+        "dim_lo", "lo_id", "lo_id, farm_id, lo_name, lo_code, area_ha, lo_type, doi_id, is_active", row_lot_ids
+    )
+    cong_viec_map = _fetch_dimension_map(
+        "dim_cong_viec", "cong_viec_id", "cong_viec_id, ma_cv, ten_cong_viec, cong_doan", cong_viec_ids
+    )
+    vat_tu_map = _fetch_dimension_map(
+        "dim_vat_tu", "vat_tu_id", "vat_tu_id, ma_vat_tu, ten_vat_tu, loai_vat_tu", vat_tu_ids
+    )
+
+    return {
+        "dim_lot_rows": dim_lot_rows,
+        "doi_map": doi_map,
+        "all_planting_rows": all_planting_rows,
+        "labor_rows": labor_rows,
+        "material_rows": material_rows,
+        "global_lot_map": global_lot_map,
+        "cong_viec_map": cong_viec_map,
+        "vat_tu_map": vat_tu_map,
+    }
+
+
+@st.cache_data(ttl=LOT_COST_CACHE_TTL_SECONDS, show_spinner=False)
 def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
     farm_id = get_farm_id_from_name(farm_name)
     dim_lo_id = get_dim_lo_id(farm_name, lo_name)
@@ -1147,18 +1212,14 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
         return {"error": "Không tìm thấy farm/lô trong dim_farm/dim_lo."}
 
     today_iso = date.today().isoformat()
-    dim_lot_rows = _fetch_paginated_rows(
-        "dim_lo",
-        "lo_id, farm_id, lo_name, lo_code, area_ha, lo_type, doi_id, is_active",
-        lambda q: q.eq("farm_id", farm_id).eq("is_active", True),
-    )
+    cost_context = _fetch_lot_cost_context(farm_id, today_iso)
+    dim_lot_rows = cost_context["dim_lot_rows"]
     lot_meta_by_id = {row.get("lo_id"): row for row in dim_lot_rows}
     lot_meta = lot_meta_by_id.get(dim_lo_id, {})
     if not lot_meta:
         return {"error": "Không tìm thấy farm/lô trong dim_lo."}
 
-    doi_ids = [row.get("doi_id") for row in dim_lot_rows]
-    doi_map = _fetch_dimension_map("dim_doi", "doi_id", "doi_id, doi_name, doi_code", doi_ids)
+    doi_map = cost_context["doi_map"]
     physical_lot_rows = [row for row in dim_lot_rows if _is_physical_lot_row(row)]
     physical_lot_by_id = {row.get("lo_id"): row for row in physical_lot_rows}
     physical_lot_by_label = {}
@@ -1175,7 +1236,7 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
     }
 
     physical_ids = list(physical_lot_by_id.keys()) or [dim_lo_id]
-    all_planting_rows = _fetch_paginated_rows(
+    all_planting_rows = cost_context["all_planting_rows"] or _fetch_paginated_rows(
         "base_lots",
         "id, ngay_trong, so_luong, dien_tich_trong, loai_trong, is_deleted, dim_lo_id",
         lambda q: q.in_("dim_lo_id", physical_ids)
@@ -1242,31 +1303,11 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
         except Exception:
             seasons_by_batch = {}
 
-    labor_rows = _fetch_paginated_rows(
-        "fact_nhat_ky_san_xuat",
-        "ngay, thanh_tien, cong_viec_id, hang_muc_du_toan_cong, ma_cv_chuan, lo_id, lo_2",
-        lambda q: q.eq("farm_id", farm_id).lte("ngay", today_iso),
-        order_col="ngay",
-    )
-    material_rows = _fetch_paginated_rows(
-        "fact_vat_tu",
-        "ngay, thanh_tien, vat_tu_id, cong_viec_id, hang_muc_du_toan_vat_tu, ma_khoan_muc_cp, ma_cv_chuan, lo_id, lo_2",
-        lambda q: q.eq("farm_id", farm_id).lte("ngay", today_iso),
-        order_col="ngay",
-    )
-
-    cong_viec_ids = [r.get("cong_viec_id") for r in labor_rows + material_rows]
-    vat_tu_ids = [r.get("vat_tu_id") for r in material_rows]
-    row_lot_ids = [r.get("lo_id") for r in labor_rows + material_rows]
-    global_lot_map = _fetch_dimension_map(
-        "dim_lo", "lo_id", "lo_id, farm_id, lo_name, lo_code, area_ha, lo_type, doi_id, is_active", row_lot_ids
-    )
-    cong_viec_map = _fetch_dimension_map(
-        "dim_cong_viec", "cong_viec_id", "cong_viec_id, ma_cv, ten_cong_viec, cong_doan", cong_viec_ids
-    )
-    vat_tu_map = _fetch_dimension_map(
-        "dim_vat_tu", "vat_tu_id", "vat_tu_id, ma_vat_tu, ten_vat_tu, loai_vat_tu", vat_tu_ids
-    )
+    labor_rows = cost_context["labor_rows"]
+    material_rows = cost_context["material_rows"]
+    global_lot_map = cost_context["global_lot_map"]
+    cong_viec_map = cost_context["cong_viec_map"]
+    vat_tu_map = cost_context["vat_tu_map"]
 
     def classify_cost_scope(row):
         row_lo_id = row.get("lo_id")
@@ -1463,13 +1504,14 @@ def _render_lot_cost_dialog(farm_name: str, lo_name: str):
     </style>
     """, unsafe_allow_html=True)
 
-    result = calculate_lot_cost_per_tree(farm_name, lo_name)
+    with st.spinner("Đang tính chi phí/cây cho lô này..."):
+        result = calculate_lot_cost_per_tree(farm_name, lo_name)
     if result.get("error"):
         st.error(result["error"])
         if st.button("Đóng", key="close_lot_cost_dialog_error"):
             _clear_cost_query_params()
             st.rerun()
-        return
+        return False
 
     st.markdown(f"#### {farm_name} · Lô {lo_name}")
     area_ha = result.get("area_ha")
@@ -1552,12 +1594,13 @@ def _maybe_render_lot_cost_dialog(current_farm: str):
     farm_name = st.session_state.get("cost_dialog_farm") or _query_param_value("cost_farm")
     lo_name = st.session_state.get("cost_dialog_lot") or _query_param_value("cost_lot")
     if not farm_name or not lo_name:
-        return
+        return False
     if current_farm not in ["Admin", "Phòng Kinh doanh", farm_name]:
         st.warning("Bạn không có quyền xem chi phí của farm này.")
         _clear_cost_query_params()
-        return
+        return True
     _render_lot_cost_dialog(str(farm_name), str(lo_name))
+    return True
 
 
 def lookup_ribbon(farm_id, year, week):
@@ -3214,6 +3257,9 @@ def render_global_data_tab(c_farm):
     st.markdown("### 🌐 Bảng dữ liệu Toàn cục Farm")
     st.caption("Khám phá dữ liệu tổng quan bằng các Biểu đồ phân tích và Bộ lọc.")
     
+    if _maybe_render_lot_cost_dialog(c_farm):
+        st.stop()
+
     # Fetch all data
     df_lots_all = fetch_table_data("base_lots", c_farm)
     df_stg_all = fetch_table_data("stage_logs", c_farm)
@@ -4003,7 +4049,7 @@ def render_global_data_tab(c_farm):
             key=f"farm_map_component_{farm_name}",
             default=None,
         )
-        _handle_map_cost_event(map_event)
+        _handle_map_cost_event(map_event, rerun_on_open=True)
 
     for _farm_name, _polygon_file, _default_w, _default_h, _map_zoom in [
         ("Farm 126", "farm_126_polygons.json", 2382, 1684, 1.0),
@@ -4017,8 +4063,6 @@ def render_global_data_tab(c_farm):
             _default_h,
             map_zoom=_map_zoom,
         )
-
-    _maybe_render_lot_cost_dialog(c_farm)
 
     st.divider()
 
