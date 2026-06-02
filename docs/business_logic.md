@@ -394,3 +394,19 @@ Hệ thống phân biệt **2 loại diện tích**:
 - **Input**: `df_lots` (base_lots filtered), `df_seasons` (seasons data).
 - **`loai_trong`**: Ưu tiên lấy trực tiếp từ `base_lots.loai_trong` (không cần join `seasons`). Fallback join nếu cột không tồn tại.
 - **Layout**: Danh sách đợt trồng kèm ngày, farm, lô, số lượng, loại trồng.
+
+---
+
+## 10. Chi Phí/Cây Trên Bản Đồ
+
+Dashboard chi phí/cây được mở từ tooltip của bản đồ Farm 126/157/195.
+
+- **Nguồn chi phí**: cộng `fact_nhat_ky_san_xuat.thanh_tien` và `fact_vat_tu.thanh_tien`.
+- **Phạm vi lô**: chỉ tính dòng có `farm_id` và `lo_id` khớp với lô đang xem; dòng không map được lô không được đưa vào dashboard lô.
+- **Giữ dữ liệu gốc**: không loại trừ dòng gộp/rollup như `Chăm sóc vườn`, `Chăm sóc buồng`, `Điện, Phân, và Nước`; số liệu phản ánh tổng hiện có trong fact table.
+- **Mẫu số**: tính theo từng đợt `base_lots.loai_trong = "Trồng mới"`. Trồng dặm không tạo đợt chi phí riêng trong v1.
+- **Phân bổ nhiều đợt**: vì fact chi phí hiện chỉ có `lo_id`, không có `base_lot_id`, mỗi dòng chi phí theo ngày được chia cho các đợt trồng đang active tại ngày đó (`ngay_trong <= ngay`) theo tỷ lệ `so_luong` của từng đợt.
+- **Công thức**:
+  - `chi_phi_phan_bo_dot = chi_phi_dong * so_cay_dot / tong_so_cay_cac_dot_active`
+  - `chi_phi_cay_dot = tong_chi_phi_phan_bo_dot / so_cay_dot`
+- **Không phân bổ**: dòng chi phí trước mọi ngày trồng hoặc thiếu ngày được đưa vào nhóm "Chi phí chưa phân bổ" để user kiểm tra.

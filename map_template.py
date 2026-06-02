@@ -172,6 +172,21 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
             border-top: 1px solid rgba(255,255,255,0.08);
             padding-top: 6px;
         }}
+        .map-tooltip .tt-cost-btn {{
+            display: block;
+            margin-top: 10px;
+            padding: 7px 10px;
+            border-radius: 7px;
+            background: #2e7d32;
+            color: #fff;
+            text-align: center;
+            text-decoration: none;
+            font-weight: 700;
+            font-size: 12px;
+        }}
+        .map-tooltip .tt-cost-btn:hover {{
+            background: #1b5e20;
+        }}
         .legend-bar {{
             display: flex;
             justify-content: center;
@@ -407,6 +422,9 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
                 html += '<div class="tt-hint">💡 Click để ghim tooltip</div>';
             }} else {{
                 html += '<div class="tt-hint">Click lô khác hoặc vùng trống để bỏ ghim</div>';
+            }}
+            if (showPin && d.costUrl) {{
+                html += '<a class="tt-cost-btn" href="' + d.costUrl + '" target="_parent">Xem chi ph&iacute;/c&acirc;y</a>';
             }}
             return html;
         }}

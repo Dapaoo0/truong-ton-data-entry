@@ -19,6 +19,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 import json
+import html
+from urllib.parse import urlencode
 
 try:
     from container_allocation import (
@@ -737,6 +739,354 @@ def get_farm_id_from_name(farm_name: str):
     """Resolve farm_name → farm_id from dim_farm."""
     res = supabase.table("dim_farm").select("farm_id").eq("farm_name", farm_name).limit(1).execute()
     return res.data[0]["farm_id"] if res.data else None
+
+
+MAP_COST_QUERY_KEYS = ("cost_farm", "cost_lot")
+
+
+def _money(value) -> float:
+    try:
+        if value is None or pd.isna(value):
+            return 0.0
+        return float(value)
+    except Exception:
+        return 0.0
+
+
+def _format_money(value) -> str:
+    return f"{_money(value):,.0f} đ"
+
+
+def _fetch_paginated_rows(table_name: str, select_cols: str, filter_fn=None, order_col: str = None, page_size: int = 1000):
+    rows = []
+    start = 0
+    while True:
+        query = supabase.table(table_name).select(select_cols)
+        if filter_fn:
+            query = filter_fn(query)
+        if order_col:
+            query = query.order(order_col, desc=False)
+        res = query.range(start, start + page_size - 1).execute()
+        batch = res.data or []
+        rows.extend(batch)
+        if len(batch) < page_size:
+            break
+        start += page_size
+    return rows
+
+
+def _fetch_dimension_map(table_name: str, id_col: str, select_cols: str, ids):
+    ids = sorted({int(x) for x in ids if x is not None and not pd.isna(x)})
+    if not ids:
+        return {}
+    try:
+        res = supabase.table(table_name).select(select_cols).in_(id_col, ids).execute()
+        return {row.get(id_col): row for row in (res.data or [])}
+    except Exception:
+        return {}
+
+
+def _current_query_params_with_cost(farm_name: str, lo_name: str) -> str:
+    params = {k: _query_param_value(k) for k in st.query_params.keys()}
+    params["cost_farm"] = farm_name
+    params["cost_lot"] = lo_name
+    return "?" + urlencode({k: v for k, v in params.items() if v is not None})
+
+
+def _clear_cost_query_params():
+    for key in MAP_COST_QUERY_KEYS:
+        if key in st.query_params:
+            del st.query_params[key]
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
+    farm_id = get_farm_id_from_name(farm_name)
+    dim_lo_id = get_dim_lo_id(farm_name, lo_name)
+    if not farm_id or not dim_lo_id:
+        return {"error": "Không tìm thấy farm/lô trong dim_farm/dim_lo."}
+
+    lot_res = supabase.table("dim_lo").select("lo_id, lo_name, area_ha, dim_farm!inner(farm_name)") \
+        .eq("lo_id", dim_lo_id).limit(1).execute()
+    lot_meta = (lot_res.data or [{}])[0]
+
+    planting_rows = _fetch_paginated_rows(
+        "base_lots",
+        "id, ngay_trong, so_luong, dien_tich_trong, loai_trong, is_deleted, dim_lo_id",
+        lambda q: q.eq("dim_lo_id", dim_lo_id)
+                   .eq("is_deleted", False)
+                   .eq("loai_trong", "Trồng mới"),
+        order_col="ngay_trong",
+    )
+    if not planting_rows:
+        return {
+            "farm_name": farm_name,
+            "lo_name": lo_name,
+            "area_ha": lot_meta.get("area_ha"),
+            "batches": pd.DataFrame(),
+            "costs": pd.DataFrame(),
+            "allocations": pd.DataFrame(),
+            "unallocated": pd.DataFrame(),
+            "summary": {
+                "total_labor": 0,
+                "total_material": 0,
+                "total_cost": 0,
+                "allocated_cost": 0,
+                "avg_cost_per_tree": 0,
+            },
+            "warnings": ["Lô này chưa có đợt trồng mới nên chưa thể tính chi phí/cây."],
+        }
+
+    batch_rows = []
+    for idx, row in enumerate(planting_rows, start=1):
+        ngay_trong = pd.to_datetime(row.get("ngay_trong"), errors="coerce")
+        trees = int(_money(row.get("so_luong")))
+        batch_rows.append({
+            "base_lot_id": int(row.get("id")),
+            "dot": idx,
+            "ngay_trong": ngay_trong.date() if not pd.isna(ngay_trong) else None,
+            "ngay_trong_ts": ngay_trong,
+            "so_cay": trees,
+            "dien_tich_trong": _money(row.get("dien_tich_trong")),
+            "labor_cost": 0.0,
+            "material_cost": 0.0,
+        })
+
+    base_lot_ids = [b["base_lot_id"] for b in batch_rows]
+    seasons_by_batch = {}
+    if base_lot_ids:
+        try:
+            season_res = supabase.table("seasons").select("base_lot_id, vu, ngay_bat_dau, ngay_ket_thuc_thuc_te") \
+                .eq("is_deleted", False).in_("base_lot_id", base_lot_ids).order("ngay_bat_dau", desc=True).execute()
+            for row in season_res.data or []:
+                blid = row.get("base_lot_id")
+                if blid not in seasons_by_batch:
+                    seasons_by_batch[blid] = row
+                if row.get("ngay_ket_thuc_thuc_te") is None:
+                    seasons_by_batch[blid] = row
+        except Exception:
+            seasons_by_batch = {}
+
+    labor_rows = _fetch_paginated_rows(
+        "fact_nhat_ky_san_xuat",
+        "ngay, thanh_tien, cong_viec_id, hang_muc_du_toan_cong, ma_cv_chuan, lo_2",
+        lambda q: q.eq("farm_id", farm_id).eq("lo_id", dim_lo_id).lte("ngay", date.today().isoformat()),
+        order_col="ngay",
+    )
+    material_rows = _fetch_paginated_rows(
+        "fact_vat_tu",
+        "ngay, thanh_tien, vat_tu_id, cong_viec_id, hang_muc_du_toan_vat_tu, ma_khoan_muc_cp, ma_cv_chuan, lo_2",
+        lambda q: q.eq("farm_id", farm_id).eq("lo_id", dim_lo_id).lte("ngay", date.today().isoformat()),
+        order_col="ngay",
+    )
+
+    cong_viec_ids = [r.get("cong_viec_id") for r in labor_rows + material_rows]
+    vat_tu_ids = [r.get("vat_tu_id") for r in material_rows]
+    cong_viec_map = _fetch_dimension_map(
+        "dim_cong_viec", "cong_viec_id", "cong_viec_id, ma_cv, ten_cong_viec, cong_doan", cong_viec_ids
+    )
+    vat_tu_map = _fetch_dimension_map(
+        "dim_vat_tu", "vat_tu_id", "vat_tu_id, ma_vat_tu, ten_vat_tu, loai_vat_tu", vat_tu_ids
+    )
+
+    cost_rows = []
+    for row in labor_rows:
+        cv = cong_viec_map.get(row.get("cong_viec_id"), {})
+        ten_cv = cv.get("ten_cong_viec") or row.get("ma_cv_chuan") or row.get("hang_muc_du_toan_cong") or f"CV {row.get('cong_viec_id')}"
+        cost_rows.append({
+            "source": "Nhân công",
+            "ngay": row.get("ngay"),
+            "amount": _money(row.get("thanh_tien")),
+            "category": row.get("hang_muc_du_toan_cong") or cv.get("cong_doan") or row.get("ma_cv_chuan") or "Khác",
+            "detail": ten_cv,
+        })
+    for row in material_rows:
+        vt = vat_tu_map.get(row.get("vat_tu_id"), {})
+        cv = cong_viec_map.get(row.get("cong_viec_id"), {})
+        ten_vt = vt.get("ten_vat_tu") or row.get("ma_khoan_muc_cp") or row.get("ma_cv_chuan") or f"VT {row.get('vat_tu_id')}"
+        cost_rows.append({
+            "source": "Vật tư",
+            "ngay": row.get("ngay"),
+            "amount": _money(row.get("thanh_tien")),
+            "category": row.get("hang_muc_du_toan_vat_tu") or vt.get("loai_vat_tu") or row.get("ma_khoan_muc_cp") or cv.get("ten_cong_viec") or "Khác",
+            "detail": ten_vt,
+        })
+
+    cost_rows.sort(key=lambda r: (str(r.get("ngay") or ""), r.get("source") or ""))
+    allocation_rows = []
+    unallocated_rows = []
+    for cost in cost_rows:
+        amount = _money(cost.get("amount"))
+        if amount == 0:
+            continue
+        cost_dt = pd.to_datetime(cost.get("ngay"), errors="coerce")
+        active_batches = [
+            b for b in batch_rows
+            if b["ngay_trong_ts"] is not None and not pd.isna(b["ngay_trong_ts"])
+            and not pd.isna(cost_dt) and b["ngay_trong_ts"] <= cost_dt
+            and int(b.get("so_cay") or 0) > 0
+        ]
+        active_trees = sum(int(b.get("so_cay") or 0) for b in active_batches)
+        if active_trees <= 0:
+            unallocated_rows.append(cost)
+            continue
+        for batch in active_batches:
+            share = amount * int(batch["so_cay"]) / active_trees
+            if cost["source"] == "Nhân công":
+                batch["labor_cost"] += share
+            else:
+                batch["material_cost"] += share
+            allocation_rows.append({
+                "base_lot_id": batch["base_lot_id"],
+                "dot": batch["dot"],
+                "source": cost["source"],
+                "ngay": cost["ngay"],
+                "amount": share,
+                "category": cost["category"],
+                "detail": cost["detail"],
+            })
+
+    for batch in batch_rows:
+        season = seasons_by_batch.get(batch["base_lot_id"], {})
+        batch["vu"] = season.get("vu", "")
+        batch["total_cost"] = batch["labor_cost"] + batch["material_cost"]
+        batch["cost_per_tree"] = batch["total_cost"] / batch["so_cay"] if batch["so_cay"] > 0 else 0.0
+
+    cost_df = pd.DataFrame(cost_rows)
+    allocation_df = pd.DataFrame(allocation_rows)
+    unallocated_df = pd.DataFrame(unallocated_rows)
+    batch_df = pd.DataFrame(batch_rows)
+
+    allocated_cost = float(batch_df["total_cost"].sum()) if not batch_df.empty else 0.0
+    allocated_tree_denominator = int(batch_df.loc[batch_df["total_cost"] > 0, "so_cay"].sum()) if not batch_df.empty else 0
+    if allocated_tree_denominator <= 0 and not batch_df.empty:
+        allocated_tree_denominator = int(batch_df["so_cay"].sum())
+    total_labor = sum(_money(r.get("amount")) for r in cost_rows if r.get("source") == "Nhân công")
+    total_material = sum(_money(r.get("amount")) for r in cost_rows if r.get("source") == "Vật tư")
+    warnings = []
+    if len(batch_rows) > 1:
+        warnings.append("Lô có nhiều đợt trồng: chi phí từng ngày được chia theo tỷ lệ số cây của các đợt đang active.")
+    if not unallocated_df.empty:
+        warnings.append(f"Có {len(unallocated_df):,} dòng chi phí trước ngày trồng hoặc thiếu ngày nên chưa phân bổ vào đợt nào.")
+
+    return {
+        "farm_name": farm_name,
+        "lo_name": lo_name,
+        "area_ha": lot_meta.get("area_ha"),
+        "batches": batch_df,
+        "costs": cost_df,
+        "allocations": allocation_df,
+        "unallocated": unallocated_df,
+        "summary": {
+            "total_labor": total_labor,
+            "total_material": total_material,
+            "total_cost": total_labor + total_material,
+            "allocated_cost": allocated_cost,
+            "unallocated_cost": float(unallocated_df["amount"].sum()) if not unallocated_df.empty else 0.0,
+            "avg_cost_per_tree": allocated_cost / allocated_tree_denominator if allocated_tree_denominator > 0 else 0.0,
+        },
+        "warnings": warnings,
+    }
+
+
+@dialog_decorator("Dashboard chi phí/cây")
+def _render_lot_cost_dialog(farm_name: str, lo_name: str):
+    result = calculate_lot_cost_per_tree(farm_name, lo_name)
+    if result.get("error"):
+        st.error(result["error"])
+        if st.button("Đóng", key="close_lot_cost_dialog_error"):
+            _clear_cost_query_params()
+            st.rerun()
+        return
+
+    st.markdown(f"#### {farm_name} · Lô {lo_name}")
+    area_ha = result.get("area_ha")
+    batch_df = result.get("batches", pd.DataFrame())
+    if area_ha is not None:
+        st.caption(f"Diện tích lô: {float(area_ha):.2f} ha · Số đợt trồng: {len(batch_df) if isinstance(batch_df, pd.DataFrame) else 0}")
+    else:
+        st.caption(f"Số đợt trồng: {len(batch_df) if isinstance(batch_df, pd.DataFrame) else 0}")
+
+    for warning in result.get("warnings", []):
+        st.warning(warning)
+
+    summary = result.get("summary", {})
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Nhân công", _format_money(summary.get("total_labor", 0)))
+    m2.metric("Vật tư", _format_money(summary.get("total_material", 0)))
+    m3.metric("Tổng chi phí", _format_money(summary.get("total_cost", 0)))
+    m4.metric("Chi phí/cây TB", _format_money(summary.get("avg_cost_per_tree", 0)))
+
+    if not isinstance(batch_df, pd.DataFrame) or batch_df.empty:
+        st.info("Lô này chưa có đợt trồng mới để tính chi phí/cây.")
+    else:
+        batch_view = batch_df.copy().sort_values("dot")
+        batch_display = pd.DataFrame({
+            "Đợt": batch_view["dot"].apply(lambda x: f"Đợt {int(x)}"),
+            "Vụ": batch_view.get("vu", ""),
+            "Ngày trồng": batch_view["ngay_trong"].astype(str),
+            "Số cây": batch_view["so_cay"].astype(int),
+            "Chi phí nhân công": batch_view["labor_cost"].round(0).astype(int),
+            "Chi phí vật tư": batch_view["material_cost"].round(0).astype(int),
+            "Tổng chi phí": batch_view["total_cost"].round(0).astype(int),
+            "Chi phí/cây": batch_view["cost_per_tree"].round(0).astype(int),
+        })
+        st.markdown("##### Theo từng đợt trồng")
+        st.dataframe(batch_display, use_container_width=True, hide_index=True)
+
+    cost_df = result.get("costs", pd.DataFrame())
+    if isinstance(cost_df, pd.DataFrame) and not cost_df.empty:
+        cost_df = cost_df.copy()
+        cost_df["ngay_dt"] = pd.to_datetime(cost_df["ngay"], errors="coerce")
+        with st.expander("Breakdown theo nguồn", expanded=True):
+            source_df = cost_df.groupby("source", dropna=False)["amount"].sum().reset_index()
+            source_df.columns = ["Nguồn", "Thành tiền"]
+            source_df["Thành tiền"] = source_df["Thành tiền"].round(0).astype(int)
+            st.dataframe(source_df, use_container_width=True, hide_index=True)
+        with st.expander("Breakdown theo tháng", expanded=False):
+            month_df = cost_df.dropna(subset=["ngay_dt"]).copy()
+            month_df["Tháng"] = month_df["ngay_dt"].dt.strftime("%Y-%m")
+            month_df = month_df.groupby(["Tháng", "source"], dropna=False)["amount"].sum().reset_index()
+            month_df.columns = ["Tháng", "Nguồn", "Thành tiền"]
+            month_df["Thành tiền"] = month_df["Thành tiền"].round(0).astype(int)
+            st.dataframe(month_df, use_container_width=True, hide_index=True)
+        with st.expander("Breakdown theo hạng mục / công việc / vật tư", expanded=False):
+            detail_df = cost_df.groupby(["source", "category", "detail"], dropna=False)["amount"].sum().reset_index()
+            detail_df.columns = ["Nguồn", "Hạng mục", "Chi tiết", "Thành tiền"]
+            detail_df = detail_df.sort_values("Thành tiền", ascending=False)
+            detail_df["Thành tiền"] = detail_df["Thành tiền"].round(0).astype(int)
+            st.dataframe(detail_df, use_container_width=True, hide_index=True)
+
+    unallocated_df = result.get("unallocated", pd.DataFrame())
+    if isinstance(unallocated_df, pd.DataFrame) and not unallocated_df.empty:
+        with st.expander("Chi phí chưa phân bổ", expanded=False):
+            view = unallocated_df.copy()
+            view = view.rename(columns={
+                "source": "Nguồn",
+                "ngay": "Ngày",
+                "amount": "Thành tiền",
+                "category": "Hạng mục",
+                "detail": "Chi tiết",
+            })
+            view["Thành tiền"] = view["Thành tiền"].round(0).astype(int)
+            st.dataframe(view[["Ngày", "Nguồn", "Hạng mục", "Chi tiết", "Thành tiền"]], use_container_width=True, hide_index=True)
+
+    if st.button("Đóng", key=f"close_lot_cost_dialog_{farm_name}_{lo_name}"):
+        _clear_cost_query_params()
+        st.rerun()
+
+
+def _maybe_render_lot_cost_dialog(current_farm: str):
+    farm_name = _query_param_value("cost_farm")
+    lo_name = _query_param_value("cost_lot")
+    if not farm_name or not lo_name:
+        return
+    if current_farm not in ["Admin", "Phòng Kinh doanh", farm_name]:
+        st.warning("Bạn không có quyền xem chi phí của farm này.")
+        _clear_cost_query_params()
+        return
+    _render_lot_cost_dialog(str(farm_name), str(lo_name))
+
 
 def lookup_ribbon(farm_id, year, week):
     """Lookup ribbon color for (farm, year, week). Returns color_name or None."""
@@ -2401,6 +2751,8 @@ def render_global_data_tab(c_farm):
     df_tree_inv_all = fetch_table_data("tree_inventory_logs", c_farm)
     df_seasons = fetch_table_data("seasons", c_farm)
 
+    _maybe_render_lot_cost_dialog(c_farm)
+
     # ─── Phân loại Trồng mới vs Trồng dặm ───
     # loai_trong nằm trực tiếp trong base_lots (sau migration add_loai_trong_to_base_lots)
     # Trồng dặm KHÔNG phải đợt trồng độc lập → tách riêng khỏi forecast & bảng chi tiết
@@ -3144,12 +3496,13 @@ def render_global_data_tab(c_farm):
             dt_trong_str = f'{dt_trong:.2f} ha' if dt_trong > 0 else "—"
             total_cay = info.get("total_cay", 0)
             batches_json = json.dumps(info.get("batches", []), ensure_ascii=False).replace('"', '&quot;')
+            cost_url = html.escape(_current_query_params_with_cost(farm_name, name), quote=True)
             poly_pts = [(p["x"], p["y"]) for p in lot["points"]]
             cx, cy = _map_best_label_pos(poly_pts)
             svg_polygons += f'''
             <polygon class="lot-poly" points="{points_str}" fill="{fill}"
                 data-name="{name}" data-area-ha="{area_ha_str}" data-dt-trong="{dt_trong_str}" data-total="{total_cay}"
-                data-gd="{giai_doan}" data-batches="{batches_json}" />
+                data-gd="{giai_doan}" data-batches="{batches_json}" data-cost-url="{cost_url}" />
             <text x="{cx:.0f}" y="{cy:.0f}" class="lot-label">{name}</text>
             '''
 
