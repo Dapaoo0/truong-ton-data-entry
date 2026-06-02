@@ -767,6 +767,10 @@ def _format_money_compact(value) -> str:
     return _format_money(amount)
 
 
+def _format_int_commas(value) -> str:
+    return f"{int(round(_money(value))):,}"
+
+
 def _fetch_paginated_rows(table_name: str, select_cols: str, filter_fn=None, order_col: str = None, page_size: int = 1000):
     rows = []
     start = 0
@@ -1044,11 +1048,11 @@ def _render_lot_cost_dialog(farm_name: str, lo_name: str):
             "Đợt": batch_view["dot"].apply(lambda x: f"Đợt {int(x)}"),
             "Vụ": batch_view.get("vu", ""),
             "Ngày trồng": batch_view["ngay_trong"].astype(str),
-            "Số cây": batch_view["so_cay"].astype(int),
-            "Chi phí nhân công": batch_view["labor_cost"].round(0).astype(int),
-            "Chi phí vật tư": batch_view["material_cost"].round(0).astype(int),
-            "Tổng chi phí": batch_view["total_cost"].round(0).astype(int),
-            "Chi phí/cây": batch_view["cost_per_tree"].round(0).astype(int),
+            "Số cây": batch_view["so_cay"].apply(_format_int_commas),
+            "Chi phí nhân công": batch_view["labor_cost"].apply(_format_int_commas),
+            "Chi phí vật tư": batch_view["material_cost"].apply(_format_int_commas),
+            "Tổng chi phí": batch_view["total_cost"].apply(_format_int_commas),
+            "Chi phí/cây": batch_view["cost_per_tree"].apply(_format_int_commas),
         })
         st.markdown("##### Theo từng đợt trồng")
         st.dataframe(batch_display, use_container_width=True, hide_index=True)
@@ -1060,20 +1064,20 @@ def _render_lot_cost_dialog(farm_name: str, lo_name: str):
         with st.expander("Breakdown theo nguồn", expanded=True):
             source_df = cost_df.groupby("source", dropna=False)["amount"].sum().reset_index()
             source_df.columns = ["Nguồn", "Thành tiền"]
-            source_df["Thành tiền"] = source_df["Thành tiền"].round(0).astype(int)
+            source_df["Thành tiền"] = source_df["Thành tiền"].apply(_format_int_commas)
             st.dataframe(source_df, use_container_width=True, hide_index=True)
         with st.expander("Breakdown theo tháng", expanded=False):
             month_df = cost_df.dropna(subset=["ngay_dt"]).copy()
             month_df["Tháng"] = month_df["ngay_dt"].dt.strftime("%Y-%m")
             month_df = month_df.groupby(["Tháng", "source"], dropna=False)["amount"].sum().reset_index()
             month_df.columns = ["Tháng", "Nguồn", "Thành tiền"]
-            month_df["Thành tiền"] = month_df["Thành tiền"].round(0).astype(int)
+            month_df["Thành tiền"] = month_df["Thành tiền"].apply(_format_int_commas)
             st.dataframe(month_df, use_container_width=True, hide_index=True)
         with st.expander("Breakdown theo hạng mục / công việc / vật tư", expanded=False):
             detail_df = cost_df.groupby(["source", "category", "detail"], dropna=False)["amount"].sum().reset_index()
             detail_df.columns = ["Nguồn", "Hạng mục", "Chi tiết", "Thành tiền"]
             detail_df = detail_df.sort_values("Thành tiền", ascending=False)
-            detail_df["Thành tiền"] = detail_df["Thành tiền"].round(0).astype(int)
+            detail_df["Thành tiền"] = detail_df["Thành tiền"].apply(_format_int_commas)
             st.dataframe(detail_df, use_container_width=True, hide_index=True)
 
     unallocated_df = result.get("unallocated", pd.DataFrame())
@@ -1087,7 +1091,7 @@ def _render_lot_cost_dialog(farm_name: str, lo_name: str):
                 "category": "Hạng mục",
                 "detail": "Chi tiết",
             })
-            view["Thành tiền"] = view["Thành tiền"].round(0).astype(int)
+            view["Thành tiền"] = view["Thành tiền"].apply(_format_int_commas)
             st.dataframe(view[["Ngày", "Nguồn", "Hạng mục", "Chi tiết", "Thành tiền"]], use_container_width=True, hide_index=True)
 
     if st.button("Đóng", key=f"close_lot_cost_dialog_{farm_name}_{lo_name}"):
