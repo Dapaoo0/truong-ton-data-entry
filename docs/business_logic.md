@@ -248,7 +248,7 @@ Hệ thống tự động liên kết log entries (stage_logs, harvest_logs, des
 
 ### 4.6 Ribbon Schedule (Quản lý Màu dây Tập trung)
 
-**Bảng `ribbon_schedule`** là nguồn dữ liệu duy nhất cho màu dây, thay thế cột `mau_day` cũ trên `stage_logs`, `destruction_logs`, `harvest_logs` (đã xóa).
+**Bảng `ribbon_schedule`** là nguồn chuẩn cho màu dây theo `(farm_id, year, week_number)`. `stage_logs` và `destruction_logs` resolve màu dây qua tuần; riêng `harvest_logs` lưu thêm `mau_day` ở cấp record vì một lô có thể thu nhiều màu dây trong cùng ngày.
 
 | Thuộc tính | Giá trị |
 |---|---|
@@ -261,7 +261,8 @@ Hệ thống tự động liên kết log entries (stage_logs, harvest_logs, des
 **Nơi sử dụng:**
 - Forecast engine: `_resolve_ribbon_color(row)` dùng `_ribbon_lookup` dict pre-computed
 - FIFO Strategy 3: Query `ribbon_schedule` để tìm tuần khớp màu dây → match `stage_logs.tuan`
-- Excel export: Resolve week-color từ `ribbon_schedule` thay vì `df_cut["mau_day"]`
+- Thu hoạch: user chọn `mau_day` từ các màu dây đang có; hệ thống map về tuần cắt có cùng màu dây, ưu tiên cửa sổ dự báo `+8/+9`.
+- Excel export: Resolve week-color từ `ribbon_schedule`; cột `Thu hoạch` lấy `harvest_logs.mau_day` để quy về tuần cắt nguồn.
 - UI display: Selectbox `build_color_selectbox` + `get_or_create_ribbon` validation
 
 ---
@@ -372,17 +373,17 @@ Hệ thống phân biệt **2 loại diện tích**:
 - Cột Lũy kế cuối bảng tổng cộng dồn riêng CẮT và HỦY.
 
 ### 9.2 Báo cáo Cắt bắp (`generate_cut_bap_excel`)
-- **Input**: `df_lots` (base_lots filtered), `df_stg` (stage_logs filtered), `df_des` (destruction_logs, `giai_doan == "Trước thu hoạch"`).
+- **Input**: `df_lots` (base_lots filtered), `df_stg` (stage_logs filtered), `df_des` (destruction_logs, `giai_doan == "Trước thu hoạch"`), `df_har` (harvest_logs).
 - **Layout**: Chia sheet theo năm. Mỗi sheet = 1 năm.
   - Cột A: Tên lô (sorted tự nhiên: 1A, 2A, 3A... không phải 10A, 11A, 1A).
-  - Mỗi tuần = 2 cột (CẮT BẮP | XUẤT HỦY).
-  - Cột cuối: **Lũy kế** = tổng cộng dồn theo lô (CẮT riêng, HỦY riêng).
+  - Mỗi tuần = 4 cột (CẮT BẮP | XUẤT HỦY | Thu hoạch | Tồn trên lô).
+  - Cột cuối: **Lũy kế** = tổng cộng dồn theo lô (CẮT, HỦY, THU, TỒN).
 - **Header 4 dòng** (`data_start_row = 5`, `freeze_panes = "B5"`):
   - **Row 1 — Dự báo thu hoạch**: `_forecast_harvest_label(cut_week, year)` → format `"25 (+8)/26 (+9)"`. Tính 8 tuần (mùa nắng) / 9 tuần (mùa mưa) kể từ tuần cắt bắp (tính cả tuần cắt). Nền vàng pastel (`#FFF9C4`), chữ bold italic. Xử lý chuyển năm ISO (52/53 tuần): `"5-2027 (+8)/6-2027 (+9)"`. Cột Lũy kế để trống.
-  - **Row 2 — Tuần X**: Số tuần ISO, merged 2 cột, nền xanh dương header (`#D9E1F2`).
-  - **Row 3 — Sub-headers**: "CẮT BẮP" | "XUẤT HỦY", nền trắng.
+  - **Row 2 — Tuần X**: Số tuần ISO, merged 4 cột, nền xanh dương header (`#D9E1F2`).
+  - **Row 3 — Sub-headers**: "CẮT BẮP" | "XUẤT HỦY" | "Thu hoạch" | "Tồn trên lô", nền trắng.
   - **Row 4 — Màu dây**: Từ `ribbon_schedule` (farm_id, year, week_number), nền theo COLOR_MAP.
-- **Data matching**: `base_lot_id` (ưu tiên) hoặc fallback `df_cut["lo"] == lo_name`.
+- **Data matching**: `base_lot_id` (ưu tiên) hoặc fallback `df_cut["lo"] == lo_name`. Thu hoạch map bằng `harvest_logs.mau_day` về tuần cắt cùng màu dây, ưu tiên tuần có dự báo `+8/+9` trùng tuần thu hoạch thực tế.
 - **Type safety**: `tuan` → `pd.to_numeric().astype(int)`, `_year` → `.astype(int)`.
 - **Lot union**: Tên lô lấy từ CẢ `base_lots` VÀ `stage_logs`/`destruction_logs` (tránh miss lô chỉ tồn tại trong 1 nguồn).
 

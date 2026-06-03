@@ -1797,6 +1797,61 @@ def get_current_season_used(bid: int, log_type: str, giai_doan: str = None, excl
     res = q.execute()
     return sum(int(r["so_luong"]) for r in res.data if r["id"] != exclude_id) if res.data else 0
 
+def _iso_year_week(value):
+    dt = pd.to_datetime(value)
+    iso = dt.isocalendar()
+    return int(iso.year), int(iso.week)
+
+def _shift_iso_week(year: int, week: int, week_offset: int):
+    from datetime import date as _date, timedelta as _timedelta
+    shifted = _date.fromisocalendar(int(year), int(week), 1) + _timedelta(weeks=int(week_offset))
+    iso = shifted.isocalendar()
+    return int(iso.year), int(iso.week)
+
+def get_ribbon_cut_week_candidates_for_harvest(farm_id, mau_day, harvest_date):
+    """Trả về các tuần cắt bắp ứng với màu dây thu hoạch.
+
+    Ưu tiên tuần cắt có dự báo +8/+9 trùng tuần thu hoạch thực tế.
+    Fallback về mọi tuần có cùng màu dây để dữ liệu vẫn nhập được khi lệch lịch.
+    """
+    if not farm_id or not mau_day or not harvest_date:
+        return []
+    ribbon_res = supabase.table("ribbon_schedule").select("year, week_number") \
+        .eq("farm_id", farm_id).eq("color_name", mau_day).eq("is_deleted", False).execute()
+    candidates = [
+        (int(r["year"]), int(r["week_number"]))
+        for r in (ribbon_res.data or [])
+        if r.get("year") is not None and r.get("week_number") is not None
+    ]
+    if not candidates:
+        return []
+    harvest_pair = _iso_year_week(harvest_date)
+    exact = [
+        pair for pair in candidates
+        if _shift_iso_week(pair[0], pair[1], 7) == harvest_pair
+        or _shift_iso_week(pair[0], pair[1], 8) == harvest_pair
+    ]
+    return exact or candidates
+
+def get_cut_quantity_for_ribbon_candidates(base_lot_id, candidate_pairs):
+    """Tổng Cắt bắp của một base_lot thuộc các tuần/màu dây nguồn đã chọn."""
+    candidate_set = {(int(y), int(w)) for y, w in (candidate_pairs or [])}
+    if not candidate_set:
+        return 0
+    res = supabase.table("stage_logs").select("so_luong, ngay_thuc_hien, tuan") \
+        .eq("base_lot_id", base_lot_id).eq("giai_doan", "Cắt bắp").eq("is_deleted", False).execute()
+    total = 0
+    for row in (res.data or []):
+        row_date = row.get("ngay_thuc_hien")
+        if not row_date:
+            continue
+        row_year, row_week = _iso_year_week(row_date)
+        if row.get("tuan") is not None:
+            row_week = int(row["tuan"])
+        if (row_year, row_week) in candidate_set:
+            total += int(row.get("so_luong") or 0)
+    return total
+
 def get_available_capacity_for_lot(farm_name, lot_id_str, log_type, giai_doan=None, exclude_id=None):
     dim_id = get_dim_lo_id(farm_name, lot_id_str)
     if not dim_id: return 0, 0
@@ -1886,8 +1941,16 @@ def allocate_fifo_quantity(farm_name, lo_name, new_sl, log_type, target_date, ac
             cap = total_chich - total_cat
 
         elif log_type == "harvest":
-            total_cat = get_current_season_used(bid, "stage", "Cắt bắp")
-            total_har = get_current_season_used(bid, "harvest")
+            if mau_day:
+                farm_id = get_farm_id_from_name(farm_name)
+                candidate_pairs = get_ribbon_cut_week_candidates_for_harvest(farm_id, mau_day, target_date)
+                total_cat = get_cut_quantity_for_ribbon_candidates(bid, candidate_pairs)
+                har_q = supabase.table("harvest_logs").select("so_luong") \
+                    .eq("base_lot_id", bid).eq("mau_day", mau_day).eq("is_deleted", False).execute()
+                total_har = sum(int(r["so_luong"]) for r in (har_q.data or []))
+            else:
+                total_cat = get_current_season_used(bid, "stage", "Cắt bắp")
+                total_har = get_current_season_used(bid, "harvest")
             cap = total_cat - total_har
 
         else:
@@ -2475,7 +2538,9 @@ def edit_harvest_log_dialog(editing_row, available_lots):
             ribbons = get_all_ribbons_for_farm(farm_id) if farm_id else []
             ribbon_opts = sorted({r["color_name"] for r in ribbons})
             if ribbon_opts:
-                mau_day_color = st.selectbox("🎨 Màu dây", options=ribbon_opts, key="dlg_mau_har_sel")
+                def_mau = str(editing_row.get("mau_day", ""))
+                mau_idx = ribbon_opts.index(def_mau) if def_mau in ribbon_opts else 0
+                mau_day_color = st.selectbox("🎨 Màu dây", options=ribbon_opts, index=mau_idx, key="dlg_mau_har_sel")
             else:
                 st.warning("⚠️ Farm chưa có màu dây trong ribbon_schedule.")
                 mau_day_color = None
@@ -2499,10 +2564,21 @@ def edit_harvest_log_dialog(editing_row, available_lots):
                     if not resolved_blid:
                         st.error("❌ Không còn đợt trồng nào đủ capacity để ghi nhận thu hoạch này. Vui lòng giảm số lượng hoặc nhập lại qua form thêm mới để hệ thống tự tách FIFO.")
                         st.stop()
+                    candidate_pairs = get_ribbon_cut_week_candidates_for_harvest(farm_id, mau_day_color, ngay.isoformat())
+                    color_cap = get_cut_quantity_for_ribbon_candidates(resolved_blid, candidate_pairs)
+                    har_same_color = supabase.table("harvest_logs").select("id, so_luong") \
+                        .eq("base_lot_id", resolved_blid).eq("mau_day", mau_day_color).eq("is_deleted", False).execute()
+                    used_same_color = sum(
+                        int(r["so_luong"]) for r in (har_same_color.data or [])
+                        if r.get("id") != editing_row["id"]
+                    )
+                    if sl > max(0, color_cap - used_same_color):
+                        st.error(f"❌ Màu dây `{mau_day_color}` chỉ còn {max(0, color_cap - used_same_color)} buồng có thể thu hoạch.")
+                        st.stop()
                     data = {
                         "ngay_thu_hoach": ngay.isoformat(), "so_luong": sl, 
                         "hinh_thuc_thu_hoach": hinh_thuc_thu_hoach, "tuan": ngay.isocalendar()[1],
-                        "base_lot_id": resolved_blid
+                        "base_lot_id": resolved_blid, "mau_day": mau_day_color
                     }
                     supabase.table("harvest_logs").update(data).eq("id", editing_row["id"]).execute()
                     st.session_state["toast"] = f"✅ Lưu thu hoạch {lot_id} thành công!"
@@ -2909,9 +2985,10 @@ def generate_chich_bap_excel(df_lots, df_stg) -> bytes:
     return output.getvalue()
 
 
-def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
-    """Tạo file Excel báo cáo Cắt bắp + Xuất hủy trước thu hoạch theo tuần.
-    Mỗi sheet = 1 năm. Mỗi tuần = 2 cột (CẮT BẮP | XUẤT HỦY)."""
+def generate_cut_bap_excel(df_lots, df_stg, df_des=None, df_har=None) -> bytes:
+    """Tạo file Excel báo cáo Cắt bắp theo tuần.
+    Mỗi sheet = 1 năm. Mỗi tuần = 4 cột (CẮT BẮP | XUẤT HỦY | Thu hoạch | Tồn trên lô).
+    Cột Thu hoạch dùng harvest_logs.mau_day để quy về tuần cắt bắp nguồn."""
     thin_border = Border(
         left=Side(style='thin'), right=Side(style='thin'),
         top=Side(style='thin'), bottom=Side(style='thin')
@@ -2936,6 +3013,7 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
     df_xh = pd.DataFrame()
     if df_des is not None and not df_des.empty and "giai_doan" in df_des.columns:
         df_xh = df_des[df_des["giai_doan"] == "Trước thu hoạch"].copy()
+    df_hv = df_har.copy() if df_har is not None and not df_har.empty else pd.DataFrame()
 
     wb = Workbook()
 
@@ -2957,6 +3035,13 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
         df_xh["_year"] = df_xh["ngay_xuat_huy"].dt.year.astype(int)
         df_xh["tuan"] = pd.to_numeric(df_xh["tuan"], errors="coerce").fillna(
             df_xh["ngay_xuat_huy"].dt.isocalendar().week
+        ).astype(int)
+
+    if not df_hv.empty and "ngay_thu_hoach" in df_hv.columns:
+        df_hv["ngay_thu_hoach"] = pd.to_datetime(df_hv["ngay_thu_hoach"])
+        df_hv["_year"] = df_hv["ngay_thu_hoach"].dt.year.astype(int)
+        df_hv["tuan"] = pd.to_numeric(df_hv["tuan"], errors="coerce").fillna(
+            df_hv["ngay_thu_hoach"].dt.isocalendar().week
         ).astype(int)
 
     # ── Build lot display names (chia đợt giống chích bắp) ──
@@ -2982,12 +3067,11 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
     lot_batch_keys = [x for x in lot_batch_keys if x[1] in active_blids_cut]
     mapped_blids = {x[1] for x in lot_batch_keys}
     for blid in active_blids_cut - mapped_blids:
-        lo_name = ""
-        if "lo" in df_cut.columns:
+        lo_name = f"Lot_{blid}"
+        if "lo" in df_cut.columns and "base_lot_id" in df_cut.columns:
             _m = df_cut[df_cut["base_lot_id"] == blid]["lo"]
-            lo_name = _m.iloc[0] if not _m.empty else f"Lot_{blid}"
-        else:
-            lo_name = f"Lot_{blid}"
+            if not _m.empty:
+                lo_name = _m.iloc[0]
         lot_batch_keys.append((lo_name, blid, lo_name))
 
     def _nat_sort_cut(item):
@@ -3009,7 +3093,10 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
         if _farm_name:
             _excel_farm_id = get_farm_id_from_name(_farm_name)
 
-    years = sorted(df_cut["_year"].unique())
+    years = set(df_cut["_year"].dropna().astype(int).unique())
+    if not df_xh.empty and "_year" in df_xh.columns:
+        years.update(df_xh["_year"].dropna().astype(int).unique())
+    years = sorted(years)
     wb.remove(wb.active)
 
     for year in years:
@@ -3036,6 +3123,35 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
         if not weeks:
             ws.cell(row=1, column=1, value=f"Chưa có dữ liệu năm {year}.")
             continue
+
+        harvest_by_blid_week = {}
+        if not df_hv.empty and {"base_lot_id", "mau_day", "ngay_thu_hoach", "so_luong"}.issubset(df_hv.columns):
+            color_to_weeks = {}
+            for wk, color in week_color.items():
+                if color:
+                    color_to_weeks.setdefault(str(color).strip(), []).append(int(wk))
+            for _, h_row in df_hv.iterrows():
+                blid = h_row.get("base_lot_id")
+                mau_day = str(h_row.get("mau_day") or "").strip()
+                ngay_har = h_row.get("ngay_thu_hoach")
+                if pd.isna(blid) or not mau_day or pd.isna(ngay_har):
+                    continue
+                candidate_weeks = color_to_weeks.get(mau_day, [])
+                if not candidate_weeks:
+                    continue
+                har_pair = _iso_year_week(ngay_har)
+                exact_weeks = [
+                    wk for wk in candidate_weeks
+                    if _shift_iso_week(year, wk, 7) == har_pair
+                    or _shift_iso_week(year, wk, 8) == har_pair
+                ]
+                # Nếu màu dây chỉ xuất hiện một lần trong sheet, cho phép map dù thu hoạch lệch vài ngày.
+                target_weeks = exact_weeks or (candidate_weeks if len(candidate_weeks) == 1 else [])
+                if not target_weeks:
+                    continue
+                qty = int(pd.to_numeric(pd.Series([h_row.get("so_luong")]), errors="coerce").fillna(0).iloc[0])
+                key = (int(blid), int(target_weeks[0]))
+                harvest_by_blid_week[key] = harvest_by_blid_week.get(key, 0) + qty
 
         # === Helper: forecast harvest label ===
         def _forecast_harvest_label(cut_week, cut_year):
@@ -3066,10 +3182,10 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
         forecast_fill = PatternFill(start_color="FFF9C4", end_color="FFF9C4", fill_type="solid")
 
         # === HEADER: 4 rows ===
-        # Row 1: "Lô" merged R1-R4 | Dự báo thu hoạch merged 2 cols
-        # Row 2: (merged)          | "Tuần X" merged across 2 cols
-        # Row 3: (merged)          | "CẮT BẮP" | "XUẤT HỦY"
-        # Row 4: (merged)          | màu dây    | màu dây
+        # Row 1: "Lô" merged R1-R4 | Dự báo thu hoạch merged 4 cols
+        # Row 2: (merged)          | "Tuần X" merged across 4 cols
+        # Row 3: (merged)          | "CẮT BẮP" | "XUẤT HỦY" | "Thu hoạch" | "Tồn trên lô"
+        # Row 4: (merged)          | màu dây    | màu dây    | màu dây     | màu dây
         ws.merge_cells(start_row=1, start_column=1, end_row=4, end_column=1)
         c_lo = ws.cell(row=1, column=1, value="Lô")
         c_lo.font = Font(bold=True, size=10); c_lo.fill = header_fill
@@ -3078,67 +3194,84 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
         col = 2
         week_cut_col = {}   # week -> col index of CẮT BẮP
         week_des_col = {}   # week -> col index of XUẤT HỦY
+        week_har_col = {}   # week -> col index of Thu hoạch
+        week_rem_col = {}   # week -> col index of Tồn trên lô
         for week in weeks:
             cut_col = col
             des_col = col + 1
+            har_col = col + 2
+            rem_col = col + 3
             week_cut_col[week] = cut_col
             week_des_col[week] = des_col
+            week_har_col[week] = har_col
+            week_rem_col[week] = rem_col
             color_name = week_color.get(week, "")
             color_fill_cell = get_mau_day_fill(color_name)
 
             # Row 1: Dự báo thu hoạch merged
             forecast_label = _forecast_harvest_label(week, year)
-            ws.merge_cells(start_row=1, start_column=cut_col, end_row=1, end_column=des_col)
+            ws.merge_cells(start_row=1, start_column=cut_col, end_row=1, end_column=rem_col)
             c_fc = ws.cell(row=1, column=cut_col, value=forecast_label)
             c_fc.font = Font(bold=True, size=9, italic=True); c_fc.fill = forecast_fill
             c_fc.alignment = center_align; c_fc.border = thin_border
-            ws.cell(row=1, column=des_col).border = thin_border
+            for c_i in range(cut_col, rem_col + 1):
+                ws.cell(row=1, column=c_i).border = thin_border
 
             # Row 2: "Tuần X" merged
-            ws.merge_cells(start_row=2, start_column=cut_col, end_row=2, end_column=des_col)
+            ws.merge_cells(start_row=2, start_column=cut_col, end_row=2, end_column=rem_col)
             c_w = ws.cell(row=2, column=cut_col, value=f"Tuần {week}")
             c_w.font = Font(bold=True, size=11); c_w.fill = header_fill
             c_w.alignment = center_align; c_w.border = thin_border
-            ws.cell(row=2, column=des_col).border = thin_border
+            for c_i in range(cut_col, rem_col + 1):
+                ws.cell(row=2, column=c_i).border = thin_border
 
-            # Row 3: "CẮT BẮP" | "XUẤT HỦY"
+            # Row 3: "CẮT BẮP" | "XUẤT HỦY" | "Thu hoạch" | "Tồn trên lô"
             c_cut = ws.cell(row=3, column=cut_col, value="CẮT BẮP")
             c_cut.font = Font(bold=True, size=9); c_cut.fill = white_fill
             c_cut.alignment = center_align; c_cut.border = thin_border
             c_des = ws.cell(row=3, column=des_col, value="XUẤT HỦY")
             c_des.font = Font(bold=True, size=9); c_des.fill = white_fill
             c_des.alignment = center_align; c_des.border = thin_border
+            c_har = ws.cell(row=3, column=har_col, value="Thu hoạch")
+            c_har.font = Font(bold=True, size=9, color="C00000"); c_har.fill = white_fill
+            c_har.alignment = center_align; c_har.border = thin_border
+            c_rem = ws.cell(row=3, column=rem_col, value="Tồn trên lô")
+            c_rem.font = Font(bold=True, size=9, color="C00000"); c_rem.fill = white_fill
+            c_rem.alignment = center_align; c_rem.border = thin_border
 
             # Row 4: màu dây
-            c_r4a = ws.cell(row=4, column=cut_col, value=color_name)
-            c_r4a.font = Font(bold=True, size=8)
-            c_r4a.fill = color_fill_cell if color_fill_cell else white_fill
-            c_r4a.alignment = center_align; c_r4a.border = thin_border
-            c_r4b = ws.cell(row=4, column=des_col, value=color_name)
-            c_r4b.font = Font(bold=True, size=8)
-            c_r4b.fill = color_fill_cell if color_fill_cell else white_fill
-            c_r4b.alignment = center_align; c_r4b.border = thin_border
+            for c_i in range(cut_col, rem_col + 1):
+                c_r4 = ws.cell(row=4, column=c_i, value=color_name)
+                c_r4.font = Font(bold=True, size=8)
+                c_r4.fill = color_fill_cell if color_fill_cell else white_fill
+                c_r4.alignment = center_align; c_r4.border = thin_border
 
-            col += 2
+            col += 4
 
-        # Lũy kế: 2 cols (CẮT + HỦY)
-        ws.merge_cells(start_row=1, start_column=col, end_row=2, end_column=col + 1)
+        # Lũy kế: 4 cols (CẮT + HỦY + THU + TỒN)
+        ws.merge_cells(start_row=1, start_column=col, end_row=2, end_column=col + 3)
         c_lk = ws.cell(row=1, column=col, value="Lũy kế")
         c_lk.font = Font(bold=True, size=11); c_lk.fill = total_fill
         c_lk.alignment = center_align; c_lk.border = thin_border
-        ws.cell(row=1, column=col + 1).border = thin_border
-        ws.cell(row=2, column=col).border = thin_border
-        ws.cell(row=2, column=col + 1).border = thin_border
+        for c_i in range(col, col + 4):
+            ws.cell(row=1, column=c_i).border = thin_border
+            ws.cell(row=2, column=c_i).border = thin_border
         lk_cut_col = col
         lk_des_col = col + 1
+        lk_har_col = col + 2
+        lk_rem_col = col + 3
         c_lk_c = ws.cell(row=3, column=lk_cut_col, value="CẮT"); c_lk_c.font = Font(bold=True, size=9)
         c_lk_c.fill = white_fill; c_lk_c.alignment = center_align; c_lk_c.border = thin_border
         c_lk_d = ws.cell(row=3, column=lk_des_col, value="HỦY"); c_lk_d.font = Font(bold=True, size=9)
         c_lk_d.fill = white_fill; c_lk_d.alignment = center_align; c_lk_d.border = thin_border
-        for c_i in [lk_cut_col, lk_des_col]:
+        c_lk_h = ws.cell(row=3, column=lk_har_col, value="THU"); c_lk_h.font = Font(bold=True, size=9, color="C00000")
+        c_lk_h.fill = white_fill; c_lk_h.alignment = center_align; c_lk_h.border = thin_border
+        c_lk_r = ws.cell(row=3, column=lk_rem_col, value="TỒN"); c_lk_r.font = Font(bold=True, size=9, color="C00000")
+        c_lk_r.fill = white_fill; c_lk_r.alignment = center_align; c_lk_r.border = thin_border
+        for c_i in [lk_cut_col, lk_des_col, lk_har_col, lk_rem_col]:
             ws.cell(row=4, column=c_i).border = thin_border
             ws.cell(row=4, column=c_i).fill = total_fill
-        last_col = lk_des_col
+        last_col = lk_rem_col
 
         # === DATA ===
         # Filter lot_batch_keys to only include lots with data this year
@@ -3156,6 +3289,7 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
             c.font = Font(bold=True); c.border = thin_border; c.alignment = center_align
             lot_cut_total = 0
             lot_des_total = 0
+            lot_har_total = 0
             for week in weeks:
                 # CẮT BẮP — filter by base_lot_id
                 cut_mask = (df_cut_yr["base_lot_id"] == blid) & (df_cut_yr["tuan"] == week) if "base_lot_id" in df_cut_yr.columns else (df_cut_yr["lo"] == lo_name) & (df_cut_yr["tuan"] == week)
@@ -3173,6 +3307,19 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
                 cell_d = ws.cell(row=row_idx, column=week_des_col[week], value=val_des if val_des > 0 else "")
                 cell_d.border = thin_border; cell_d.alignment = center_align
                 lot_des_total += val_des
+
+                # THU HOẠCH — map từ harvest_logs.mau_day về tuần cắt bắp nguồn.
+                val_har = int(harvest_by_blid_week.get((int(blid), int(week)), 0))
+                cell_h = ws.cell(row=row_idx, column=week_har_col[week], value=val_har if val_har > 0 else "")
+                cell_h.font = Font(color="C00000")
+                cell_h.border = thin_border; cell_h.alignment = center_align
+                lot_har_total += val_har
+
+                val_rem = val_cut - val_des - val_har
+                rem_value = val_rem if (val_cut > 0 or val_des > 0 or val_har > 0) else ""
+                cell_r = ws.cell(row=row_idx, column=week_rem_col[week], value=rem_value)
+                cell_r.font = Font(color="C00000")
+                cell_r.border = thin_border; cell_r.alignment = center_align
             # Lũy kế
             c_lc = ws.cell(row=row_idx, column=lk_cut_col, value=lot_cut_total if lot_cut_total > 0 else "")
             c_lc.font = Font(bold=True); c_lc.fill = PatternFill(start_color="FFF3E0", end_color="FFF3E0", fill_type="solid")
@@ -3180,6 +3327,13 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
             c_ld = ws.cell(row=row_idx, column=lk_des_col, value=lot_des_total if lot_des_total > 0 else "")
             c_ld.font = Font(bold=True); c_ld.fill = PatternFill(start_color="F3E5F5", end_color="F3E5F5", fill_type="solid")
             c_ld.border = thin_border; c_ld.alignment = center_align
+            c_lh = ws.cell(row=row_idx, column=lk_har_col, value=lot_har_total if lot_har_total > 0 else "")
+            c_lh.font = Font(bold=True, color="C00000"); c_lh.fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+            c_lh.border = thin_border; c_lh.alignment = center_align
+            lot_rem_total = lot_cut_total - lot_des_total - lot_har_total
+            c_lr = ws.cell(row=row_idx, column=lk_rem_col, value=lot_rem_total if (lot_cut_total > 0 or lot_des_total > 0 or lot_har_total > 0) else "")
+            c_lr.font = Font(bold=True, color="C00000"); c_lr.fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+            c_lr.border = thin_border; c_lr.alignment = center_align
 
         # === TOTAL ROW ===
         total_row = data_start_row + len(yr_lots)
@@ -3187,8 +3341,13 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None) -> bytes:
         c.font = Font(bold=True, size=11); c.fill = total_fill
         c.border = thin_border; c.alignment = center_align
         for ci in range(2, last_col + 1):
-            col_sum = sum(int(ws.cell(row=r, column=ci).value) for r in range(data_start_row, total_row) if isinstance(ws.cell(row=r, column=ci).value, (int, float)))
-            c_tot = ws.cell(row=total_row, column=ci, value=col_sum if col_sum > 0 else "")
+            values = [
+                int(ws.cell(row=r, column=ci).value)
+                for r in range(data_start_row, total_row)
+                if isinstance(ws.cell(row=r, column=ci).value, (int, float))
+            ]
+            col_sum = sum(values)
+            c_tot = ws.cell(row=total_row, column=ci, value=col_sum if values else "")
             c_tot.font = Font(bold=True); c_tot.fill = total_fill
             c_tot.border = thin_border; c_tot.alignment = center_align
 
@@ -3384,7 +3543,8 @@ def render_global_data_tab(c_farm):
                 fl = _filter_by_farm(df_lots_all, sel_cat)
                 fs = _filter_by_farm(df_stg_all, sel_cat)
                 fd = _filter_by_farm(df_des_all, sel_cat)
-                cut_excel = generate_cut_bap_excel(fl, fs, fd)
+                fh = _filter_by_farm(df_har_all, sel_cat)
+                cut_excel = generate_cut_bap_excel(fl, fs, fd, fh)
                 fn = f"Bao_cao_cat_bap_{sel_cat}_{date.today().strftime('%Y%m%d')}.xlsx"
                 st.download_button("⬇️ Tải về", data=cut_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
@@ -3405,7 +3565,7 @@ def render_global_data_tab(c_farm):
             st.markdown(href, unsafe_allow_html=True)
 
         with col_t4:
-            cut_excel = generate_cut_bap_excel(df_lots_all, df_stg_all, df_des_all)
+            cut_excel = generate_cut_bap_excel(df_lots_all, df_stg_all, df_des_all, df_har_all)
             fn = f"Bao_cao_cat_bap_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx"
             href = _gen_dl_link(cut_excel, fn, "btn-cat", "Báo cáo Cắt bắp")
             st.markdown(href, unsafe_allow_html=True)
@@ -8387,13 +8547,13 @@ def render_main_app():
                             return
                     success_count = 0
                     for item in queue:
-                        is_valid, msg, allocations = allocate_fifo_quantity(c_farm, item["Lô"], item["Số lượng"], "harvest", item["Ngày"], "Thu hoạch")
+                        is_valid, msg, allocations = allocate_fifo_quantity(c_farm, item["Lô"], item["Số lượng"], "harvest", item["Ngày"], "Thu hoạch", mau_day=item["Màu dây"])
                         if is_valid:
                             for alloc in allocations:
                                 data = {
                                     "farm": c_farm, "team": c_team, "ngay_thu_hoach": item["Ngày"],
                                     "hinh_thuc_thu_hoach": item["Hình thức"], "tuan": item["Tuần"], "lot_id": alloc["lot_id"], "so_luong": alloc["so_luong"],
-                                    "base_lot_id": alloc.get("base_lot_id")
+                                    "base_lot_id": alloc.get("base_lot_id"), "mau_day": item["Màu dây"]
                                 }
                                 if not insert_to_db("harvest_logs", data):
                                     st.error(f"❌ Lỗi ghi phân rã {alloc['lot_id']}")
@@ -8423,7 +8583,7 @@ def render_main_app():
                 elif is_editing and not is_within_48h:
                     with col_e: st.caption("🔒 Quá 48h")
                     
-                render_team_dataframe("harvest_logs", df_har_team, ["lot_id", "ngay_thu_hoach", "so_luong", "hinh_thuc_thu_hoach", "created_at"])
+                render_team_dataframe("harvest_logs", df_har_team, ["lot_id", "mau_day", "ngay_thu_hoach", "so_luong", "hinh_thuc_thu_hoach", "created_at"])
 
         elif active_tab == tab_opts[1]:
             render_global_data_tab(c_farm)

@@ -468,7 +468,7 @@ Tài liệu này ghi lại chi tiết toàn bộ cấu trúc cơ sở dữ liệ
 **Ý nghĩa:** Log lưu quá trình thu hoạch chuối.
 
 **Ghi chú nghiệp vụ:**
-- Cột `mau_day` đã được xóa (migration 08/05/2026). Màu dây resolve từ `ribbon_schedule` qua `(farm_id, year, tuan)`.
+- `mau_day` là màu dây nguồn của lứa thu hoạch. Thu hoạch có thể xảy ra cùng ngày/cùng lô nhưng nhiều màu dây, nên cần lưu ở cấp record để đối chiếu về tuần cắt bắp trong báo cáo.
 
 | Tên Trường (Field) | Kiểu Dữ Liệu (Type) | Bắt Buộc (Required) | Ý Nghĩa / Ghi Chú |
 |---|---|---|---|
@@ -481,9 +481,10 @@ Tài liệu này ghi lại chi tiết toàn bộ cấu trúc cơ sở dữ liệ
 | hinh_thuc_thu_hoach | text | Không | - |
 | dim_lo_id | integer | Không | ID định danh/Khóa ngoại |
 | base_lot_id | integer | Không | FK → base_lots.id — Đợt trồng tương ứng, auto-resolved bằng timeline sinh trưởng |
+| mau_day | text | Không | Màu dây nguồn, chọn từ `ribbon_schedule.color_name`; dùng để map thu hoạch thực tế về tuần cắt bắp nguồn |
 
 ## public.ribbon_schedule
-**Ý nghĩa:** Bảng lịch trình màu dây (ribbon color) chuẩn hóa theo farm, năm và tuần. Đây là **nguồn dữ liệu duy nhất (single source of truth)** cho màu dây, thay thế cột `mau_day` trước đây trên `stage_logs`, `destruction_logs`, `harvest_logs`.
+**Ý nghĩa:** Bảng lịch trình màu dây (ribbon color) chuẩn hóa theo farm, năm và tuần. Đây là nguồn chuẩn cho màu dây theo tuần cắt bắp; `harvest_logs.mau_day` lưu màu thực tế người dùng chọn để đối chiếu về tuần nguồn.
 
 **Ghi chú nghiệp vụ:**
 - Mỗi farm chỉ có **1 màu dây cho 1 tuần cụ thể**. Màu dây có thể được tái sử dụng ở các tuần khác nhau (VD: tuần 2 = cam, tuần 22 = cam).
