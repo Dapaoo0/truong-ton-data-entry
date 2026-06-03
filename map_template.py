@@ -47,6 +47,8 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
     viewbox_h = img_h / map_zoom
     viewbox_x = (img_w - viewbox_w) / 2
     viewbox_y = (img_h - viewbox_h) / 2
+    viewport_aspect_w = max(1, viewbox_w)
+    viewport_aspect_h = max(1, viewbox_h)
 
     return f'''
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
@@ -76,10 +78,20 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
             overflow: hidden;
             border: 1px solid #2d3460;
         }}
-        .farm-map-container svg {{
+        .map-viewport {{
+            position: relative;
+            width: 100%;
+            max-width: 100%;
+            aspect-ratio: {viewport_aspect_w:.6f} / {viewport_aspect_h:.6f};
+            background: #1a1a2e;
+            overflow: hidden;
+        }}
+        .map-viewport svg {{
+            position: absolute;
+            inset: 0;
             display: block;
             width: 100%;
-            height: auto;
+            height: 100%;
         }}
         .lot-poly {{
             fill-opacity: 0.45;
@@ -370,8 +382,9 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
     </style>
 
     <div class="farm-map-container" id="farmMapContainer">
+        <div class="map-viewport" id="farmMapViewport">
         <svg viewBox="{viewbox_x:.2f} {viewbox_y:.2f} {viewbox_w:.2f} {viewbox_h:.2f}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
-            <rect width="{img_w}" height="{img_h}" fill="#1a1a2e"/>
+            <rect x="{viewbox_x:.2f}" y="{viewbox_y:.2f}" width="{viewbox_w:.2f}" height="{viewbox_h:.2f}" fill="#1a1a2e"/>
             {svg_polygons}
         </svg>
         <div class="map-tooltip" id="mapTooltip"></div>
@@ -379,12 +392,14 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
             <div class="info-title">Diện tích Farm</div>
             {info_panel_html}
         </div>
+        </div>
         <div class="legend-bar">{legend_html}</div>
     </div>
 
     <script>
     (function() {{
-        const container = document.getElementById('farmMapContainer');
+        const mapRoot = document.getElementById('farmMapContainer');
+        const container = document.getElementById('farmMapViewport');
         const tooltip = document.getElementById('mapTooltip');
         const polys = container.querySelectorAll('.lot-poly');
         const stageColors = {stage_colors_json};
@@ -582,7 +597,7 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
             }}
 
             function fitHeight() {{
-                var c = document.querySelector('.farm-map-container');
+                var c = mapRoot || document.querySelector('.farm-map-container');
                 if (!c) return;
                 var h = c.getBoundingClientRect().height;
                 if (h < 50) return;
