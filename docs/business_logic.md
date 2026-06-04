@@ -406,14 +406,16 @@ Dashboard chi phí/cây được mở từ tooltip của bản đồ Farm 126/15
 - **Phạm vi lô**: cột lô (`lo_id`/tên lô nguồn) quyết định chi phí thuộc đâu; `doi_id` chỉ là đội thực hiện, không dùng để suy ra lô chịu chi phí.
 - **Lô cụ thể**: nếu dòng chi phí ghi lô thật (`A8`, `D4`, `3B`, `8A`...) thì cộng 100% vào lô đó, bất kể đội nào thực hiện.
 - **Lô chung theo đội**: nếu dòng ghi `NT1`, `NT2` hoặc tên cũ `NT3+NT4` thì chia cho các lô thuộc nhóm đó theo tỷ lệ diện tích. Farm 157: `8A` thuộc nhóm `NT2` (tên cũ `NT3+NT4`).
-- **Chi phí chung toàn farm**: nếu dòng ghi `Farm xxx`, `Vườn Ươm`, `Nhà Đội`, `Cơ giới`, `Điện nước`, `BVTV`, `Thu hoạch`, `Trồng mới`, hoặc `lo_id` rỗng/mô tả chung farm thì chia toàn farm theo tỷ lệ diện tích. Farm 195 hiện chưa lập đội NT nên mọi chi phí chung không phải lô cụ thể đều chia toàn farm.
+- **Chi phí chung toàn farm**: nếu dòng ghi `Farm xxx`, `Vườn Ươm`, `Nhà Đội`, `Cơ giới`, `Điện nước`, `BVTV`, `Trồng mới`, hoặc `lo_id` rỗng/mô tả chung farm thì chia toàn farm theo tỷ lệ diện tích active. Farm 195 hiện chưa lập đội NT nên mọi chi phí chung không phải lô cụ thể đều chia toàn farm.
 - **Không xác định**: nhãn lô không phải lô thật, không phải đội, và không phải phạm vi chung farm thì không tự động chia toàn farm để tránh làm lệch chi phí/cây.
 - **Giữ dữ liệu gốc**: không loại trừ dòng gộp/rollup như `Chăm sóc vườn`, `Chăm sóc buồng`, `Điện, Phân, và Nước`; số liệu phản ánh tổng hiện có trong fact table.
 - **Mẫu số**: tính theo từng đợt `base_lots.loai_trong = "Trồng mới"`. Trồng dặm không tạo đợt chi phí riêng trong v1.
-- **Trọng số phân bổ lô**: ưu tiên `base_lots.dien_tich_trong` tại ngày phát sinh chi phí; nếu thiếu thì fallback `dim_lo.area_ha`. Chỉ lô đã có đợt trồng active tại ngày chi phí (`ngay_trong <= ngay`) mới nhận phần chia.
-- **Phân bổ nhiều đợt**: vì fact chi phí hiện chỉ có `lo_id`, không có `base_lot_id`, mỗi dòng chi phí theo ngày được chia cho các đợt trồng đang active tại ngày đó (`ngay_trong <= ngay`) theo tỷ lệ `so_luong` của từng đợt.
+- **Vòng đời đợt trồng**: mỗi đợt nhận chi phí từ `ngay_trong` đến `seasons.ngay_ket_thuc_thuc_te`; nếu chưa có ngày kết thúc thì đợt vẫn active. Nếu không có season mở, ngày thu hoạch/xuất hủy đủ cây có thể đóng vòng đời đợt.
+- **Trọng số phân bổ lô**: ưu tiên `base_lots.dien_tich_trong` của các đợt active tại ngày phát sinh chi phí; nếu thiếu thì fallback theo tỷ lệ số cây active hoặc `dim_lo.area_ha`. Lô/đợt cũ đã kết thúc không còn nhận chi phí mới.
+- **Phân bổ nhiều đợt**: vì fact chi phí hiện chỉ có `lo_id`, không có `base_lot_id`, mỗi dòng chi phí theo ngày được chia cho các đợt trồng đang active tại ngày đó theo tỷ lệ `so_luong` của từng đợt.
+- **Chi phí thu hoạch**: chỉ nhận diện khi `công đoạn/hạng mục/công việc/mã chuẩn` có nghĩa là `Thu hoạch`; không coi `Chăm sóc buồng` là thu hoạch. Dòng thu hoạch chỉ phân bổ cho đợt đã có `harvest_logs` tương ứng và chia theo sản lượng thu hoạch; nếu chưa có harvest phù hợp thì đưa vào chi phí chưa phân bổ, không ép vào cây mới.
 - **Công thức**:
   - `chi_phi_lot = chi_phi_dong * dien_tich_lot_active / tong_dien_tich_scope_active`
   - `chi_phi_phan_bo_dot = chi_phi_dong * so_cay_dot / tong_so_cay_cac_dot_active`
   - `chi_phi_cay_dot = tong_chi_phi_phan_bo_dot / so_cay_dot`
-- **Không phân bổ**: dòng chi phí trước mọi ngày trồng hoặc thiếu ngày được đưa vào nhóm "Chi phí chưa phân bổ" để user kiểm tra.
+- **Không phân bổ**: dòng chi phí trước mọi ngày trồng, thiếu ngày, ngoài vòng đời đợt trồng, hoặc chi phí thu hoạch chưa có harvest tương ứng được đưa vào nhóm "Chi phí chưa phân bổ" để user kiểm tra.

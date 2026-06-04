@@ -24,6 +24,14 @@ import html
 import re
 import unicodedata
 import inspect
+from cost_lifecycle import (
+    build_batch_lifecycle,
+    build_harvest_rows_by_batch,
+    harvest_quantity_for_batch_until,
+    is_batch_active_on_date,
+    is_harvest_related_cost,
+    lot_weight_on_date as lifecycle_lot_weight_on_date,
+)
 
 FARM_MAP_COMPONENT_PATH = os.path.join(os.path.dirname(__file__), "components", "farm_map")
 farm_map_component = components.declare_component("farm_map_component", path=FARM_MAP_COMPONENT_PATH)
@@ -909,20 +917,7 @@ def _team_group_for_physical_lot(farm_name: str, lot_row: dict, doi_map: dict) -
 
 
 def _lot_weight_on_date(lot_id, cost_dt, plantings_by_lot: dict, lot_meta_by_id: dict) -> float:
-    if pd.isna(cost_dt):
-        return 0.0
-    active_rows = [
-        row for row in plantings_by_lot.get(lot_id, [])
-        if row.get("ngay_trong_ts") is not None
-        and not pd.isna(row.get("ngay_trong_ts"))
-        and row.get("ngay_trong_ts") <= cost_dt
-    ]
-    if not active_rows:
-        return 0.0
-    planted_area = sum(_money(row.get("dien_tich_trong")) for row in active_rows)
-    if planted_area > 0:
-        return planted_area
-    return _money((lot_meta_by_id.get(lot_id) or {}).get("area_ha"))
+    return lifecycle_lot_weight_on_date(lot_id, cost_dt, plantings_by_lot, lot_meta_by_id)
 
 
 def _fetch_dimension_map(table_name: str, id_col: str, select_cols: str, ids):
@@ -970,6 +965,7 @@ def _handle_map_cost_event(event, rerun_on_open: bool = False):
 
 @st.cache_data(ttl=LOT_COST_CACHE_TTL_SECONDS, show_spinner=False)
 def _calculate_lot_cost_per_tree_direct_only(farm_name: str, lo_name: str) -> dict:
+    return calculate_lot_cost_per_tree(farm_name, lo_name)
     farm_id = get_farm_id_from_name(farm_name)
     dim_lo_id = get_dim_lo_id(farm_name, lo_name)
     if not farm_id or not dim_lo_id:
@@ -1089,18 +1085,40 @@ def _calculate_lot_cost_per_tree_direct_only(farm_name: str, lo_name: str) -> di
         if amount == 0:
             continue
         cost_dt = pd.to_datetime(cost.get("ngay"), errors="coerce")
-        active_batches = [
-            b for b in batch_rows
-            if b["ngay_trong_ts"] is not None and not pd.isna(b["ngay_trong_ts"])
-            and not pd.isna(cost_dt) and b["ngay_trong_ts"] <= cost_dt
-            and int(b.get("so_cay") or 0) > 0
-        ]
-        active_trees = sum(int(b.get("so_cay") or 0) for b in active_batches)
-        if active_trees <= 0:
-            unallocated_rows.append(cost)
-            continue
+        if cost.get("is_harvest_related"):
+            batch_weights = {
+                b["base_lot_id"]: harvest_quantity_for_batch_until(
+                    harvest_rows_by_batch, b["base_lot_id"], cost_dt
+                )
+                for b in batch_rows
+            }
+            active_batches = [
+                b for b in batch_rows
+                if batch_weights.get(b["base_lot_id"], 0) > 0
+                and int(b.get("so_cay") or 0) > 0
+            ]
+            active_trees = sum(batch_weights.get(b["base_lot_id"], 0) for b in active_batches)
+            if active_trees <= 0:
+                blocked = dict(cost)
+                blocked["unallocated_reason"] = "Chi phí thu hoạch chưa có thu hoạch tương ứng"
+                unallocated_rows.append(blocked)
+                continue
+        else:
+            batch_weights = {}
+            active_batches = [
+                b for b in batch_rows
+                if is_batch_active_on_date(b, cost_dt)
+                and int(b.get("so_cay") or 0) > 0
+            ]
+            active_trees = sum(int(b.get("so_cay") or 0) for b in active_batches)
+            if active_trees <= 0:
+                blocked = dict(cost)
+                blocked["unallocated_reason"] = "Ngoài vòng đời đợt trồng hoặc thiếu ngày"
+                unallocated_rows.append(blocked)
+                continue
         for batch in active_batches:
-            share = amount * int(batch["so_cay"]) / active_trees
+            weight = batch_weights.get(batch["base_lot_id"], int(batch["so_cay"]))
+            share = amount * weight / active_trees
             if cost["source"] == "Nhân công":
                 batch["labor_cost"] += share
             else:
@@ -1121,8 +1139,8 @@ def _calculate_lot_cost_per_tree_direct_only(farm_name: str, lo_name: str) -> di
         batch["total_cost"] = batch["labor_cost"] + batch["material_cost"]
         batch["cost_per_tree"] = batch["total_cost"] / batch["so_cay"] if batch["so_cay"] > 0 else 0.0
 
-    cost_df = pd.DataFrame(cost_rows)
     allocation_df = pd.DataFrame(allocation_rows)
+    cost_df = allocation_df.copy()
     unallocated_df = pd.DataFrame(unallocated_rows)
     batch_df = pd.DataFrame(batch_rows)
 
@@ -1132,10 +1150,21 @@ def _calculate_lot_cost_per_tree_direct_only(farm_name: str, lo_name: str) -> di
         allocated_tree_denominator = int(batch_df["so_cay"].sum())
     total_labor = sum(_money(r.get("amount")) for r in cost_rows if r.get("source") == "Nhân công")
     total_material = sum(_money(r.get("amount")) for r in cost_rows if r.get("source") == "Vật tư")
+    total_labor = float(batch_df["labor_cost"].sum()) if not batch_df.empty else 0.0
+    total_material = float(batch_df["material_cost"].sum()) if not batch_df.empty else 0.0
+    total_labor = float(batch_df["labor_cost"].sum()) if not batch_df.empty else 0.0
+    total_material = float(batch_df["material_cost"].sum()) if not batch_df.empty else 0.0
     warnings = []
     if len(batch_rows) > 1:
         warnings.append("Lô có nhiều đợt trồng: chi phí từng ngày được chia theo tỷ lệ số cây của các đợt đang active.")
     if not unallocated_df.empty:
+        reasons = unallocated_df.get("unallocated_reason", pd.Series([""] * len(unallocated_df)))
+        harvest_count = int((reasons == "Chi phĂ­ thu hoáº¡ch chÆ°a cĂ³ thu hoáº¡ch tÆ°Æ¡ng á»©ng").sum())
+        outside_count = int((reasons == "NgoĂ i vĂ²ng Ä‘á»i Ä‘á»£t trá»“ng hoáº·c thiáº¿u ngĂ y").sum())
+        if harvest_count:
+            warnings.append(f"CĂ³ {harvest_count:,} dĂ²ng chi phĂ­ thu hoáº¡ch Ä‘Æ°á»£c tĂ¡ch riĂªng vĂ¬ chÆ°a cĂ³ thu hoáº¡ch tÆ°Æ¡ng á»©ng.")
+        if outside_count:
+            warnings.append(f"CĂ³ {outside_count:,} dĂ²ng chi phĂ­ ngoĂ i vĂ²ng Ä‘á»i Ä‘á»£t trá»“ng hoáº·c thiáº¿u ngĂ y.")
         warnings.append(f"Có {len(unallocated_df):,} dòng chi phí trước ngày trồng hoặc thiếu ngày nên chưa phân bổ vào đợt nào.")
 
     return {
@@ -1181,6 +1210,33 @@ def _fetch_lot_cost_context(farm_id, today_iso: str) -> dict:
             order_col="ngay_trong",
         )
 
+    all_base_lot_ids = [
+        row.get("id") for row in all_planting_rows
+        if row.get("id") is not None and not pd.isna(row.get("id"))
+    ]
+    season_rows = []
+    harvest_lifecycle_rows = []
+    destruction_lifecycle_rows = []
+    if all_base_lot_ids:
+        season_rows = _fetch_paginated_rows(
+            "seasons",
+            "base_lot_id, vu, ngay_bat_dau, ngay_ket_thuc_thuc_te, is_deleted",
+            lambda q: q.in_("base_lot_id", all_base_lot_ids).eq("is_deleted", False),
+            order_col="ngay_bat_dau",
+        )
+        harvest_lifecycle_rows = _fetch_paginated_rows(
+            "harvest_logs",
+            "base_lot_id, ngay_thu_hoach, so_luong, is_deleted",
+            lambda q: q.in_("base_lot_id", all_base_lot_ids).eq("is_deleted", False),
+            order_col="ngay_thu_hoach",
+        )
+        destruction_lifecycle_rows = _fetch_paginated_rows(
+            "destruction_logs",
+            "base_lot_id, ngay_xuat_huy, so_luong, is_deleted",
+            lambda q: q.in_("base_lot_id", all_base_lot_ids).eq("is_deleted", False),
+            order_col="ngay_xuat_huy",
+        )
+
     labor_rows = _fetch_paginated_rows(
         "fact_nhat_ky_san_xuat",
         "ngay, thanh_tien, cong_viec_id, hang_muc_du_toan_cong, ma_cv_chuan, lo_id, lo_2",
@@ -1211,6 +1267,9 @@ def _fetch_lot_cost_context(farm_id, today_iso: str) -> dict:
         "dim_lot_rows": dim_lot_rows,
         "doi_map": doi_map,
         "all_planting_rows": all_planting_rows,
+        "season_rows": season_rows,
+        "harvest_lifecycle_rows": harvest_lifecycle_rows,
+        "destruction_lifecycle_rows": destruction_lifecycle_rows,
         "labor_rows": labor_rows,
         "material_rows": material_rows,
         "global_lot_map": global_lot_map,
@@ -1259,10 +1318,18 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
                    .eq("loai_trong", "Trồng mới"),
         order_col="ngay_trong",
     )
+    all_planting_rows = build_batch_lifecycle(
+        all_planting_rows,
+        cost_context.get("season_rows", []),
+        cost_context.get("harvest_lifecycle_rows", []),
+        cost_context.get("destruction_lifecycle_rows", []),
+    )
+    harvest_rows_by_batch = build_harvest_rows_by_batch(cost_context.get("harvest_lifecycle_rows", []))
     plantings_by_lot = {}
     for row in all_planting_rows:
         row = dict(row)
-        row["ngay_trong_ts"] = pd.to_datetime(row.get("ngay_trong"), errors="coerce")
+        if row.get("ngay_trong_ts") is None:
+            row["ngay_trong_ts"] = pd.to_datetime(row.get("ngay_trong"), errors="coerce")
         plantings_by_lot.setdefault(row.get("dim_lo_id"), []).append(row)
 
     planting_rows = sorted(
@@ -1297,6 +1364,9 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
             "dot": idx,
             "ngay_trong": ngay_trong.date() if not pd.isna(ngay_trong) else None,
             "ngay_trong_ts": ngay_trong,
+            "active_until": row.get("active_until"),
+            "active_until_ts": row.get("active_until_ts"),
+            "lifecycle_end_reason": row.get("lifecycle_end_reason", ""),
             "so_cay": trees,
             "dien_tich_trong": _money(row.get("dien_tich_trong")),
             "labor_cost": 0.0,
@@ -1355,6 +1425,12 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
             return {"scope": "farm", "scope_label": scope_label or farm_name}
         return {"scope": "unallocated", "scope_label": scope_label or farm_name}
 
+    def lot_harvest_weight_on_date(lot_id, cost_dt):
+        return sum(
+            harvest_quantity_for_batch_until(harvest_rows_by_batch, row.get("id"), cost_dt)
+            for row in plantings_by_lot.get(lot_id, [])
+        )
+
     def share_cost_to_target_lot(cost, cost_dt):
         amount = _money(cost.get("amount"))
         scope = cost.get("scope")
@@ -1381,10 +1457,16 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
         else:
             recipient_ids = list(physical_lot_by_id.keys())
 
-        weights = {
-            lot_id: _lot_weight_on_date(lot_id, cost_dt, plantings_by_lot, lot_meta_by_id)
-            for lot_id in recipient_ids
-        }
+        if cost.get("is_harvest_related"):
+            weights = {
+                lot_id: lot_harvest_weight_on_date(lot_id, cost_dt)
+                for lot_id in recipient_ids
+            }
+        else:
+            weights = {
+                lot_id: _lot_weight_on_date(lot_id, cost_dt, plantings_by_lot, lot_meta_by_id)
+                for lot_id in recipient_ids
+            }
         total_weight = sum(weight for weight in weights.values() if weight > 0)
         target_weight = weights.get(dim_lo_id, 0.0)
         if total_weight <= 0 or target_weight <= 0:
@@ -1405,8 +1487,14 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
             "amount": _money(row.get("thanh_tien")),
             "category": row.get("hang_muc_du_toan_cong") or cv.get("cong_doan") or row.get("ma_cv_chuan") or "Khác",
             "detail": ten_cv,
+            "cong_doan": cv.get("cong_doan"),
+            "ma_cv": cv.get("ma_cv"),
+            "ma_cv_chuan": row.get("ma_cv_chuan"),
+            "hang_muc": row.get("hang_muc_du_toan_cong"),
         }
+        cost["is_harvest_related"] = is_harvest_related_cost(cost)
         cost.update(classify_cost_scope(row))
+        cost["is_harvest_related"] = cost["is_harvest_related"] or is_harvest_related_cost(cost)
         raw_cost_rows.append(cost)
     for row in material_rows:
         vt = vat_tu_map.get(row.get("vat_tu_id"), {})
@@ -1418,8 +1506,15 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
             "amount": _money(row.get("thanh_tien")),
             "category": row.get("hang_muc_du_toan_vat_tu") or vt.get("loai_vat_tu") or row.get("ma_khoan_muc_cp") or cv.get("ten_cong_viec") or "Khác",
             "detail": ten_vt,
+            "cong_doan": cv.get("cong_doan"),
+            "ma_cv": cv.get("ma_cv"),
+            "ma_cv_chuan": row.get("ma_cv_chuan"),
+            "ma_khoan_muc_cp": row.get("ma_khoan_muc_cp"),
+            "hang_muc": row.get("hang_muc_du_toan_vat_tu"),
         }
+        cost["is_harvest_related"] = is_harvest_related_cost(cost)
         cost.update(classify_cost_scope(row))
+        cost["is_harvest_related"] = cost["is_harvest_related"] or is_harvest_related_cost(cost)
         raw_cost_rows.append(cost)
 
     cost_rows = []
@@ -1437,18 +1532,40 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
         if amount == 0:
             continue
         cost_dt = pd.to_datetime(cost.get("ngay"), errors="coerce")
-        active_batches = [
-            b for b in batch_rows
-            if b["ngay_trong_ts"] is not None and not pd.isna(b["ngay_trong_ts"])
-            and not pd.isna(cost_dt) and b["ngay_trong_ts"] <= cost_dt
-            and int(b.get("so_cay") or 0) > 0
-        ]
-        active_trees = sum(int(b.get("so_cay") or 0) for b in active_batches)
-        if active_trees <= 0:
-            unallocated_rows.append(cost)
-            continue
+        if cost.get("is_harvest_related"):
+            batch_weights = {
+                b["base_lot_id"]: harvest_quantity_for_batch_until(
+                    harvest_rows_by_batch, b["base_lot_id"], cost_dt
+                )
+                for b in batch_rows
+            }
+            active_batches = [
+                b for b in batch_rows
+                if batch_weights.get(b["base_lot_id"], 0) > 0
+                and int(b.get("so_cay") or 0) > 0
+            ]
+            active_trees = sum(batch_weights.get(b["base_lot_id"], 0) for b in active_batches)
+            if active_trees <= 0:
+                blocked = dict(cost)
+                blocked["unallocated_reason"] = "Chi phí thu hoạch chưa có thu hoạch tương ứng"
+                unallocated_rows.append(blocked)
+                continue
+        else:
+            batch_weights = {}
+            active_batches = [
+                b for b in batch_rows
+                if is_batch_active_on_date(b, cost_dt)
+                and int(b.get("so_cay") or 0) > 0
+            ]
+            active_trees = sum(int(b.get("so_cay") or 0) for b in active_batches)
+            if active_trees <= 0:
+                blocked = dict(cost)
+                blocked["unallocated_reason"] = "Ngoài vòng đời đợt trồng hoặc thiếu ngày"
+                unallocated_rows.append(blocked)
+                continue
         for batch in active_batches:
-            share = amount * int(batch["so_cay"]) / active_trees
+            weight = batch_weights.get(batch["base_lot_id"], int(batch["so_cay"]))
+            share = amount * weight / active_trees
             if cost["source"] == "Nhân công":
                 batch["labor_cost"] += share
             else:
@@ -1463,6 +1580,7 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
                 "detail": cost["detail"],
                 "scope": cost.get("scope"),
                 "scope_label": cost.get("scope_label"),
+                "is_harvest_related": cost.get("is_harvest_related", False),
             })
 
     for batch in batch_rows:
@@ -1471,8 +1589,8 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
         batch["total_cost"] = batch["labor_cost"] + batch["material_cost"]
         batch["cost_per_tree"] = batch["total_cost"] / batch["so_cay"] if batch["so_cay"] > 0 else 0.0
 
-    cost_df = pd.DataFrame(cost_rows)
     allocation_df = pd.DataFrame(allocation_rows)
+    cost_df = allocation_df.copy()
     unallocated_df = pd.DataFrame(unallocated_rows)
     batch_df = pd.DataFrame(batch_rows)
 
@@ -1482,6 +1600,8 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
         allocated_tree_denominator = int(batch_df["so_cay"].sum())
     total_labor = sum(_money(r.get("amount")) for r in cost_rows if r.get("source") == "Nhân công")
     total_material = sum(_money(r.get("amount")) for r in cost_rows if r.get("source") == "Vật tư")
+    total_labor = float(batch_df["labor_cost"].sum()) if not batch_df.empty else 0.0
+    total_material = float(batch_df["material_cost"].sum()) if not batch_df.empty else 0.0
     warnings = []
     if len(batch_rows) > 1:
         warnings.append("Lô có nhiều đợt trồng: chi phí từng ngày được chia theo tỷ lệ số cây của các đợt đang active.")
@@ -1596,9 +1716,13 @@ def _render_lot_cost_dialog(farm_name: str, lo_name: str):
                 "amount": "Thành tiền",
                 "category": "Hạng mục",
                 "detail": "Chi tiết",
+                "unallocated_reason": "Lý do",
             })
             view["Thành tiền"] = view["Thành tiền"].apply(_format_int_commas)
-            st.dataframe(view[["Ngày", "Nguồn", "Hạng mục", "Chi tiết", "Thành tiền"]], use_container_width=True, hide_index=True)
+            display_cols = ["Ngày", "Nguồn", "Hạng mục", "Chi tiết", "Thành tiền"]
+            if "Lý do" in view.columns:
+                display_cols.append("Lý do")
+            st.dataframe(view[display_cols], use_container_width=True, hide_index=True)
 
     if st.button("Đóng", key=f"close_lot_cost_dialog_{farm_name}_{lo_name}"):
         _clear_cost_query_params()
