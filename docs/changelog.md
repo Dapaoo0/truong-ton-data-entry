@@ -2,6 +2,16 @@
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
 
+## [05/06/2026] - Siết logic chi phí/cây theo mốc sinh trưởng
+
+#### Fix: Cây mới không gánh chi phí chăm sóc buồng/cây cũ (`app.py`, `cost_lifecycle.py`)
+- **[Cổng sinh trưởng]**: Các hạng mục chăm sóc buồng như `Bao buồng`, `Bao búp`, `Bẻ hoa`, `Lặt râu`, `Chăm sóc buồng`, `Gỡ/Sửa bao`, `Vệ sinh buồng`, `Vén lá`, `Đo size` chỉ được phân bổ vào đợt trồng nếu đợt đó đã có mốc `Cắt bắp`.
+- **[Cap KL]**: Nhân công có `klcv` thuộc nhóm sau cắt bắp hoặc chính `Cắt bắp` bị giới hạn theo số `Cắt bắp` lũy kế và `so_luong` của đợt; phần vượt được tách khỏi chi phí/cây.
+- **[UI]**: Popup `Xem chi phí/cây` được tối giản, chỉ hiển thị chi phí/cây, tổng chi phí tính vào cây, tổng cây tính và bảng theo từng đợt; không hiển thị số dòng/bảng chi phí chưa phân bổ cho người dùng.
+- **[Docs/Tests]**: Cập nhật business docs và unit tests cho nhận diện nhóm chăm sóc buồng cần mốc cắt bắp.
+
+---
+
 ## [03/06/2026] - Mở dashboard chi phí/cây không reload trình duyệt
 
 #### Fix: Nút chi phí/cây trên bản đồ dùng Streamlit Custom Component (`app.py`, `map_template.py`, `components/farm_map/index.html`)

@@ -6,6 +6,20 @@ import pandas as pd
 
 
 HARVEST_COST_KEYWORD = "THUHOACH"
+CUT_STAGE_NAME = "Cắt bắp"
+BUNCH_CARE_REQUIRES_CUT_TOKENS = (
+    "BAOBUONG",
+    "BAOBUP",
+    "BEHOA",
+    "LATRAU",
+    "CHAMSOCBUONG",
+    "GOBAO",
+    "SUABAO",
+    "VESINHBUONG",
+    "VENLA",
+    "DOSIZECHUOI",
+)
+STAGE_QUANTITY_CAPPED_TOKENS = BUNCH_CARE_REQUIRES_CUT_TOKENS + ("CATBAP",)
 
 
 def money(value) -> float:
@@ -45,6 +59,29 @@ def is_harvest_related_cost(cost: dict) -> bool:
     return any(HARVEST_COST_KEYWORD in normalize_label(cost.get(field)) for field in fields)
 
 
+def _normalized_cost_text(cost: dict) -> str:
+    fields = (
+        "cong_doan",
+        "category",
+        "detail",
+        "ma_cv",
+        "ma_cv_chuan",
+        "ma_khoan_muc_cp",
+        "hang_muc",
+    )
+    return "|".join(normalize_label(cost.get(field)) for field in fields)
+
+
+def is_bunch_care_requiring_cut(cost: dict) -> bool:
+    text = _normalized_cost_text(cost)
+    return any(token in text for token in BUNCH_CARE_REQUIRES_CUT_TOKENS)
+
+
+def is_stage_quantity_capped_cost(cost: dict) -> bool:
+    text = _normalized_cost_text(cost)
+    return any(token in text for token in STAGE_QUANTITY_CAPPED_TOKENS)
+
+
 def _group_rows_by_base_lot(rows):
     grouped = defaultdict(list)
     for row in rows or []:
@@ -68,6 +105,24 @@ def harvest_quantity_for_batch_until(harvest_rows_by_batch: dict, base_lot_id, c
 
 def build_harvest_rows_by_batch(harvest_rows):
     return _group_rows_by_base_lot(harvest_rows)
+
+
+def build_stage_rows_by_batch(stage_rows):
+    return _group_rows_by_base_lot(stage_rows)
+
+
+def stage_quantity_for_batch_until(stage_rows_by_batch: dict, base_lot_id, stage_name: str, cost_dt) -> float:
+    cost_ts = to_timestamp(cost_dt)
+    if base_lot_id is None or cost_ts is None:
+        return 0.0
+    total = 0.0
+    for row in stage_rows_by_batch.get(int(base_lot_id), []):
+        if str(row.get("giai_doan") or "") != stage_name:
+            continue
+        stage_ts = to_timestamp(row.get("ngay_thuc_hien"))
+        if stage_ts is not None and stage_ts <= cost_ts:
+            total += money(row.get("so_luong"))
+    return total
 
 
 def build_batch_lifecycle(planting_rows, season_rows=None, harvest_rows=None, destruction_rows=None):

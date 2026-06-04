@@ -53,3 +53,31 @@ def test_harvest_quantity_only_counts_past_harvest_for_batch():
     assert cl.harvest_quantity_for_batch_until(grouped, 1, "2026-01-31") == 100
     assert cl.harvest_quantity_for_batch_until(grouped, 1, "2026-02-28") == 150
     assert cl.harvest_quantity_for_batch_until(grouped, 3, "2026-02-28") == 0
+
+
+def test_bunch_care_requires_cut_detection_avoids_false_positive():
+    assert cl.is_bunch_care_requiring_cut({"detail": "Bao buồng"})
+    assert cl.is_bunch_care_requiring_cut({"ma_cv_chuan": "BE_HOA_NHAT_BUONG"})
+    assert cl.is_bunch_care_requiring_cut({"detail": "Lặt râu"})
+    assert cl.is_bunch_care_requiring_cut({"detail": "Chăm sóc buồng"})
+
+    assert not cl.is_bunch_care_requiring_cut({"detail": "Chống đổ"})
+    assert not cl.is_bunch_care_requiring_cut({
+        "detail": "Phun xe cày - Bệnh",
+        "ma_cv_chuan": "PHUN_XE_CAY_BENH_KHOAN_HA",
+    })
+
+
+def test_stage_quantity_for_batch_until_uses_cut_bap_timeline():
+    stage_rows = [
+        {"base_lot_id": 1, "giai_doan": "Chích bắp", "ngay_thuc_hien": "2026-01-01", "so_luong": 100},
+        {"base_lot_id": 1, "giai_doan": "Cắt bắp", "ngay_thuc_hien": "2026-01-10", "so_luong": 40},
+        {"base_lot_id": 1, "giai_doan": "Cắt bắp", "ngay_thuc_hien": "2026-01-20", "so_luong": 60},
+        {"base_lot_id": 2, "giai_doan": "Cắt bắp", "ngay_thuc_hien": "2026-01-10", "so_luong": 999},
+    ]
+    grouped = cl.build_stage_rows_by_batch(stage_rows)
+
+    assert cl.stage_quantity_for_batch_until(grouped, 1, "Cắt bắp", "2026-01-09") == 0
+    assert cl.stage_quantity_for_batch_until(grouped, 1, "Cắt bắp", "2026-01-10") == 40
+    assert cl.stage_quantity_for_batch_until(grouped, 1, "Cắt bắp", "2026-01-31") == 100
+    assert cl.stage_quantity_for_batch_until(grouped, 2, "Cắt bắp", "2026-01-31") == 999
