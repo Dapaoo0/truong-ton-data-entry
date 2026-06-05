@@ -463,7 +463,29 @@ def test_min_bunch_mode_handles_multiple_container_demands():
     assert result["summary"]["short_boxes"] == 0
 
 
-def test_min_bunch_mode_handles_four_containers_split_across_many_skus():
+def test_min_bunch_mode_handles_four_containers_with_proven_optimum():
+    profile = build_hand_weight_profile(12, 18)
+    result = calculate_min_bunches_for_container_plan(
+        [
+            _optimizer_customer_row(1, "Wismettac (Nhật 1)", 1, "27CP", 1320, "Nhật"),
+            _optimizer_customer_row(1, "Wismettac (Nhật 1)", 2, "6H", 1320, "Nhật"),
+            _optimizer_customer_row(2, "Uone", 1, "8H", 1320, "Hàn"),
+            _optimizer_customer_row(2, "Uone", 2, "15CP", 1320, "Hàn"),
+        ],
+        profile["kg_per_bunch"],
+        profile["hands_per_bunch"],
+        hand_weights=profile["hand_weights"],
+    )
+
+    summary = result["summary"]
+    assert summary["solver_status"] == "OPTIMAL"
+    assert summary["requested_boxes"] == 5280
+    assert summary["fulfilled_boxes"] == 5280
+    assert summary["short_boxes"] == 0
+    assert summary["active_bunches_estimated"] > 0
+
+
+def test_min_bunch_mode_does_not_return_approximate_when_exact_proof_times_out():
     profile = build_hand_weight_profile(12, 18)
     result = calculate_min_bunches_for_container_plan(
         [
@@ -478,14 +500,12 @@ def test_min_bunch_mode_handles_four_containers_split_across_many_skus():
         profile["kg_per_bunch"],
         profile["hands_per_bunch"],
         hand_weights=profile["hand_weights"],
+        time_limit_seconds=1,
     )
 
-    summary = result["summary"]
-    assert summary["solver_status"] in {"OPTIMAL", "FEASIBLE", "APPROXIMATE"}
-    assert summary["requested_boxes"] == 5280
-    assert summary["fulfilled_boxes"] == 5280
-    assert summary["short_boxes"] == 0
-    assert summary["active_bunches_estimated"] > 0
+    assert result["summary"]["solver_status"] == "NO_SOLUTION"
+    assert result["summary"]["solver_backend"].endswith("_timeout")
+    assert result["rows"] == []
 
 
 def test_min_bunch_mode_rejects_wrong_market_sku():

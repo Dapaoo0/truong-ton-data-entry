@@ -7689,7 +7689,16 @@ def render_container_allocation_calculator():
             _render_container_saved_plan_cards()
             return
 
-        with st.spinner("Đang tối ưu số buồng xẻ tối thiểu..."):
+        status_box = st.status("Đang tối ưu chính xác số buồng xẻ tối thiểu...", expanded=True)
+        progress_bar = st.progress(0)
+
+        def _container_exact_progress(message, progress=None):
+            if message:
+                status_box.write(message)
+            if progress is not None:
+                progress_bar.progress(max(0, min(100, int(progress * 100))))
+
+        try:
             result = calculate_min_bunches_for_container_plan(
                 allocation_rows,
                 kg_per_bunch,
@@ -7697,17 +7706,23 @@ def render_container_allocation_calculator():
                 kg_per_box=KG_PER_BOX,
                 boxes_per_container=BOXES_PER_CONTAINER,
                 hand_weights=hand_weights,
+                progress_callback=_container_exact_progress,
             )
+        finally:
+            progress_bar.empty()
         summary = result["summary"]
 
         st.markdown("##### Kết quả tổng")
         solver_status = summary.get("solver_status", result.get("solver_status", "APPROXIMATE"))
         solver_backend = summary.get("solver_backend", result.get("solver_backend", "unknown"))
         if solver_status == "APPROXIMATE":
-            st.warning("Kết quả xấp xỉ do thiếu solver tối ưu hoặc đang dùng fallback.")
+            status_box.update(label="Chưa có kết quả tối ưu chính xác", state="error", expanded=True)
+            st.warning("Không dùng kết quả xấp xỉ cho mode này. Hãy cài OR-Tools hoặc chạy lại khi solver chính khả dụng.")
         elif solver_status == "NO_SOLUTION":
-            st.error("Không tìm được phương án xẻ hợp lệ cho cơ cấu cont đã nhập.")
+            status_box.update(label="Chưa chứng minh được phương án tối ưu chính xác", state="error", expanded=True)
+            st.error("Không tìm được hoặc chưa chứng minh được phương án xẻ tối ưu chính xác cho cơ cấu cont đã nhập.")
         else:
+            status_box.update(label="Đã chứng minh tối ưu tuyệt đối", state="complete", expanded=False)
             st.caption(f"Thuật toán tối ưu: {solver_status} · {solver_backend}")
 
         target_containers = len(container_targets)
@@ -7727,6 +7742,10 @@ def render_container_allocation_calculator():
             st.metric("Kg phân bổ", f"{kg_allocated:,.0f}")
         with m6:
             st.metric("Kg dư", f"{extra_kg:,.1f}")
+
+        if solver_status != "OPTIMAL":
+            _render_container_saved_plan_cards()
+            return
 
         if result["rows"]:
             st.success(
