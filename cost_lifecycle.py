@@ -5,7 +5,13 @@ import unicodedata
 import pandas as pd
 
 
-HARVEST_COST_KEYWORD = "THUHOACH"
+HARVEST_COST_TOKENS = (
+    "THUHOACH",
+    "CATBAN",
+    "BANBUONG",
+    "RONGROC",
+    "VANCHUYENTHUHOACH",
+)
 CUT_STAGE_NAME = "Cắt bắp"
 BUNCH_CARE_REQUIRES_CUT_TOKENS = (
     "BAOBUONG",
@@ -18,8 +24,58 @@ BUNCH_CARE_REQUIRES_CUT_TOKENS = (
     "VESINHBUONG",
     "VENLA",
     "DOSIZECHUOI",
+    "XOPLOTNAI",
+    "DAYCHONGNGA",
+    "GOBUONG",
+    "DAYBUONG",
 )
 STAGE_QUANTITY_CAPPED_TOKENS = BUNCH_CARE_REQUIRES_CUT_TOKENS + ("CATBAP",)
+PREHARVEST_CARE_TOKENS = (
+    "BONPHAN",
+    "PHAN",
+    "DAM",
+    "KALI",
+    "URE",
+    "LAN",
+    "HCVS",
+    "HC1",
+    "HUUCO",
+    "TRICHODERMA",
+    "TRICODERMA",
+    "CHAMSOCVUON",
+    "LAMCO",
+    "TUOINUOC",
+    "THUOCBVTV",
+    "PHUNXECAY",
+    "THUOC",
+    "BVTV",
+    "DIETCO",
+    "STREPTOMICIN",
+    "BUPROFEZIN",
+)
+GENERAL_OVERHEAD_TOKENS = (
+    "DAUDO",
+    "DAU",
+    "COGIOI",
+    "MAYCAY",
+    "XECAY",
+    "CHAYXECAY",
+    "SUACHUA",
+    "HETHONGTUOI",
+    "DIENNUOC",
+    "DIENPHANVANUOC",
+)
+PLANTING_NURSERY_TOKENS = (
+    "TRONGMOI",
+    "CAYCHUOI",
+    "CAYGIONG",
+    "BAU",
+    "DONGBAU",
+    "VUONUOM",
+    "UOM",
+    "LOTHO",
+    "DATBAU",
+)
 
 
 def money(value) -> float:
@@ -56,7 +112,8 @@ def is_harvest_related_cost(cost: dict) -> bool:
         "hang_muc",
         "scope_label",
     )
-    return any(HARVEST_COST_KEYWORD in normalize_label(cost.get(field)) for field in fields)
+    text = "|".join(normalize_label(cost.get(field)) for field in fields)
+    return any(token in text for token in HARVEST_COST_TOKENS)
 
 
 def _normalized_cost_text(cost: dict) -> str:
@@ -80,6 +137,21 @@ def is_bunch_care_requiring_cut(cost: dict) -> bool:
 def is_stage_quantity_capped_cost(cost: dict) -> bool:
     text = _normalized_cost_text(cost)
     return any(token in text for token in STAGE_QUANTITY_CAPPED_TOKENS)
+
+
+def is_preharvest_care_cost(cost: dict) -> bool:
+    text = _normalized_cost_text(cost)
+    return any(token in text for token in PREHARVEST_CARE_TOKENS)
+
+
+def is_general_overhead_cost(cost: dict) -> bool:
+    text = _normalized_cost_text(cost)
+    return any(token in text for token in GENERAL_OVERHEAD_TOKENS)
+
+
+def is_planting_or_nursery_cost(cost: dict) -> bool:
+    text = _normalized_cost_text(cost)
+    return any(token in text for token in PLANTING_NURSERY_TOKENS)
 
 
 def _group_rows_by_base_lot(rows):

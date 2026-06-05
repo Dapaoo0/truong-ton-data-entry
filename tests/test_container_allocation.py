@@ -463,6 +463,31 @@ def test_min_bunch_mode_handles_multiple_container_demands():
     assert result["summary"]["short_boxes"] == 0
 
 
+def test_min_bunch_mode_handles_four_containers_split_across_many_skus():
+    profile = build_hand_weight_profile(12, 18)
+    result = calculate_min_bunches_for_container_plan(
+        [
+            _optimizer_customer_row(1, "Wismettac (Nhật 1)", 1, "27CP", 880, "Nhật"),
+            _optimizer_customer_row(1, "Wismettac (Nhật 1)", 2, "30CP", 880, "Nhật"),
+            _optimizer_customer_row(1, "Wismettac (Nhật 1)", 3, "6H", 880, "Nhật"),
+            _optimizer_customer_row(2, "Uone", 1, "8H", 660, "Hàn"),
+            _optimizer_customer_row(2, "Uone", 2, "5/6H", 660, "Hàn"),
+            _optimizer_customer_row(2, "Uone", 3, "15CP", 660, "Hàn"),
+            _optimizer_customer_row(2, "Uone", 4, "12CP", 660, "Hàn"),
+        ],
+        profile["kg_per_bunch"],
+        profile["hands_per_bunch"],
+        hand_weights=profile["hand_weights"],
+    )
+
+    summary = result["summary"]
+    assert summary["solver_status"] in {"OPTIMAL", "FEASIBLE", "APPROXIMATE"}
+    assert summary["requested_boxes"] == 5280
+    assert summary["fulfilled_boxes"] == 5280
+    assert summary["short_boxes"] == 0
+    assert summary["active_bunches_estimated"] > 0
+
+
 def test_min_bunch_mode_rejects_wrong_market_sku():
     result = calculate_min_bunches_for_container_plan(
         [_optimizer_customer_row(1, "Wismettac (Nhật 1)", 1, "15CP", 1320, "Nhật")],

@@ -242,6 +242,7 @@ MARKET_MAX_CONTAINER_RECIPES = MARKET_MAX_CONTAINER_RECIPES_12_HANDS
 
 BEAM_WIDTH = 250
 CP_SAT_TIME_LIMIT_SECONDS = 60
+MIN_BUNCH_CP_SAT_TIME_LIMIT_SECONDS = 15
 WEIGHT_SCALE = 12000
 
 
@@ -1130,6 +1131,7 @@ def allocate_bunches_optimized(
     boxes_per_container: int = 1320,
     beam_width: int = BEAM_WIDTH,
     hand_weights: dict[int, float] | None = None,
+    time_limit_seconds: int = CP_SAT_TIME_LIMIT_SECONDS,
 ) -> dict[str, Any]:
     cp_result = _allocate_bunches_cpsat(
         total_bunches,
@@ -1139,6 +1141,7 @@ def allocate_bunches_optimized(
         kg_per_box=kg_per_box,
         boxes_per_container=boxes_per_container,
         hand_weights=hand_weights,
+        time_limit_seconds=time_limit_seconds,
     )
     if cp_result is not None:
         return cp_result
@@ -1625,7 +1628,7 @@ def _calculate_min_bunches_cpsat(
     hands_per_bunch: int,
     kg_per_box: float = 13,
     boxes_per_container: int = 1320,
-    time_limit_seconds: int = CP_SAT_TIME_LIMIT_SECONDS,
+    time_limit_seconds: int = MIN_BUNCH_CP_SAT_TIME_LIMIT_SECONDS,
     hand_weights: dict[int, float] | None = None,
 ) -> dict[str, Any] | None:
     if cp_model is None:
@@ -1758,24 +1761,37 @@ def _calculate_min_bunches_cpsat(
     )
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = max(1, _to_int(time_limit_seconds, CP_SAT_TIME_LIMIT_SECONDS))
+    objective_exprs = (
+        active_bunches_var,
+        segment_count_expr,
+        capacity_units_expr,
+        extra_units_expr,
+    )
+    total_time_limit = max(1, _to_int(time_limit_seconds, MIN_BUNCH_CP_SAT_TIME_LIMIT_SECONDS))
+    phase_time_limit = max(1, math.ceil(total_time_limit / (len(objective_exprs) + 1)))
+    solver.parameters.max_time_in_seconds = phase_time_limit
     solver.parameters.num_search_workers = 8
     final_status_name = "OPTIMAL"
-    for objective_expr in (active_bunches_var, segment_count_expr, capacity_units_expr, extra_units_expr):
+    solved_all_objectives = True
+    for objective_expr in objective_exprs:
         model.Minimize(objective_expr)
         status = solver.Solve(model)
         if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             return None
         if status != cp_model.OPTIMAL:
             final_status_name = "FEASIBLE"
+            solved_all_objectives = False
         model.Add(objective_expr == solver.Value(objective_expr))
+        if not solved_all_objectives:
+            break
 
-    model.Minimize(range_preference_expr)
-    status = solver.Solve(model)
-    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        return None
-    if status != cp_model.OPTIMAL or final_status_name != "OPTIMAL":
-        final_status_name = "FEASIBLE"
+    if solved_all_objectives:
+        model.Minimize(range_preference_expr)
+        status = solver.Solve(model)
+        if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            return None
+        if status != cp_model.OPTIMAL or final_status_name != "OPTIMAL":
+            final_status_name = "FEASIBLE"
 
     active_bunches = solver.Value(active_bunches_var)
     remaining_hands = {hand: active_bunches for hand in range(1, hands_per_bunch + 1)}
@@ -1952,6 +1968,7 @@ def calculate_min_bunches_for_container_plan(
     kg_per_box: float = 13,
     boxes_per_container: int = 1320,
     hand_weights: dict[int, float] | None = None,
+    time_limit_seconds: int = MIN_BUNCH_CP_SAT_TIME_LIMIT_SECONDS,
 ) -> dict[str, Any]:
     """Calculate the minimum whole bunches needed to satisfy fixed box demand."""
     cp_result = _calculate_min_bunches_cpsat(
@@ -1961,6 +1978,7 @@ def calculate_min_bunches_for_container_plan(
         kg_per_box=kg_per_box,
         boxes_per_container=boxes_per_container,
         hand_weights=hand_weights,
+        time_limit_seconds=time_limit_seconds,
     )
     if cp_result is not None:
         return cp_result
@@ -1995,7 +2013,7 @@ def calculate_min_bunches_for_container_plan(
     low, high = 0, upper_bound
     while low <= high:
         mid = (low + high) // 2
-        result = allocate_bunches_optimized(
+        result = _allocate_bunches_beam(
             mid,
             kg_per_bunch,
             hands_per_bunch,
@@ -2003,6 +2021,8 @@ def calculate_min_bunches_for_container_plan(
             kg_per_box=kg_per_box,
             boxes_per_container=boxes_per_container,
             hand_weights=hand_weights,
+            solver_status="APPROXIMATE",
+            solver_backend="beam_search_fallback",
         )
         summary = result.get("summary", {})
         feasible = (

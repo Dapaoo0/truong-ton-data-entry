@@ -157,7 +157,8 @@ def _fallback_is_batch_active_on_date(batch: dict, cost_dt) -> bool:
 
 def _fallback_is_harvest_related_cost(cost: dict) -> bool:
     fields = ("cong_doan", "category", "detail", "ma_cv", "ma_cv_chuan", "ma_khoan_muc_cp", "hang_muc", "scope_label")
-    return any("THUHOACH" in _cl_normalize_label(cost.get(field)) for field in fields)
+    text = "|".join(_cl_normalize_label(cost.get(field)) for field in fields)
+    return any(token in text for token in ("THUHOACH", "CATBAN", "BANBUONG", "RONGROC", "VANCHUYENTHUHOACH"))
 
 
 def _fallback_cost_text(cost: dict) -> str:
@@ -176,6 +177,59 @@ _BUNCH_CARE_REQUIRES_CUT_TOKENS = (
     "VESINHBUONG",
     "VENLA",
     "DOSIZECHUOI",
+    "XOPLOTNAI",
+    "DAYCHONGNGA",
+    "GOBUONG",
+    "DAYBUONG",
+)
+
+_PREHARVEST_CARE_TOKENS = (
+    "BONPHAN",
+    "PHAN",
+    "DAM",
+    "KALI",
+    "URE",
+    "LAN",
+    "HCVS",
+    "HC1",
+    "HUUCO",
+    "TRICHODERMA",
+    "TRICODERMA",
+    "CHAMSOCVUON",
+    "LAMCO",
+    "TUOINUOC",
+    "THUOCBVTV",
+    "PHUNXECAY",
+    "THUOC",
+    "BVTV",
+    "DIETCO",
+    "STREPTOMICIN",
+    "BUPROFEZIN",
+)
+
+_GENERAL_OVERHEAD_TOKENS = (
+    "DAUDO",
+    "DAU",
+    "COGIOI",
+    "MAYCAY",
+    "XECAY",
+    "CHAYXECAY",
+    "SUACHUA",
+    "HETHONGTUOI",
+    "DIENNUOC",
+    "DIENPHANVANUOC",
+)
+
+_PLANTING_NURSERY_TOKENS = (
+    "TRONGMOI",
+    "CAYCHUOI",
+    "CAYGIONG",
+    "BAU",
+    "DONGBAU",
+    "VUONUOM",
+    "UOM",
+    "LOTHO",
+    "DATBAU",
 )
 
 
@@ -187,6 +241,21 @@ def _fallback_is_bunch_care_requiring_cut(cost: dict) -> bool:
 def _fallback_is_stage_quantity_capped_cost(cost: dict) -> bool:
     text = _fallback_cost_text(cost)
     return any(token in text for token in _BUNCH_CARE_REQUIRES_CUT_TOKENS + ("CATBAP",))
+
+
+def _fallback_is_preharvest_care_cost(cost: dict) -> bool:
+    text = _fallback_cost_text(cost)
+    return any(token in text for token in _PREHARVEST_CARE_TOKENS)
+
+
+def _fallback_is_general_overhead_cost(cost: dict) -> bool:
+    text = _fallback_cost_text(cost)
+    return any(token in text for token in _GENERAL_OVERHEAD_TOKENS)
+
+
+def _fallback_is_planting_or_nursery_cost(cost: dict) -> bool:
+    text = _fallback_cost_text(cost)
+    return any(token in text for token in _PLANTING_NURSERY_TOKENS)
 
 
 def _fallback_lot_weight_on_date(lot_id, cost_dt, plantings_by_lot: dict, lot_meta_by_id: dict) -> float:
@@ -217,6 +286,9 @@ is_bunch_care_requiring_cut = getattr(_cost_lifecycle, "is_bunch_care_requiring_
 is_batch_active_on_date = getattr(_cost_lifecycle, "is_batch_active_on_date", _fallback_is_batch_active_on_date)
 is_harvest_related_cost = getattr(_cost_lifecycle, "is_harvest_related_cost", _fallback_is_harvest_related_cost)
 is_stage_quantity_capped_cost = getattr(_cost_lifecycle, "is_stage_quantity_capped_cost", _fallback_is_stage_quantity_capped_cost)
+is_preharvest_care_cost = getattr(_cost_lifecycle, "is_preharvest_care_cost", _fallback_is_preharvest_care_cost)
+is_general_overhead_cost = getattr(_cost_lifecycle, "is_general_overhead_cost", _fallback_is_general_overhead_cost)
+is_planting_or_nursery_cost = getattr(_cost_lifecycle, "is_planting_or_nursery_cost", _fallback_is_planting_or_nursery_cost)
 lifecycle_lot_weight_on_date = getattr(_cost_lifecycle, "lot_weight_on_date", _fallback_lot_weight_on_date)
 stage_quantity_for_batch_until = getattr(_cost_lifecycle, "stage_quantity_for_batch_until", _fallback_stage_quantity_for_batch_until)
 
@@ -990,6 +1062,25 @@ GENERAL_COST_SCOPE_KEYWORDS = (
     "XEXUC",
 )
 
+EXCLUDED_LOT_COST_SCOPE_KEYWORDS = (
+    "XUONGDONGGOI",
+    "XUONG",
+    "DONGGOI",
+    "KHOHOCMON",
+    "KHO",
+    "BANHANG",
+    "VANPHONG",
+    "CONGTRINH",
+    "XAYDUNG",
+    "NHAXUONG",
+)
+
+PREHARVEST_CARE_PER_TREE_LIMIT = 20_000
+GENERAL_OVERHEAD_PER_TREE_LIMIT = 30_000
+PREHARVEST_CARE_GROUP_PER_TREE_LIMIT = 80_000
+GENERAL_OVERHEAD_GROUP_PER_TREE_LIMIT = 50_000
+PLANTING_NURSERY_MAX_DAYS_FROM_PLANTING = 60
+
 
 def _money(value) -> float:
     try:
@@ -1072,6 +1163,13 @@ def _is_general_cost_scope_label(label: str) -> bool:
     if not norm:
         return True
     return any(keyword in norm for keyword in GENERAL_COST_SCOPE_KEYWORDS)
+
+
+def _is_excluded_lot_cost_scope_label(label: str) -> bool:
+    norm = _normalize_cost_label(label)
+    if not norm:
+        return False
+    return any(keyword in norm for keyword in EXCLUDED_LOT_COST_SCOPE_KEYWORDS)
 
 
 def _is_physical_lot_row(row: dict) -> bool:
@@ -1607,6 +1705,9 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
             }
 
         scope_label = _lot_display_label(local_lot) or _lot_display_label(global_lot) or str(fallback_label or "")
+        if _is_excluded_lot_cost_scope_label(scope_label):
+            return {"scope": "excluded", "scope_label": scope_label or farm_name}
+
         team_group = _team_group_from_scope_label(farm_name, scope_label)
         if team_group:
             return {"scope": "team", "team_group": team_group, "scope_label": scope_label}
@@ -1626,7 +1727,7 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
         scope = cost.get("scope")
         if amount == 0:
             return None
-        if scope == "unallocated":
+        if scope in {"unallocated", "excluded"}:
             return None
 
         if scope == "direct":
@@ -1691,10 +1792,16 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
         cost["is_harvest_related"] = is_harvest_related_cost(cost)
         cost["requires_cut_done"] = is_bunch_care_requiring_cut(cost)
         cost["stage_quantity_capped"] = is_stage_quantity_capped_cost(cost)
+        cost["is_preharvest_care"] = is_preharvest_care_cost(cost)
+        cost["is_general_overhead"] = is_general_overhead_cost(cost)
+        cost["is_planting_or_nursery"] = is_planting_or_nursery_cost(cost)
         cost.update(classify_cost_scope(row))
         cost["is_harvest_related"] = cost["is_harvest_related"] or is_harvest_related_cost(cost)
         cost["requires_cut_done"] = cost["requires_cut_done"] or is_bunch_care_requiring_cut(cost)
         cost["stage_quantity_capped"] = cost["stage_quantity_capped"] or is_stage_quantity_capped_cost(cost)
+        cost["is_preharvest_care"] = cost["is_preharvest_care"] or is_preharvest_care_cost(cost)
+        cost["is_general_overhead"] = cost["is_general_overhead"] or is_general_overhead_cost(cost)
+        cost["is_planting_or_nursery"] = cost["is_planting_or_nursery"] or is_planting_or_nursery_cost(cost)
         raw_cost_rows.append(cost)
     for row in material_rows:
         vt = vat_tu_map.get(row.get("vat_tu_id"), {})
@@ -1717,9 +1824,15 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
         cost["is_harvest_related"] = is_harvest_related_cost(cost)
         cost["requires_cut_done"] = is_bunch_care_requiring_cut(cost)
         cost["stage_quantity_capped"] = False
+        cost["is_preharvest_care"] = is_preharvest_care_cost(cost)
+        cost["is_general_overhead"] = is_general_overhead_cost(cost)
+        cost["is_planting_or_nursery"] = is_planting_or_nursery_cost(cost)
         cost.update(classify_cost_scope(row))
         cost["is_harvest_related"] = cost["is_harvest_related"] or is_harvest_related_cost(cost)
         cost["requires_cut_done"] = cost["requires_cut_done"] or is_bunch_care_requiring_cut(cost)
+        cost["is_preharvest_care"] = cost["is_preharvest_care"] or is_preharvest_care_cost(cost)
+        cost["is_general_overhead"] = cost["is_general_overhead"] or is_general_overhead_cost(cost)
+        cost["is_planting_or_nursery"] = cost["is_planting_or_nursery"] or is_planting_or_nursery_cost(cost)
         raw_cost_rows.append(cost)
 
     cost_rows = []
@@ -1771,7 +1884,45 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
             "is_harvest_related": cost.get("is_harvest_related", False),
             "requires_cut_done": cost.get("requires_cut_done", False),
             "stage_quantity_capped": cost.get("stage_quantity_capped", False),
+            "is_preharvest_care": cost.get("is_preharvest_care", False),
+            "is_general_overhead": cost.get("is_general_overhead", False),
+            "is_planting_or_nursery": cost.get("is_planting_or_nursery", False),
         })
+
+    def _days_from_nearest_planting(active_batches, cost_dt):
+        cost_ts = pd.to_datetime(cost_dt, errors="coerce")
+        if pd.isna(cost_ts):
+            return None
+        day_gaps = []
+        for batch in active_batches:
+            planting_ts = batch.get("ngay_trong_ts") or pd.to_datetime(batch.get("ngay_trong"), errors="coerce")
+            if pd.isna(planting_ts):
+                continue
+            day_gaps.append(abs((cost_ts - planting_ts).days))
+        return min(day_gaps) if day_gaps else None
+
+    def _active_cost_exclusion_reason(cost: dict, amount: float, active_batches, active_trees, cost_dt):
+        if active_trees <= 0:
+            return ""
+        amount_per_tree = amount / active_trees
+        if cost.get("is_preharvest_care") and amount_per_tree >= PREHARVEST_CARE_PER_TREE_LIMIT:
+            return (
+                "Chi phí phân bón/chăm sóc cây vượt ngưỡng theo số cây active "
+                f"({amount_per_tree:,.0f} đ/cây)"
+            )
+        if cost.get("is_general_overhead") and amount_per_tree >= GENERAL_OVERHEAD_PER_TREE_LIMIT:
+            return (
+                "Chi phí cơ giới/điện nước/dầu DO vượt ngưỡng theo số cây active "
+                f"({amount_per_tree:,.0f} đ/cây)"
+            )
+        if cost.get("is_planting_or_nursery"):
+            day_gap = _days_from_nearest_planting(active_batches, cost_dt)
+            if day_gap is not None and day_gap > PLANTING_NURSERY_MAX_DAYS_FROM_PLANTING:
+                return (
+                    "Chi phí trồng mới/vườn ươm phát sinh xa ngày trồng active "
+                    f"({day_gap} ngày)"
+                )
+        return ""
     for cost in cost_rows:
         amount = _money(cost.get("amount"))
         if amount == 0:
@@ -1822,6 +1973,10 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
                 if active_trees <= 0:
                     _add_unallocated(cost, "Chưa có mốc Cắt bắp tương ứng cho hạng mục chăm sóc buồng")
                     continue
+            exclusion_reason = _active_cost_exclusion_reason(cost, amount, active_batches, active_trees, cost_dt)
+            if exclusion_reason:
+                _add_unallocated(cost, exclusion_reason)
+                continue
             quantity = _money(cost.get("quantity"))
             if cost.get("stage_quantity_capped") and quantity > 0:
                 work_key = _stage_work_key(cost)
@@ -1860,22 +2015,63 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
         for batch in active_batches:
             weight = batch_weights.get(batch["base_lot_id"], int(batch["so_cay"]))
             share = amount * weight / active_trees
-            if cost["source"] == "Nhân công":
-                batch["labor_cost"] += share
+            _add_allocation(cost, batch, share)
+
+    batch_tree_by_id = {row["base_lot_id"]: int(row.get("so_cay") or 0) for row in batch_rows}
+
+    def _exclude_large_allocation_groups():
+        nonlocal allocation_rows
+        if not allocation_rows:
+            return
+        allocation_df_tmp = pd.DataFrame(allocation_rows)
+        if allocation_df_tmp.empty:
+            return
+        drop_indices = set()
+        group_cols = ["source", "scope", "scope_label", "category", "detail"]
+        for _, group in allocation_df_tmp.groupby(group_cols, dropna=False):
+            affected_batch_ids = set(group["base_lot_id"].dropna().astype(int).tolist())
+            affected_trees = sum(batch_tree_by_id.get(batch_id, 0) for batch_id in affected_batch_ids)
+            if affected_trees <= 0:
+                continue
+            group_amount = float(group["amount"].sum())
+            amount_per_tree = group_amount / affected_trees
+            is_preharvest_group = bool(group.get("is_preharvest_care", pd.Series([False])).fillna(False).any())
+            is_general_group = bool(group.get("is_general_overhead", pd.Series([False])).fillna(False).any())
+            reason = ""
+            if is_preharvest_group and amount_per_tree >= PREHARVEST_CARE_GROUP_PER_TREE_LIMIT:
+                reason = (
+                    "Nhóm phân bón/chăm sóc cây vượt ngưỡng theo số cây active "
+                    f"({amount_per_tree:,.0f} đ/cây)"
+                )
+            elif is_general_group and amount_per_tree >= GENERAL_OVERHEAD_GROUP_PER_TREE_LIMIT:
+                reason = (
+                    "Nhóm cơ giới/điện nước/dầu DO vượt ngưỡng theo số cây active "
+                    f"({amount_per_tree:,.0f} đ/cây)"
+                )
+            if not reason:
+                continue
+            for idx, row in group.iterrows():
+                blocked = row.to_dict()
+                blocked["unallocated_reason"] = reason
+                unallocated_rows.append(blocked)
+                drop_indices.add(idx)
+        if not drop_indices:
+            return
+        allocation_df_tmp = allocation_df_tmp.drop(index=list(drop_indices))
+        allocation_rows = allocation_df_tmp.to_dict("records")
+        for batch in batch_rows:
+            batch["labor_cost"] = 0.0
+            batch["material_cost"] = 0.0
+        for row in allocation_rows:
+            batch = next((b for b in batch_rows if b["base_lot_id"] == row.get("base_lot_id")), None)
+            if not batch:
+                continue
+            if row.get("source") == "Nhân công":
+                batch["labor_cost"] += _money(row.get("amount"))
             else:
-                batch["material_cost"] += share
-            allocation_rows.append({
-                "base_lot_id": batch["base_lot_id"],
-                "dot": batch["dot"],
-                "source": cost["source"],
-                "ngay": cost["ngay"],
-                "amount": share,
-                "category": cost["category"],
-                "detail": cost["detail"],
-                "scope": cost.get("scope"),
-                "scope_label": cost.get("scope_label"),
-                "is_harvest_related": cost.get("is_harvest_related", False),
-            })
+                batch["material_cost"] += _money(row.get("amount"))
+
+    _exclude_large_allocation_groups()
 
     for batch in batch_rows:
         season = seasons_by_batch.get(batch["base_lot_id"], {})
@@ -7493,14 +7689,15 @@ def render_container_allocation_calculator():
             _render_container_saved_plan_cards()
             return
 
-        result = calculate_min_bunches_for_container_plan(
-            allocation_rows,
-            kg_per_bunch,
-            hands_per_bunch,
-            kg_per_box=KG_PER_BOX,
-            boxes_per_container=BOXES_PER_CONTAINER,
-            hand_weights=hand_weights,
-        )
+        with st.spinner("Đang tối ưu số buồng xẻ tối thiểu..."):
+            result = calculate_min_bunches_for_container_plan(
+                allocation_rows,
+                kg_per_bunch,
+                hands_per_bunch,
+                kg_per_box=KG_PER_BOX,
+                boxes_per_container=BOXES_PER_CONTAINER,
+                hand_weights=hand_weights,
+            )
         summary = result["summary"]
 
         st.markdown("##### Kết quả tổng")

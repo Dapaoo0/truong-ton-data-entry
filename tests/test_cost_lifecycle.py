@@ -60,12 +60,23 @@ def test_bunch_care_requires_cut_detection_avoids_false_positive():
     assert cl.is_bunch_care_requiring_cut({"ma_cv_chuan": "BE_HOA_NHAT_BUONG"})
     assert cl.is_bunch_care_requiring_cut({"detail": "Lặt râu"})
     assert cl.is_bunch_care_requiring_cut({"detail": "Chăm sóc buồng"})
+    assert cl.is_bunch_care_requiring_cut({"detail": "Xốp lót nải"})
+    assert cl.is_bunch_care_requiring_cut({"detail": "Dây chống ngã"})
 
     assert not cl.is_bunch_care_requiring_cut({"detail": "Chống đổ"})
     assert not cl.is_bunch_care_requiring_cut({
         "detail": "Phun xe cày - Bệnh",
         "ma_cv_chuan": "PHUN_XE_CAY_BENH_KHOAN_HA",
     })
+
+
+def test_cost_category_detection_for_cost_cleanup_rules():
+    assert cl.is_harvest_related_cost({"detail": "Thu hoạch bằng ròng rọc"})
+    assert cl.is_preharvest_care_cost({"detail": "PHÂN KALI PHÚ MỸ"})
+    assert cl.is_preharvest_care_cost({"detail": "Streptomicin"})
+    assert cl.is_general_overhead_cost({"detail": "Dầu DO"})
+    assert cl.is_general_overhead_cost({"detail": "Kiểm tra sửa chữa hệ thống tưới"})
+    assert cl.is_planting_or_nursery_cost({"detail": "Cây chuối giống UNI 126"})
 
 
 def test_stage_quantity_for_batch_until_uses_cut_bap_timeline():
