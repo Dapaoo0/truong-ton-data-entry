@@ -1627,6 +1627,468 @@ def _empty_min_bunch_result(
     }
 
 
+def _decompose_hand_quantities(hand_quantities: dict[int, int]) -> list[tuple[int, int, int]]:
+    remaining = {hand: int(qty) for hand, qty in hand_quantities.items() if int(qty) > 0}
+    segments: list[tuple[int, int, int]] = []
+    while remaining:
+        hands = sorted(remaining)
+        start = hands[0]
+        end = start
+        for hand in hands[1:]:
+            if hand != end + 1:
+                break
+            end = hand
+        qty = min(remaining[hand] for hand in range(start, end + 1))
+        segments.append((start, end, qty))
+        for hand in range(start, end + 1):
+            next_qty = remaining[hand] - qty
+            if next_qty <= 0:
+                remaining.pop(hand, None)
+            else:
+                remaining[hand] = next_qty
+    return segments
+
+
+def _calculate_min_bunches_hand_mip(
+    sku_rows: list[dict[str, Any]],
+    kg_per_bunch: float,
+    hands_per_bunch: int,
+    kg_per_box: float = 13,
+    boxes_per_container: int = 1320,
+    time_limit_seconds: int = MIN_BUNCH_CP_SAT_TIME_LIMIT_SECONDS,
+    hand_weights: dict[int, float] | None = None,
+    progress_callback=None,
+) -> dict[str, Any] | None:
+    if pywraplp is None:
+        return None
+
+    def emit_progress(message: str, progress: float | None = None) -> None:
+        if progress_callback is None:
+            return
+        try:
+            progress_callback(message, progress)
+        except TypeError:
+            progress_callback(message)
+        except Exception:
+            return
+
+    kg_per_bunch = max(0.0, _to_float(kg_per_bunch))
+    hands_per_bunch = max(0, _to_int(hands_per_bunch))
+    hand_weights, kg_per_bunch, kg_per_hand = _resolve_hand_weights(
+        hands_per_bunch, kg_per_bunch, hand_weights
+    )
+    kg_per_box = max(0.0, _to_float(kg_per_box))
+    boxes_per_container = max(1, _to_int(boxes_per_container, 1))
+    if kg_per_bunch <= 0 or hands_per_bunch <= 0 or kg_per_box <= 0:
+        return _empty_min_bunch_result(
+            kg_per_bunch,
+            hands_per_bunch,
+            kg_per_box,
+            boxes_per_container,
+            "NO_SOLUTION",
+            "ortools_hand_mip",
+            hand_weights,
+        )
+
+    normalized_rows = normalize_sku_rows(sku_rows)
+    positive_rows = [row for row in normalized_rows if row["demand"] > 0 and row["sku"]]
+    candidate_rows = _build_candidate_rows(positive_rows, hands_per_bunch)
+    if not positive_rows or len(candidate_rows) != len(positive_rows):
+        return _empty_min_bunch_result(
+            kg_per_bunch,
+            hands_per_bunch,
+            kg_per_box,
+            boxes_per_container,
+            "NO_SOLUTION",
+            "ortools_hand_mip",
+            hand_weights,
+        )
+
+    total_requested_boxes = sum(
+        _requested_boxes(row, boxes_per_container)
+        for _, row, _ in candidate_rows
+    )
+    upper_bound = _minimum_bunch_upper_bound(
+        positive_rows,
+        hands_per_bunch,
+        hand_weights,
+        kg_per_box,
+        boxes_per_container,
+    )
+    if total_requested_boxes <= 0 or upper_bound <= 0:
+        return _empty_min_bunch_result(
+            kg_per_bunch,
+            hands_per_bunch,
+            kg_per_box,
+            boxes_per_container,
+            "NO_SOLUTION",
+            "ortools_hand_mip",
+            hand_weights,
+        )
+
+    solver = pywraplp.Solver.CreateSolver("SCIP") or pywraplp.Solver.CreateSolver("CBC")
+    if solver is None:
+        return None
+    solver_version = solver.SolverVersion()
+    solver_backend_name = "ortools_scip_hand_mip" if "SCIP" in solver_version else "ortools_cbc_hand_mip"
+    if "SCIP" in solver_version:
+        try:
+            solver.SetNumThreads(8)
+        except Exception:
+            pass
+    exact_time_limit = max(1, _to_int(time_limit_seconds, MIN_BUNCH_CP_SAT_TIME_LIMIT_SECONDS))
+    solver.SetTimeLimit(exact_time_limit * 1000)
+
+    def unfinished_exact_result(backend: str = "") -> dict[str, Any]:
+        return _empty_min_bunch_result(
+            kg_per_bunch,
+            hands_per_bunch,
+            kg_per_box,
+            boxes_per_container,
+            "NO_SOLUTION",
+            backend or f"{solver_backend_name}_timeout",
+            hand_weights,
+        )
+
+    hand_weight_units = {
+        hand: max(1, int(round(weight * WEIGHT_SCALE)))
+        for hand, weight in hand_weights.items()
+    }
+    kg_per_box_units = max(1, int(round(kg_per_box * WEIGHT_SCALE)))
+
+    row_records: list[dict[str, Any]] = []
+    hand_vars: dict[tuple[int, int], Any] = {}
+    for processing_order, (original_index, row, ranges) in enumerate(candidate_rows, start=1):
+        requested_boxes = _requested_boxes(row, boxes_per_container)
+        hand_positions = sorted({
+            hand
+            for hand_from, hand_to in ranges
+            for hand in range(hand_from, hand_to + 1)
+        })
+        row_record = {
+            "processing_order": processing_order,
+            "original_index": original_index,
+            "row": row,
+            "requested_boxes": requested_boxes,
+            "ranges": ranges,
+            "hands": hand_positions,
+        }
+        for hand in hand_positions:
+            var_prefix = f"hand_r{processing_order}_h{hand}"
+            qty_var = solver.IntVar(0, upper_bound, f"{var_prefix}_bunches")
+            hand_vars[(processing_order, hand)] = qty_var
+        row_capacity_expr = solver.Sum(
+            hand_vars[(processing_order, hand)] * hand_weight_units[hand]
+            for hand in hand_positions
+        )
+        solver.Add(row_capacity_expr >= requested_boxes * kg_per_box_units)
+        row_records.append(row_record)
+
+    active_bunches_var = solver.IntVar(0, upper_bound, "min_required_active_bunches")
+    for hand in range(1, hands_per_bunch + 1):
+        hand_usage_expr = solver.Sum(
+            hand_vars[(record["processing_order"], hand)]
+            for record in row_records
+            if hand in record["hands"]
+        )
+        solver.Add(hand_usage_expr <= active_bunches_var)
+
+    objective = solver.Objective()
+
+    def set_min_objective(terms):
+        objective.Clear()
+        for var, coefficient in terms:
+            objective.SetCoefficient(var, float(coefficient))
+        objective.SetMinimization()
+
+    def solve_exact_phase(label: str, terms, progress: float, fix_value: bool = True):
+        emit_progress(label, progress)
+        set_min_objective(terms)
+        status = solver.Solve()
+        if status != pywraplp.Solver.OPTIMAL:
+            return "TIME_LIMIT"
+        value = int(round(sum(var.solution_value() * coefficient for var, coefficient in terms)))
+        if fix_value:
+            solver.Add(solver.Sum(var * coefficient for var, coefficient in terms) == value)
+        return value
+
+    def capture_hand_quantities() -> dict[int, dict[int, int]]:
+        snapshot: dict[int, dict[int, int]] = {}
+        for record in row_records:
+            processing_order = record["processing_order"]
+            snapshot[processing_order] = {
+                hand: int(round(hand_vars[(processing_order, hand)].solution_value()))
+                for hand in record["hands"]
+            }
+        return snapshot
+
+    def build_compact_range_quantities(active_bunches: int) -> dict[int, dict[int, int]] | None:
+        remaining_capacity = {hand: active_bunches for hand in range(1, hands_per_bunch + 1)}
+        compact_plan: dict[int, dict[int, int]] = {}
+
+        for record in row_records:
+            processing_order = record["processing_order"]
+            requested_units = record["requested_boxes"] * kg_per_box_units
+            row_plan = {hand: 0 for hand in record["hands"]}
+            ranges = sorted(
+                record["ranges"],
+                key=lambda item: (
+                    -(item[1] - item[0] + 1),
+                    -_range_weight_units(item[0], item[1], hand_weight_units),
+                    item[0],
+                    item[1],
+                ),
+            )
+
+            while requested_units > 0:
+                finish_candidates = []
+                progress_candidates = []
+                for hand_from, hand_to in ranges:
+                    hands = range(hand_from, hand_to + 1)
+                    max_bunches = min(remaining_capacity.get(hand, 0) for hand in hands)
+                    if max_bunches <= 0:
+                        continue
+                    kg_units = _range_weight_units(hand_from, hand_to, hand_weight_units)
+                    if kg_units <= 0:
+                        continue
+                    needed_bunches = int(math.ceil(requested_units / kg_units))
+                    bunches_to_use = min(max_bunches, needed_bunches)
+                    if bunches_to_use <= 0:
+                        continue
+                    hand_count = hand_to - hand_from + 1
+                    produced_units = bunches_to_use * kg_units
+                    can_finish = max_bunches * kg_units >= requested_units
+                    candidate = {
+                        "hand_from": hand_from,
+                        "hand_to": hand_to,
+                        "hand_count": hand_count,
+                        "kg_units": kg_units,
+                        "bunches": bunches_to_use,
+                        "produced_units": produced_units,
+                        "over_units": max(0, produced_units - requested_units),
+                    }
+                    if can_finish:
+                        finish_candidates.append(candidate)
+                    else:
+                        progress_candidates.append(candidate)
+
+                if finish_candidates:
+                    selected = min(
+                        finish_candidates,
+                        key=lambda item: (
+                            -item["hand_count"],
+                            item["over_units"],
+                            -item["kg_units"],
+                            item["hand_from"],
+                            item["hand_to"],
+                        ),
+                    )
+                elif progress_candidates:
+                    selected = max(
+                        progress_candidates,
+                        key=lambda item: (
+                            item["produced_units"],
+                            item["hand_count"],
+                            item["kg_units"],
+                            -item["hand_from"],
+                            -item["hand_to"],
+                        ),
+                    )
+                else:
+                    return None
+
+                for hand in range(selected["hand_from"], selected["hand_to"] + 1):
+                    row_plan[hand] += selected["bunches"]
+                    remaining_capacity[hand] -= selected["bunches"]
+                    if remaining_capacity[hand] < 0:
+                        return None
+                requested_units -= selected["produced_units"]
+
+            compact_plan[processing_order] = row_plan
+
+        return compact_plan
+
+    active_bunches = solve_exact_phase(
+        "Đang chứng minh số buồng xẻ tối thiểu.",
+        [(active_bunches_var, 1)],
+        0.22,
+        fix_value=False,
+    )
+    if active_bunches in (None, "TIME_LIMIT"):
+        return unfinished_exact_result()
+    best_hand_quantities = capture_hand_quantities()
+    solver.Add(active_bunches_var == active_bunches)
+    emit_progress(
+        f"Đã chứng minh tối thiểu {active_bunches:,} buồng. Đang ghép dải nải để hiển thị.",
+        0.70,
+    )
+    compact_hand_quantities = build_compact_range_quantities(active_bunches)
+    if compact_hand_quantities is not None:
+        best_hand_quantities = compact_hand_quantities
+
+    emit_progress("Đã chứng minh số buồng tối thiểu. Đang dựng bảng kết quả.", 0.95)
+
+    hand_usage = {hand: 0 for hand in range(1, hands_per_bunch + 1)}
+    rows = []
+    detail_rows = []
+    for row_record in row_records:
+        row = row_record["row"]
+        requested_boxes = row_record["requested_boxes"]
+        hand_quantities = best_hand_quantities.get(row_record["processing_order"], {})
+        segment_rows = []
+        for hand_from, hand_to, bunches_allocated in _decompose_hand_quantities(hand_quantities):
+            if bunches_allocated <= 0:
+                continue
+            for hand in range(hand_from, hand_to + 1):
+                hand_usage[hand] += bunches_allocated
+            kg_per_bunch_units = _range_weight_units(hand_from, hand_to, hand_weight_units)
+            kg_allocated = (bunches_allocated * kg_per_bunch_units) / WEIGHT_SCALE
+            boxes_capacity = (bunches_allocated * kg_per_bunch_units) // kg_per_box_units
+            boxes_equivalent = kg_allocated / kg_per_box if kg_per_box > 0 else 0.0
+            segment_row = {
+                "processing_order": row_record["processing_order"],
+                "original_index": row_record["original_index"],
+                "customer_priority": row.get("customer_priority", row["market_priority"]),
+                "customer": row.get("customer", ""),
+                "market_priority": row["market_priority"],
+                "market": row["market"],
+                "sku_priority": row["sku_priority"],
+                "sku": row["sku"].upper(),
+                "hand_from": hand_from,
+                "hand_to": hand_to,
+                "hand_count": hand_to - hand_from + 1,
+                "range_rank": 0,
+                "range_label": f"{hand_from}-{hand_to}",
+                "requested_boxes": 0,
+                "order_requested_boxes": requested_boxes,
+                "kg_per_bunch_for_sku": kg_per_bunch_units / WEIGHT_SCALE,
+                "bunches_needed": 0,
+                "bunches_allocated": bunches_allocated,
+                "kg_allocated": kg_allocated,
+                "boxes_capacity": int(boxes_capacity),
+                "boxes_equivalent": boxes_equivalent,
+                "boxes_fulfilled": 0,
+                "containers_fulfilled": 0.0,
+                "short_boxes": 0,
+                "short_containers": 0.0,
+                "extra_kg_from_rounding": 0.0,
+                "hand_units_consumed": bunches_allocated * (hand_to - hand_from + 1),
+                "is_fulfilled": True,
+            }
+            segment_rows.append(segment_row)
+
+        remaining_segment_boxes = requested_boxes
+        for segment_row in segment_rows:
+            assigned_boxes = min(segment_row["boxes_capacity"], remaining_segment_boxes)
+            segment_row["boxes_fulfilled"] = assigned_boxes
+            remaining_segment_boxes -= assigned_boxes
+        if remaining_segment_boxes > 0:
+            fractional_rows = sorted(
+                segment_rows,
+                key=lambda item: item["boxes_equivalent"] - math.floor(item["boxes_equivalent"]),
+                reverse=True,
+            )
+            for segment_row in fractional_rows:
+                if remaining_segment_boxes <= 0:
+                    break
+                segment_row["boxes_fulfilled"] += 1
+                remaining_segment_boxes -= 1
+
+        for segment_row in segment_rows:
+            segment_row["requested_boxes"] = segment_row["boxes_fulfilled"]
+            segment_row["containers_fulfilled"] = segment_row["boxes_fulfilled"] / boxes_per_container
+            segment_row["bunches_needed"] = (
+                int(math.ceil((segment_row["boxes_fulfilled"] * kg_per_box) / segment_row["kg_per_bunch_for_sku"]))
+                if segment_row["boxes_fulfilled"] > 0 and segment_row["kg_per_bunch_for_sku"] > 0
+                else 0
+            )
+            segment_row["extra_kg_from_rounding"] = max(
+                0.0,
+                segment_row["kg_allocated"] - segment_row["boxes_fulfilled"] * kg_per_box,
+            )
+        detail_rows.extend(segment_rows)
+
+        kg_allocated = sum(segment["kg_allocated"] for segment in segment_rows)
+        bunches_allocated = max(hand_quantities.values(), default=0)
+        hand_units_consumed = sum(
+            qty for qty in hand_quantities.values()
+        )
+        boxes_capacity = int(math.floor(kg_allocated / kg_per_box)) if kg_per_box > 0 else 0
+        extra_kg_from_rounding = max(0.0, kg_allocated - requested_boxes * kg_per_box)
+        range_labels = ", ".join(segment["range_label"] for segment in segment_rows)
+        rows.append({
+            "processing_order": row_record["processing_order"],
+            "original_index": row_record["original_index"],
+            "customer_priority": row.get("customer_priority", row["market_priority"]),
+            "customer": row.get("customer", ""),
+            "market_priority": row["market_priority"],
+            "market": row["market"],
+            "sku_priority": row["sku_priority"],
+            "sku": row["sku"].upper(),
+            "hand_from": min((segment["hand_from"] for segment in segment_rows), default=0),
+            "hand_to": max((segment["hand_to"] for segment in segment_rows), default=0),
+            "hand_count": int(round(hand_units_consumed / bunches_allocated)) if bunches_allocated else 0,
+            "range_rank": 0,
+            "range_label": range_labels or "Chưa phân bổ",
+            "requested_boxes": requested_boxes,
+            "kg_per_bunch_for_sku": kg_allocated / bunches_allocated if bunches_allocated else 0.0,
+            "bunches_needed": bunches_allocated if requested_boxes else 0,
+            "bunches_allocated": bunches_allocated,
+            "kg_allocated": kg_allocated,
+            "boxes_capacity": boxes_capacity,
+            "boxes_fulfilled": requested_boxes,
+            "containers_fulfilled": requested_boxes / boxes_per_container,
+            "short_boxes": 0,
+            "short_containers": 0.0,
+            "extra_kg_from_rounding": extra_kg_from_rounding,
+            "hand_units_consumed": hand_units_consumed,
+            "is_fulfilled": True,
+        })
+
+    remaining_hands = {hand: active_bunches - hand_usage.get(hand, 0) for hand in range(1, hands_per_bunch + 1)}
+    kg_allocated_total = sum(row["kg_allocated"] for row in rows)
+    extra_kg_total = max(0.0, kg_allocated_total - total_requested_boxes * kg_per_box)
+    source_kg = active_bunches * kg_per_bunch
+    source_boxes_capacity = int(math.floor(source_kg / kg_per_box)) if kg_per_box > 0 else 0
+    segment_count = len(detail_rows)
+    summary = {
+        "total_bunches": active_bunches,
+        "target_containers": total_requested_boxes // boxes_per_container,
+        "requested_boxes": total_requested_boxes,
+        "source_kg": source_kg,
+        "kg_per_hand": kg_per_hand,
+        "hand_weights": hand_weights,
+        "source_boxes_capacity": source_boxes_capacity,
+        "source_cont_capacity": source_boxes_capacity / boxes_per_container,
+        "active_bunches_estimated": active_bunches,
+        "segment_count": segment_count,
+        "fulfilled_boxes": total_requested_boxes,
+        "fulfilled_containers": total_requested_boxes / boxes_per_container,
+        "short_boxes": 0,
+        "short_containers": 0.0,
+        "kg_allocated": kg_allocated_total,
+        "extra_kg_from_rounding": extra_kg_total,
+        "solver_status": "OPTIMAL",
+        "solver_backend": solver_backend_name,
+    }
+    return {
+        "rows": rows,
+        "detail_rows": detail_rows,
+        "remaining_hands": remaining_hands,
+        "summary": summary,
+        "loss": {
+            "active_bunches_estimated": active_bunches,
+            "segment_count": segment_count,
+            "kg_allocated": kg_allocated_total,
+            "extra_kg_from_rounding": extra_kg_total,
+            "solver_status": "OPTIMAL",
+            "solver_backend": solver_backend_name,
+        },
+        "solver_status": "OPTIMAL",
+        "solver_backend": solver_backend_name,
+    }
+
+
 def _calculate_min_bunches_mip(
     sku_rows: list[dict[str, Any]],
     kg_per_bunch: float,
@@ -2461,6 +2923,19 @@ def calculate_min_bunches_for_container_plan(
     progress_callback=None,
 ) -> dict[str, Any]:
     """Calculate the minimum whole bunches needed to satisfy fixed box demand."""
+    hand_mip_result = _calculate_min_bunches_hand_mip(
+        sku_rows,
+        kg_per_bunch,
+        hands_per_bunch,
+        kg_per_box=kg_per_box,
+        boxes_per_container=boxes_per_container,
+        hand_weights=hand_weights,
+        time_limit_seconds=time_limit_seconds,
+        progress_callback=progress_callback,
+    )
+    if hand_mip_result is not None:
+        return hand_mip_result
+
     mip_result = _calculate_min_bunches_mip(
         sku_rows,
         kg_per_bunch,

@@ -485,7 +485,7 @@ def test_min_bunch_mode_handles_four_containers_with_proven_optimum():
     assert summary["active_bunches_estimated"] > 0
 
 
-def test_min_bunch_mode_does_not_return_approximate_when_exact_proof_times_out():
+def test_min_bunch_mode_solves_stress_case_without_approximation():
     profile = build_hand_weight_profile(12, 18)
     result = calculate_min_bunches_for_container_plan(
         [
@@ -503,9 +503,11 @@ def test_min_bunch_mode_does_not_return_approximate_when_exact_proof_times_out()
         time_limit_seconds=1,
     )
 
-    assert result["summary"]["solver_status"] == "NO_SOLUTION"
-    assert result["summary"]["solver_backend"].endswith("_timeout")
-    assert result["rows"] == []
+    assert result["summary"]["solver_status"] == "OPTIMAL"
+    assert result["summary"]["requested_boxes"] == 5280
+    assert result["summary"]["fulfilled_boxes"] == 5280
+    assert result["summary"]["short_boxes"] == 0
+    assert result["summary"]["active_bunches_estimated"] > 0
 
 
 def test_min_bunch_mode_rejects_wrong_market_sku():

@@ -7689,7 +7689,7 @@ def render_container_allocation_calculator():
             _render_container_saved_plan_cards()
             return
 
-        status_box = st.status("Đang tối ưu chính xác số buồng xẻ tối thiểu...", expanded=True)
+        status_box = st.status("Đang chứng minh số buồng xẻ tối thiểu...", expanded=True)
         progress_bar = st.progress(0)
 
         def _container_exact_progress(message, progress=None):
@@ -7716,13 +7716,13 @@ def render_container_allocation_calculator():
         solver_status = summary.get("solver_status", result.get("solver_status", "APPROXIMATE"))
         solver_backend = summary.get("solver_backend", result.get("solver_backend", "unknown"))
         if solver_status == "APPROXIMATE":
-            status_box.update(label="Chưa có kết quả tối ưu chính xác", state="error", expanded=True)
+            status_box.update(label="Chưa có kết quả chứng minh chính xác", state="error", expanded=True)
             st.warning("Không dùng kết quả xấp xỉ cho mode này. Hãy cài OR-Tools hoặc chạy lại khi solver chính khả dụng.")
         elif solver_status == "NO_SOLUTION":
-            status_box.update(label="Chưa chứng minh được phương án tối ưu chính xác", state="error", expanded=True)
-            st.error("Không tìm được hoặc chưa chứng minh được phương án xẻ tối ưu chính xác cho cơ cấu cont đã nhập.")
+            status_box.update(label="Chưa chứng minh được số buồng tối thiểu", state="error", expanded=True)
+            st.error("Không tìm được hoặc chưa chứng minh được số buồng xẻ tối thiểu cho cơ cấu cont đã nhập.")
         else:
-            status_box.update(label="Đã chứng minh tối ưu tuyệt đối", state="complete", expanded=False)
+            status_box.update(label="Đã chứng minh số buồng xẻ tối thiểu", state="complete", expanded=False)
             st.caption(f"Thuật toán tối ưu: {solver_status} · {solver_backend}")
 
         target_containers = len(container_targets)
