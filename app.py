@@ -727,6 +727,26 @@ _DESTRUCTION_STAGE_MAP = {
 }
 
 
+def _safe_int_id(value):
+    """Return an integer id when possible; otherwise None."""
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    try:
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return None
+            return int(float(value))
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def build_next_season_maps(df_seasons: pd.DataFrame, df_stg_all: pd.DataFrame):
     """Return next producing season boundaries keyed by (base_lot_id, vu)."""
     next_season = {}
@@ -734,18 +754,21 @@ def build_next_season_maps(df_seasons: pd.DataFrame, df_stg_all: pd.DataFrame):
     if df_seasons.empty or "base_lot_id" not in df_seasons.columns:
         return next_season, next_producing
 
-    season_rows = df_seasons[df_seasons["base_lot_id"].notna()]
+    season_rows = df_seasons[df_seasons["base_lot_id"].notna()].copy()
+    season_rows["_base_lot_id_int"] = season_rows["base_lot_id"].apply(_safe_int_id)
+    season_rows = season_rows[season_rows["_base_lot_id_int"].notna()]
     if (
         not df_stg_all.empty
         and "base_lot_id" in df_stg_all.columns
         and "giai_doan" in df_stg_all.columns
     ):
         stg_chich_all = df_stg_all[df_stg_all["giai_doan"] == "Chích bắp"]
+        stg_chich_ids = pd.to_numeric(stg_chich_all["base_lot_id"], errors="coerce")
         for _, s_row in season_rows.iterrows():
-            s_blid = int(s_row["base_lot_id"])
+            s_blid = int(s_row["_base_lot_id_int"])
             s_vu = s_row["vu"]
             s_start = pd.to_datetime(s_row["ngay_bat_dau"])
-            chich_batch = stg_chich_all[stg_chich_all["base_lot_id"] == s_blid]
+            chich_batch = stg_chich_all[stg_chich_ids == s_blid]
             if not chich_batch.empty and "ngay_thuc_hien" in chich_batch.columns:
                 chich_in = chich_batch[
                     pd.to_datetime(chich_batch["ngay_thuc_hien"], errors="coerce") >= s_start
@@ -753,18 +776,19 @@ def build_next_season_maps(df_seasons: pd.DataFrame, df_stg_all: pd.DataFrame):
                 if not chich_in.empty:
                     next_producing.add((s_blid, s_vu))
 
-    for blid, blid_grp in season_rows.groupby("base_lot_id"):
+    for blid, blid_grp in season_rows.groupby("_base_lot_id_int"):
+        blid_int = int(blid)
         sorted_s = blid_grp.sort_values("ngay_bat_dau").drop_duplicates("vu")
         vu_list = sorted_s[["vu", "ngay_bat_dau"]].values.tolist()
         for i, (vu_val, _start_dt) in enumerate(vu_list):
             if i + 1 < len(vu_list):
                 next_vu = vu_list[i + 1][0]
-                if (int(blid), next_vu) in next_producing:
-                    next_season[(int(blid), vu_val)] = pd.to_datetime(vu_list[i + 1][1])
+                if (blid_int, next_vu) in next_producing:
+                    next_season[(blid_int, vu_val)] = pd.to_datetime(vu_list[i + 1][1])
                 else:
-                    next_season[(int(blid), vu_val)] = None
+                    next_season[(blid_int, vu_val)] = None
             else:
-                next_season[(int(blid), vu_val)] = None
+                next_season[(blid_int, vu_val)] = None
     return next_season, next_producing
 
 
@@ -4207,9 +4231,9 @@ def render_global_data_tab(c_farm):
             if "base_lot_id" in season_scope.columns and "ngay_bat_dau" in season_scope.columns:
                 for _, season_row in season_scope.iterrows():
                     blid = season_row.get("base_lot_id")
-                    if pd.isna(blid):
+                    blid_int = _safe_int_id(blid)
+                    if blid_int is None:
                         continue
-                    blid_int = int(blid)
                     start_dt = pd.to_datetime(season_row.get("ngay_bat_dau"), errors="coerce")
                     next_start = None
                     try:
@@ -4291,9 +4315,10 @@ def render_global_data_tab(c_farm):
                             date_mask = date_mask & (dates >= start_dt)
                         blid = season_row.get("base_lot_id")
                         next_start = None
-                        if pd.notna(blid):
+                        blid_int = _safe_int_id(blid)
+                        if blid_int is not None:
                             try:
-                                next_start = _map_next_season.get((int(blid), f_vu))
+                                next_start = _map_next_season.get((blid_int, f_vu))
                             except NameError:
                                 next_start = None
                         if next_start is not None:
@@ -4643,6 +4668,7 @@ def render_global_data_tab(c_farm):
                     ngay_bd_raw = s_row.get("ngay_bat_dau")
                     ngay_bd = str(ngay_bd_raw)[:10] if ngay_bd_raw is not None else ""
                     blid = s_row.get("base_lot_id")
+                    blid_int = _safe_int_id(blid)
                     season_start = None
                     if ngay_bd_raw is not None:
                         try:
@@ -4650,33 +4676,34 @@ def render_global_data_tab(c_farm):
                         except Exception:
                             pass
 
-                    if blid and not df_lots_farm.empty and "id" in df_lots_farm.columns:
-                        batch_lot = df_lots_farm[df_lots_farm["id"] == blid]
+                    if blid_int is not None and not df_lots_farm.empty and "id" in df_lots_farm.columns:
+                        lot_ids = pd.to_numeric(df_lots_farm["id"], errors="coerce")
+                        batch_lot = df_lots_farm[lot_ids == blid_int]
                         so_cay = int(batch_lot["so_luong"].sum()) if not batch_lot.empty else 0
                         dt_trong = float(batch_lot["dien_tich_trong"].dropna().iloc[0]) if not batch_lot.empty and "dien_tich_trong" in batch_lot.columns and not batch_lot["dien_tich_trong"].dropna().empty else 0.0
                     else:
                         so_cay = 0
                         dt_trong = 0.0
 
-                    if blid:
-                        next_s = _map_next_season.get((int(blid), vu))
-                        next_prod = (int(blid), vu) in _map_next_producing if next_s else False
+                    if blid_int is not None:
+                        next_s = _map_next_season.get((blid_int, vu))
+                        next_prod = (blid_int, vu) in _map_next_producing if next_s else False
                         next_s_date = next_s.date() if next_s is not None else None
                         gd, chich, cat, thu = compute_batch_stats(
-                            lo_name, blid, vu=vu, season_start=season_start,
+                            lo_name, blid_int, vu=vu, season_start=season_start,
                             next_season_start=next_s_date, next_vu_producing=next_prod
                         )
                     else:
                         gd, chich, cat, thu = "Đang sinh trưởng", 0, 0, 0
 
-                    display_label = batch_label_map.get(blid, lo_name) if blid else lo_name
+                    display_label = batch_label_map.get(blid_int, batch_label_map.get(blid, lo_name)) if blid_int is not None else lo_name
                     is_multi = total_batches > 1
                     dot_num = 0
                     if is_multi and "đợt " in display_label:
                         dot_raw = display_label.split("đợt ")[-1].rstrip(")")
                         dot_num = int(dot_raw) if dot_raw.isdigit() else 0
                     batches.append({
-                        "base_lot_id": int(blid) if blid and pd.notna(blid) else None,
+                        "base_lot_id": blid_int,
                         "vu": vu, "ngay_bd": ngay_bd, "so_cay": so_cay,
                         "dien_tich_trong": dt_trong, "gd": gd,
                         "chich": chich, "cat": cat, "thu": thu,
@@ -4872,14 +4899,15 @@ def render_global_data_tab(c_farm):
             lo_name = row.get("lo")
             lot_id = row.get("lot_id") or row.get("dim_lo_id")
             season_blid = row.get("base_lot_id")
+            season_blid_int = _safe_int_id(season_blid)
             dien_tich_trong = row.get("dien_tich_trong")
             dien_tich_fallback = row.get("dien_tich", 0)
             # Ưu tiên diện tích trồng thực tế (per-batch), fallback diện tích lô tối đa (per-lot)
             dien_tich = float(dien_tich_trong) if pd.notna(dien_tich_trong) else (float(dien_tich_fallback) if pd.notna(dien_tich_fallback) else 0.0)
 
             # Skip duplicate (vu, base_lot_id) - giữ dòng đầu tiên
-            if pd.notna(season_blid):
-                dedup_key = (f_vu, int(season_blid))
+            if season_blid_int is not None:
+                dedup_key = (f_vu, season_blid_int)
                 if dedup_key in seen_vu_blid:
                     continue
                 seen_vu_blid.add(dedup_key)
@@ -4900,9 +4928,15 @@ def render_global_data_tab(c_farm):
             has_blid_col = (not df_stg_all.empty and "base_lot_id" in df_stg_all.columns) or \
                            (not df_har_all.empty and "base_lot_id" in df_har_all.columns)
             
-            if pd.notna(season_blid) and has_blid_col:
-                sub_lots = df_lots_all[df_lots_all["id"] == season_blid] if "id" in df_lots_all.columns else pd.DataFrame()
-                sub_des = df_des_all[df_des_all["base_lot_id"] == season_blid] if not df_des_all.empty else pd.DataFrame()
+            if season_blid_int is not None and has_blid_col:
+                if "id" in df_lots_all.columns:
+                    sub_lots = df_lots_all[pd.to_numeric(df_lots_all["id"], errors="coerce") == season_blid_int]
+                else:
+                    sub_lots = pd.DataFrame()
+                if not df_des_all.empty and "base_lot_id" in df_des_all.columns:
+                    sub_des = df_des_all[pd.to_numeric(df_des_all["base_lot_id"], errors="coerce") == season_blid_int]
+                else:
+                    sub_des = pd.DataFrame()
             else:
                 sub_lots = df_lots_all[df_lots_all["lot_id"] == lot_id] if not df_lots_all.empty else pd.DataFrame()
                 sub_des = df_des_all[df_des_all["lot_id"] == lot_id] if not df_des_all.empty else pd.DataFrame()
@@ -4918,20 +4952,20 @@ def render_global_data_tab(c_farm):
             so_luong_trong = int(sub_lots["so_luong"].sum()) if not sub_lots.empty else 0
 
             # ─── Dùng shared compute_batch_stats (đồng bộ logic với Map) ───
-            if pd.notna(season_blid) and lo_name:
-                next_start = _map_next_season.get((int(season_blid), f_vu))
+            if season_blid_int is not None and lo_name:
+                next_start = _map_next_season.get((season_blid_int, f_vu))
                 next_producing = next_start is not None
                 next_s_date = next_start.date() if next_start is not None else None
                 season_start_date = start.date() if pd.notna(start) else None
                 _, so_chich_bap, so_cat_bap, so_thu_hoach = compute_batch_stats(
-                    lo_name, season_blid, vu=f_vu, season_start=season_start_date,
+                    lo_name, season_blid_int, vu=f_vu, season_start=season_start_date,
                     next_season_start=next_s_date, next_vu_producing=next_producing
                 )
             else:
                 so_chich_bap, so_cat_bap, so_thu_hoach = 0, 0, 0
 
             # Tên lô: gắn "(đợt X)" nếu lô có nhiều đợt trồng
-            display_lo = batch_label_map.get(season_blid, lo_name) if pd.notna(season_blid) else lo_name
+            display_lo = batch_label_map.get(season_blid_int, batch_label_map.get(season_blid, lo_name)) if season_blid_int is not None else lo_name
 
             if f_vu not in detail_rows_by_vu:
                 detail_rows_by_vu[f_vu] = []
