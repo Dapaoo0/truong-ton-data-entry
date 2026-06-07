@@ -2,6 +2,16 @@
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
 
+## [07/06/2026] - Tích hợp dashboard chi phí raw vào app input
+
+#### Feature: Tab `Chi phí` dùng chung cho mọi account (`app.py`, `cost_dashboard.py`)
+- **[UI]**: Thêm tab read-only `Chi phí` cho Admin, Phòng Kinh doanh, Quản lý farm, NT/BVTV, Thu hoạch và Xưởng.
+- **[Scope]**: Admin/Kinh doanh xem được nhiều farm; account farm/đội chỉ xem dữ liệu farm đang đăng nhập.
+- **[Data]**: Dashboard đọc raw `fact_nhat_ky_san_xuat.thanh_tien` + `fact_vat_tu.thanh_tien` qua Supabase REST client hiện tại, join dim bằng pandas và cache 5 phút.
+- **[Ranh giới logic]**: Dashboard này phục vụ phân tích tổng chi phí raw; popup `chi phí/cây` trên bản đồ vẫn dùng logic clean/lifecycle riêng.
+
+---
+
 ## [05/06/2026] - Siết logic chi phí/cây theo mốc sinh trưởng
 
 #### Fix: Cây mới không gánh chi phí chăm sóc buồng/cây cũ (`app.py`, `cost_lifecycle.py`)

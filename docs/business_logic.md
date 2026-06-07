@@ -399,7 +399,19 @@ Hệ thống phân biệt **2 loại diện tích**:
 
 ---
 
-## 10. Chi Phí/Cây Trên Bản Đồ
+## 10. Chi Phí
+
+### 10.1 Dashboard Chi phí raw
+
+Tab `Chi phí` trong app input là dashboard đọc số liệu raw để phân tích tổng chi phí vận hành.
+
+- **Nguồn chi phí**: cộng trực tiếp `fact_nhat_ky_san_xuat.thanh_tien` và `fact_vat_tu.thanh_tien`.
+- **Không clean theo lifecycle**: dashboard này không loại chi phí cây cũ, không cap theo cắt bắp, không chia lại chi phí/cây. Mục tiêu là xem tổng chi phí ghi nhận theo farm/lô/đội/tháng/hạng mục.
+- **Phân quyền farm**: Admin và Phòng Kinh doanh xem được nhiều farm; account farm/đội chỉ xem farm đang đăng nhập.
+- **Data access**: dùng Supabase REST client hiện tại, cache 5 phút, join dimension bằng pandas trong app.
+- **Tách biệt với popup chi phí/cây**: popup trên bản đồ dùng logic clean/lifecycle ở mục 10.2, nên số tổng có thể khác dashboard raw.
+
+### 10.2 Chi Phí/Cây Trên Bản Đồ
 
 Dashboard chi phí/cây được mở từ tooltip của bản đồ Farm 126/157/195.
 

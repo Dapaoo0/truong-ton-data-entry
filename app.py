@@ -25,6 +25,8 @@ import re
 import unicodedata
 import inspect
 
+from cost_dashboard import render_cost_dashboard
+
 try:
     import cost_lifecycle as _cost_lifecycle
 except Exception:
@@ -8337,11 +8339,11 @@ def render_main_app():
     # MODULE ADMIN
     # =================================================
     if c_farm == "Admin" and c_team == "Quản trị viên":
-        tab_opts = ["🌐 Dữ liệu toàn cục", "👑 Quản trị Mùa Vụ"]
+        tab_opts = ["🌐 Dữ liệu toàn cục", "💰 Chi phí", "👑 Quản trị Mùa Vụ"]
         active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_admin_menu", default=tab_opts[0])
         if active_tab is None: active_tab = tab_opts[0]
         
-        if active_tab == tab_opts[1]:
+        if active_tab == tab_opts[2]:
             st.info("👋 Chào mừng Quản trị viên. Tại đây bạn có thể quản lý lịch sử Vụ cho từng lô.")
             
             res = supabase.table("seasons").select("*, dim_lo!inner(lo_name, dim_farm!inner(farm_name))").eq("is_deleted", False).order("created_at", desc=True).execute()
@@ -8411,6 +8413,8 @@ def render_main_app():
                             st.rerun()
                         except Exception as e:
                             st.error(f"❌ Lỗi khi chốt vụ: {e}")
+        elif active_tab == tab_opts[1]:
+            render_cost_dashboard(supabase, c_farm, c_team)
         elif active_tab == tab_opts[0]:
             render_global_data_tab("Admin")
         return
@@ -8419,7 +8423,7 @@ def render_main_app():
     # MODULE KINH DOANH
     # =================================================
     if c_farm == "Phòng Kinh doanh" and c_team == "Kinh doanh":
-        tab_opts = ["🌐 Dữ liệu toàn cục", "📦 Máy tính phân bổ cont"]
+        tab_opts = ["🌐 Dữ liệu toàn cục", "💰 Chi phí", "📦 Máy tính phân bổ cont"]
         active_tab = _persisted_segmented_control(
             "Chức năng",
             tab_opts,
@@ -8427,12 +8431,15 @@ def render_main_app():
             query_key="sales_tab",
             slugs={
                 tab_opts[0]: "global",
-                tab_opts[1]: "container_allocation",
+                tab_opts[1]: "cost",
+                tab_opts[2]: "container_allocation",
             },
             default=tab_opts[0],
         )
-        if active_tab == tab_opts[1]:
+        if active_tab == tab_opts[2]:
             render_container_allocation_calculator()
+        elif active_tab == tab_opts[1]:
+            render_cost_dashboard(supabase, c_farm, c_team)
         else:
             render_global_data_tab("Phòng Kinh doanh")
         return
@@ -8442,7 +8449,13 @@ def render_main_app():
     # =================================================
     if c_team == "Quản lý farm":
         st.info("👋 Chế độ chỉ xem (Read-only). Tương tác với các biểu đồ bên dưới để phân tích dữ liệu.")
-        render_global_data_tab(c_farm)
+        tab_opts = ["🌐 Dữ liệu toàn cục", "💰 Chi phí"]
+        active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_farm_manager_menu", default=tab_opts[0])
+        if active_tab is None: active_tab = tab_opts[0]
+        if active_tab == tab_opts[1]:
+            render_cost_dashboard(supabase, c_farm, c_team)
+        else:
+            render_global_data_tab(c_farm)
         return
 
     # =================================================
@@ -8452,15 +8465,19 @@ def render_main_app():
     # =================================================
     if c_team in ["NT1", "NT2", "Đội BVTV"]:
         if c_team == "Đội BVTV":
-            tab_opts = ["🌐 Dữ liệu toàn cục", "📈 Cập nhật Tiến độ"]
+            tab_opts = ["🌐 Dữ liệu toàn cục", "💰 Chi phí", "📈 Cập nhật Tiến độ"]
         else:
-            tab_opts = ["🌐 Dữ liệu toàn cục", "🌱 Khởi tạo Lô trồng", "📈 Cập nhật Tiến độ", "📏 Đo Size", "🗑️ Cập nhật Xuất hủy", "🌳 Kiểm kê cây", "🧪 Đo pH Đất", "🦠 Kiểm tra Fusarium"]
+            tab_opts = ["🌐 Dữ liệu toàn cục", "💰 Chi phí", "🌱 Khởi tạo Lô trồng", "📈 Cập nhật Tiến độ", "📏 Đo Size", "🗑️ Cập nhật Xuất hủy", "🌳 Kiểm kê cây", "🧪 Đo pH Đất", "🦠 Kiểm tra Fusarium"]
             
         active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_nt_menu", default=tab_opts[0])
         if active_tab is None: active_tab = tab_opts[0] # Prevent empty state
 
         # TAB 1: KHỞI TẠO LÔ
-        if active_tab == "🌱 Khởi tạo Lô trồng":
+        if active_tab == "💰 Chi phí":
+            render_cost_dashboard(supabase, c_farm, c_team)
+
+        # TAB 1: KHỞI TẠO LÔ
+        elif active_tab == "🌱 Khởi tạo Lô trồng":
             st.markdown("#### Đăng ký đợt xuống giống mới")
             df_lots = fetch_table_data("base_lots", c_farm)
             df_lots_team = df_lots[df_lots["team"] == c_team] if not df_lots.empty else pd.DataFrame()
@@ -9072,11 +9089,11 @@ def render_main_app():
     # MODULE 2: ĐỘI THU HOẠCH
     # =================================================
     elif c_team == "Đội Thu Hoạch":
-        tab_opts = ["🌐 Dữ liệu toàn cục", "🍌 Nhật ký Thu Hoạch"]
+        tab_opts = ["🌐 Dữ liệu toàn cục", "💰 Chi phí", "🍌 Nhật ký Thu Hoạch"]
         active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_har_menu", default=tab_opts[0])
         if active_tab is None: active_tab = tab_opts[0]
         
-        if active_tab == tab_opts[1]:
+        if active_tab == tab_opts[2]:
             st.markdown("#### Ghi nhận Sản lượng Thu hoạch hàng ngày")
             available_lots = get_lots_by_farm(c_farm)
             if not available_lots:
@@ -9180,17 +9197,19 @@ def render_main_app():
                 render_team_dataframe("harvest_logs", df_har_team, ["lot_id", "mau_day", "ngay_thu_hoach", "so_luong", "hinh_thuc_thu_hoach", "created_at"])
 
         elif active_tab == tab_opts[1]:
+            render_cost_dashboard(supabase, c_farm, c_team)
+        elif active_tab == tab_opts[0]:
             render_global_data_tab(c_farm)
 
     # =================================================
     # MODULE 3: XƯỞNG ĐÓNG GÓI
     # =================================================
     elif c_team == "Xưởng Đóng Gói":
-        tab_opts = ["🌐 Dữ liệu toàn cục", "📦 Cập nhật BSR"]
+        tab_opts = ["🌐 Dữ liệu toàn cục", "💰 Chi phí", "📦 Cập nhật BSR"]
         active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_bsr_menu", default=tab_opts[0])
         if active_tab is None: active_tab = tab_opts[0]
         
-        if active_tab == tab_opts[1]:
+        if active_tab == tab_opts[2]:
             st.markdown("#### Ghi nhận Tỷ lệ BSR thành phẩm")
             available_lots = get_lots_by_farm(c_farm)
             if not available_lots:
@@ -9258,6 +9277,8 @@ def render_main_app():
                     
                 render_team_dataframe("bsr_logs", df_bsr_team, ["lot_id", "ngay_nhap", "bsr", "created_at"])
 
+        elif active_tab == tab_opts[1]:
+            render_cost_dashboard(supabase, c_farm, c_team)
         elif active_tab == tab_opts[0]:
             render_global_data_tab(c_farm)
 
