@@ -4120,6 +4120,13 @@ def render_global_data_tab(c_farm):
         return f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{filename}" class="custom-dl-btn {css_class}">{label}</a>'
 
     col_t1, col_t3, col_t4, col_t5 = st.columns([2, 1, 1, 1])
+    report_generated_at = datetime.now()
+    report_stamp = report_generated_at.strftime("%Y%m%d_%H%M%S")
+
+    with col_t1:
+        if st.button("🔄 Làm mới báo cáo", key="global_reports_refresh", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
 
     if is_multi_farm and available_farms:
         # ── Admin/KD: mỗi nút download là popover chọn farm ──
@@ -4134,7 +4141,7 @@ def render_global_data_tab(c_farm):
                 fl = _filter_by_farm(df_lots_all, sel_chich)
                 fs = _filter_by_farm(df_stg_all, sel_chich)
                 chich_excel = generate_chich_bap_excel(fl, fs)
-                fn = f"Bao_cao_chich_bap_{sel_chich}_{date.today().strftime('%Y%m%d')}.xlsx"
+                fn = f"Bao_cao_chich_bap_{sel_chich}_{report_stamp}.xlsx"
                 st.download_button("⬇️ Tải về", data=chich_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
         with col_t4:
@@ -4145,7 +4152,7 @@ def render_global_data_tab(c_farm):
                 fd = _filter_by_farm(df_des_all, sel_cat)
                 fh = _filter_by_farm(df_har_all, sel_cat)
                 cut_excel = generate_cut_bap_excel(fl, fs, fd, fh)
-                fn = f"Bao_cao_cat_bap_{sel_cat}_{date.today().strftime('%Y%m%d')}.xlsx"
+                fn = f"Bao_cao_cat_bap_{sel_cat}_{report_stamp}.xlsx"
                 st.download_button("⬇️ Tải về", data=cut_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
         with col_t5:
@@ -4154,25 +4161,25 @@ def render_global_data_tab(c_farm):
                 fl = _filter_by_farm(df_lots_all, sel_trong)
                 f_seasons = _filter_by_farm(df_seasons, sel_trong)
                 plant_excel = generate_planting_excel(fl, f_seasons)
-                fn = f"Bao_cao_trong_moi_{sel_trong}_{date.today().strftime('%Y%m%d')}.xlsx"
+                fn = f"Bao_cao_trong_moi_{sel_trong}_{report_stamp}.xlsx"
                 st.download_button("⬇️ Tải về", data=plant_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
     else:
         # ── User thường: download trực tiếp (giữ nguyên) ──
         with col_t3:
             chich_excel = generate_chich_bap_excel(df_lots_all, df_stg_all)
-            fn = f"Bao_cao_chich_bap_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx"
+            fn = f"Bao_cao_chich_bap_{c_farm}_{report_stamp}.xlsx"
             href = _gen_dl_link(chich_excel, fn, "btn-chich", "Báo cáo Chích bắp")
             st.markdown(href, unsafe_allow_html=True)
 
         with col_t4:
             cut_excel = generate_cut_bap_excel(df_lots_all, df_stg_all, df_des_all, df_har_all)
-            fn = f"Bao_cao_cat_bap_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx"
+            fn = f"Bao_cao_cat_bap_{c_farm}_{report_stamp}.xlsx"
             href = _gen_dl_link(cut_excel, fn, "btn-cat", "Báo cáo Cắt bắp")
             st.markdown(href, unsafe_allow_html=True)
 
         with col_t5:
             plant_excel = generate_planting_excel(df_lots_all, df_seasons)
-            fn = f"Bao_cao_trong_moi_{c_farm}_{date.today().strftime('%Y%m%d')}.xlsx"
+            fn = f"Bao_cao_trong_moi_{c_farm}_{report_stamp}.xlsx"
             href = _gen_dl_link(plant_excel, fn, "btn-trong", "Báo cáo Trồng mới")
             st.markdown(href, unsafe_allow_html=True)
 
