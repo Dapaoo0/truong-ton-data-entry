@@ -4849,6 +4849,7 @@ def render_global_data_tab(c_farm):
             img_h=img_h,
             stage_colors_json=_MAP_STAGE_COLORS_JSON,
             map_zoom=map_zoom,
+            map_id=farm_name,
         )
 
         map_event = farm_map_component(

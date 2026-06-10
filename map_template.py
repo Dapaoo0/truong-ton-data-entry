@@ -3,6 +3,8 @@ Reusable HTML/CSS/JS template for interactive farm maps.
 Used by app.py for interactive farm map rendering.
 """
 
+import json
+
 
 MAP_STROKE_REFERENCE_WIDTH = 4000
 MAP_STROKE_WIDTH = 3
@@ -13,7 +15,8 @@ MAP_SMALL_MAP_ZOOM = 1.0
 
 
 def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
-                        img_w, img_h, stage_colors_json, map_zoom=None):
+                        img_w, img_h, stage_colors_json, map_zoom=None,
+                        map_id=None):
     """Build self-contained HTML for an interactive farm map.
 
     Parameters
@@ -49,6 +52,7 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
     viewbox_y = (img_h - viewbox_h) / 2
     viewport_aspect_w = max(1, viewbox_w)
     viewport_aspect_h = max(1, viewbox_h)
+    panel_storage_key = json.dumps(f"farm-map-info-panel:{map_id or f'{img_w}x{img_h}'}")
 
     return f'''
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
@@ -240,6 +244,12 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
             z-index: 500;
             min-width: 170px;
             box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            transition: opacity 0.18s ease, transform 0.18s ease;
+        }}
+        .map-info-panel.is-hidden {{
+            opacity: 0;
+            pointer-events: none;
+            transform: translateY(8px);
         }}
         .map-info-panel .info-title {{
             font-size: 11px;
@@ -250,6 +260,72 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
             border-bottom: 1px solid rgba(255,255,255,0.1);
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }}
+        .map-info-hide {{
+            width: 22px;
+            height: 22px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid rgba(148,163,184,0.28);
+            border-radius: 999px;
+            background: rgba(15,23,42,0.45);
+            color: #cbd5e1;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 800;
+            line-height: 1;
+            padding: 0;
+            flex-shrink: 0;
+        }}
+        .map-info-hide:hover {{
+            background: rgba(99,102,241,0.28);
+            color: #fff;
+            border-color: rgba(148,163,184,0.5);
+        }}
+        .map-info-open {{
+            position: absolute;
+            bottom: 44px;
+            left: 10px;
+            z-index: 501;
+            display: none;
+            align-items: center;
+            gap: 7px;
+            border: 1px solid rgba(99,102,241,0.38);
+            border-radius: 999px;
+            padding: 8px 12px;
+            background: rgba(15, 23, 42, 0.88);
+            color: #cbd5e1;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 4px 18px rgba(0,0,0,0.35);
+        }}
+        .map-info-open.is-visible {{
+            display: inline-flex;
+        }}
+        .map-info-open:hover {{
+            background: rgba(30, 41, 59, 0.95);
+            color: #fff;
+            border-color: rgba(99,102,241,0.7);
+        }}
+        .map-info-open .info-open-icon {{
+            width: 16px;
+            height: 16px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 999px;
+            background: rgba(99,102,241,0.28);
+            color: #fff;
+            font-size: 11px;
+            font-weight: 900;
         }}
         .map-info-panel .info-row {{
             display: flex;
@@ -292,6 +368,8 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
                 font-size: 9px; min-width: 110px; border-radius: 6px;
             }}
             .map-info-panel .info-title {{ font-size: 8px; margin-bottom: 2px; }}
+            .map-info-hide {{ width: 18px; height: 18px; font-size: 12px; }}
+            .map-info-open {{ bottom: 30px; left: 4px; padding: 6px 9px; font-size: 10px; }}
         }}
 
         /* ── Small tablet / phone landscape: 481–768px ── */
@@ -316,6 +394,8 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
                 font-size: 10px; min-width: 135px; border-radius: 7px;
             }}
             .map-info-panel .info-title {{ font-size: 9px; margin-bottom: 3px; }}
+            .map-info-hide {{ width: 19px; height: 19px; font-size: 12px; }}
+            .map-info-open {{ bottom: 34px; left: 6px; padding: 7px 10px; font-size: 11px; }}
         }}
 
         /* ── Tablet / iPad portrait: 769–1024px ── */
@@ -338,6 +418,7 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
                 font-size: 11px; min-width: 160px; border-radius: 8px;
             }}
             .map-info-panel .info-title {{ font-size: 10px; }}
+            .map-info-open {{ bottom: 40px; left: 8px; }}
         }}
 
         /* ── Large: 1200–1799px (laptops, desktops) ── */
@@ -388,10 +469,16 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
             {svg_polygons}
         </svg>
         <div class="map-tooltip" id="mapTooltip"></div>
-        <div class="map-info-panel">
-            <div class="info-title">Diện tích Farm</div>
+        <div class="map-info-panel" id="mapInfoPanel">
+            <div class="info-title">
+                <span>Diện tích Farm</span>
+                <button class="map-info-hide" id="mapInfoHide" type="button" aria-label="Ẩn thông tin diện tích" title="Ẩn thông tin diện tích">×</button>
+            </div>
             {info_panel_html}
         </div>
+        <button class="map-info-open" id="mapInfoOpen" type="button" aria-label="Hiện thông tin diện tích" title="Hiện thông tin diện tích">
+            <span class="info-open-icon">i</span><span>Diện tích</span>
+        </button>
         </div>
         <div class="legend-bar">{legend_html}</div>
     </div>
@@ -401,12 +488,42 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
         const mapRoot = document.getElementById('farmMapContainer');
         const container = document.getElementById('farmMapViewport');
         const tooltip = document.getElementById('mapTooltip');
+        const infoPanel = document.getElementById('mapInfoPanel');
+        const infoHideBtn = document.getElementById('mapInfoHide');
+        const infoOpenBtn = document.getElementById('mapInfoOpen');
         const polys = container.querySelectorAll('.lot-poly');
         const stageColors = {stage_colors_json};
         stageColors["Chưa có dữ liệu"] = "#636e72";
+        const infoPanelStorageKey = {panel_storage_key};
 
         let pinned = false;
         let pinnedPoly = null;
+
+        function defaultInfoHidden() {{
+            return window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+        }}
+
+        function readInfoHiddenPreference() {{
+            try {{
+                var stored = window.localStorage.getItem(infoPanelStorageKey);
+                if (stored === 'hidden') return true;
+                if (stored === 'visible') return false;
+            }} catch(e) {{}}
+            return defaultInfoHidden();
+        }}
+
+        function setInfoPanelHidden(hidden, persist) {{
+            if (!infoPanel || !infoOpenBtn) return;
+            infoPanel.classList.toggle('is-hidden', hidden);
+            infoOpenBtn.classList.toggle('is-visible', hidden);
+            if (persist) {{
+                try {{
+                    window.localStorage.setItem(infoPanelStorageKey, hidden ? 'hidden' : 'visible');
+                }} catch(e) {{}}
+            }}
+        }}
+
+        setInfoPanelHidden(readInfoHiddenPreference(), false);
 
         function getLotData(poly) {{
             return {{
@@ -539,9 +656,30 @@ def build_farm_map_html(svg_polygons, legend_html, info_panel_html,
         }});
 
         container.addEventListener('click', function(e) {{
-            if (e.target.closest('.lot-poly') || e.target.closest('.map-tooltip')) return;
+            if (
+                e.target.closest('.lot-poly') ||
+                e.target.closest('.map-tooltip') ||
+                e.target.closest('.map-info-panel') ||
+                e.target.closest('.map-info-open')
+            ) return;
             if (pinned) unpin();
         }});
+
+        if (infoHideBtn) {{
+            infoHideBtn.addEventListener('click', function(e) {{
+                e.preventDefault();
+                e.stopPropagation();
+                setInfoPanelHidden(true, true);
+            }});
+        }}
+
+        if (infoOpenBtn) {{
+            infoOpenBtn.addEventListener('click', function(e) {{
+                e.preventDefault();
+                e.stopPropagation();
+                setInfoPanelHidden(false, true);
+            }});
+        }}
 
         tooltip.addEventListener('click', function(e) {{
             e.stopPropagation();
