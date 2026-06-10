@@ -9,7 +9,7 @@ MAP_STROKE_WIDTH = 3
 MAP_STROKE_HOVER_WIDTH = 5
 MAP_STROKE_PINNED_WIDTH = 6
 MAP_STROKE_SMALL_MAP_MULTIPLIER = 1.0
-MAP_SMALL_MAP_ZOOM = 1.1
+MAP_SMALL_MAP_ZOOM = 1.0
 
 
 def build_farm_map_html(svg_polygons, legend_html, info_panel_html,

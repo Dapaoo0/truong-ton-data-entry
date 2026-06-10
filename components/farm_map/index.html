@@ -27,6 +27,7 @@
       const frame = document.getElementById("map-frame");
       let readySent = false;
       let lastHtml = null;
+      let currentArgs = {};
 
       function postToStreamlit(message) {
         window.parent.postMessage(Object.assign({
@@ -53,6 +54,28 @@
         });
       }
 
+      function estimatedResponsiveHeight(args) {
+        const imgW = Number(args && args.img_w) || 0;
+        const imgH = Number(args && args.img_h) || 0;
+        const aspect = imgW > 0 && imgH > 0 ? imgH / imgW : 0.5625;
+        const width =
+          frame.getBoundingClientRect().width ||
+          document.documentElement.clientWidth ||
+          window.innerWidth ||
+          1000;
+
+        let legendHeight = 62;
+        if (width < 481) legendHeight = 96;
+        else if (width < 769) legendHeight = 82;
+        else if (width < 1025) legendHeight = 72;
+
+        return Math.ceil(width * aspect + legendHeight + 8);
+      }
+
+      function setResponsiveFrameHeight(args) {
+        setFrameHeight(estimatedResponsiveHeight(args || currentArgs || {}));
+      }
+
       function setComponentValue(value) {
         postToStreamlit({
           type: "streamlit:setComponentValue",
@@ -66,12 +89,13 @@
         if (data.type === "streamlit:render") {
           componentReady();
           const args = data.args || {};
+          currentArgs = args;
           const html = args.html || "";
           if (html !== lastHtml) {
             lastHtml = html;
             frame.srcdoc = html;
           }
-          setFrameHeight(args.initial_height || 600);
+          setResponsiveFrameHeight(args);
           return;
         }
 
@@ -93,7 +117,14 @@
       });
 
       componentReady();
-      setFrameHeight(600);
+      window.addEventListener("resize", function () {
+        setResponsiveFrameHeight(currentArgs);
+      });
+      frame.addEventListener("load", function () {
+        setTimeout(function () { setResponsiveFrameHeight(currentArgs); }, 50);
+        setTimeout(function () { setResponsiveFrameHeight(currentArgs); }, 250);
+      });
+      setResponsiveFrameHeight(currentArgs);
     })();
   </script>
 </body>

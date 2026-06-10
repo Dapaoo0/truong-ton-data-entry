@@ -4593,7 +4593,7 @@ def render_global_data_tab(c_farm):
 
     def _map_component_initial_height(img_w, img_h):
         aspect = img_h / img_w if img_w else 0.5625
-        return min(max(500, int(aspect * 1100) + 90), 900)
+        return min(max(560, int(aspect * 1700) + 110), 1500)
 
     def _compute_map_area_metrics(lot_info_map, total_farm_area=None):
         """Tính panel diện tích bản đồ theo mốc lũy kế, dùng chung cho mọi farm."""
@@ -4854,6 +4854,8 @@ def render_global_data_tab(c_farm):
         map_event = farm_map_component(
             html=html_content,
             initial_height=_map_component_initial_height(img_w, img_h),
+            img_w=img_w,
+            img_h=img_h,
             key=f"farm_map_component_{farm_name}",
             default=None,
         )
