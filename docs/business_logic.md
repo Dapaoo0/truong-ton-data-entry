@@ -391,6 +391,7 @@ Hệ thống phân biệt **2 loại diện tích**:
   - **Row 3 — Sub-headers**: "CẮT BẮP" | "XUẤT HỦY" | "Thu hoạch" | "Tồn trên lô", nền trắng.
   - **Row 4 — Màu dây**: Từ `ribbon_schedule` (farm_id, year, week_number), nền theo COLOR_MAP.
 - **Data matching**: `base_lot_id` (ưu tiên) hoặc fallback `df_cut["lo"] == lo_name`. Thu hoạch map bằng `harvest_logs.mau_day` về tuần cắt cùng màu dây, ưu tiên tuần có dự báo `+8/+9` trùng tuần thu hoạch thực tế.
+- **Dòng `Dự kiến thu hoạch`**: nằm ngay dưới dòng `Tổng`. Mỗi tuần chỉ điền ở cột `Thu hoạch`, công thức `round(Tổng CẮT BẮP của tuần × 97%)`, chưa trừ xuất hủy và chưa trừ thu hoạch thực tế. Các cột còn lại hiển thị `-`.
 - **Type safety**: `tuan` → `pd.to_numeric().astype(int)`, `_year` → `.astype(int)`.
 - **Lot union**: Tên lô lấy từ CẢ `base_lots` VÀ `stage_logs`/`destruction_logs` (tránh miss lô chỉ tồn tại trong 1 nguồn).
 

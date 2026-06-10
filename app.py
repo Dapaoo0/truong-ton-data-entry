@@ -3974,6 +3974,49 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None, df_har=None) -> bytes:
             c_tot.font = Font(bold=True); c_tot.fill = total_fill
             c_tot.border = thin_border; c_tot.alignment = center_align
 
+        # === EXPECTED HARVEST ROW ===
+        # Dự kiến thu hoạch = round(97% tổng cắt bắp), chưa trừ xuất hủy/thu hoạch.
+        expected_row = total_row + 1
+        c_exp_label = ws.cell(row=expected_row, column=1, value="Dự kiến thu\nhoạch")
+        c_exp_label.font = Font(bold=True, size=11)
+        c_exp_label.fill = total_fill
+        c_exp_label.border = thin_border
+        c_exp_label.alignment = center_align
+        ws.row_dimensions[expected_row].height = 36
+
+        def _expected_harvest_from_cut(cut_value):
+            if not isinstance(cut_value, (int, float)) or cut_value <= 0:
+                return "-"
+            return int(float(cut_value) * 0.97 + 0.5)
+
+        for week in weeks:
+            cut_total = ws.cell(row=total_row, column=week_cut_col[week]).value
+            for ci in (week_cut_col[week], week_des_col[week], week_rem_col[week]):
+                c_dash = ws.cell(row=expected_row, column=ci, value="-")
+                c_dash.font = Font(bold=True)
+                c_dash.fill = white_fill
+                c_dash.border = thin_border
+                c_dash.alignment = center_align
+
+            c_exp = ws.cell(row=expected_row, column=week_har_col[week], value=_expected_harvest_from_cut(cut_total))
+            c_exp.font = Font(bold=True)
+            c_exp.fill = total_fill
+            c_exp.border = thin_border
+            c_exp.alignment = center_align
+
+        lk_expected = _expected_harvest_from_cut(ws.cell(row=total_row, column=lk_cut_col).value)
+        for ci in (lk_cut_col, lk_des_col, lk_rem_col):
+            c_dash = ws.cell(row=expected_row, column=ci, value="-")
+            c_dash.font = Font(bold=True)
+            c_dash.fill = white_fill
+            c_dash.border = thin_border
+            c_dash.alignment = center_align
+        c_lk_exp = ws.cell(row=expected_row, column=lk_har_col, value=lk_expected)
+        c_lk_exp.font = Font(bold=True)
+        c_lk_exp.fill = total_fill
+        c_lk_exp.border = thin_border
+        c_lk_exp.alignment = center_align
+
         ws.column_dimensions[get_column_letter(1)].width = 14
         for ci in range(2, last_col + 1):
             ws.column_dimensions[get_column_letter(ci)].width = 11
