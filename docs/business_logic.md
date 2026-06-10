@@ -369,12 +369,18 @@ Hệ thống phân biệt **2 loại diện tích**:
 ## 9. Báo cáo Excel (Excel Export)
 
 ### 9.1 Nguyên tắc chung
-- Báo cáo Excel Cắt bắp hiển thị **2 cột mỗi tuần**: CẮT BẮP (số thực tế) và XUẤT HỦY (trước thu hoạch). Hai cột **độc lập, không bù trừ nhau**.
-- Ví dụ: Tuần 10 cắt 100 bắp + hủy 5 → Excel hiển thị CẮT BẮP: 100 | XUẤT HỦY: 5. KHÔNG hiển thị 95.
-- Cột Lũy kế cuối bảng tổng cộng dồn riêng CẮT và HỦY.
+- Báo cáo Excel Cắt bắp hiển thị **4 cột mỗi tuần**: CẮT BẮP, XUẤT HỦY, Thu hoạch, Tồn trên lô.
+- XUẤT HỦY có thể gồm hai nhóm:
+  - `Trước thu hoạch`: cây/buồng hủy khi còn nằm trên lô, nên làm giảm tồn trên lô.
+  - `Sau thu hoạch`: hủy sau khi màu dây/lứa đó đã thu. Nhóm này vẫn hiển thị trong cột XUẤT HỦY nhưng được bù vào Thu hoạch ròng để không trừ tồn hai lần.
+- Công thức theo từng lô + tuần màu dây:
+  - `Thu hoạch hiển thị = max(0, Thu hoạch gốc - Xuất hủy sau thu hoạch)`.
+  - `Tồn trên lô = Cắt bắp - Xuất hủy trước thu hoạch - Thu hoạch gốc - max(0, Xuất hủy sau thu hoạch - Thu hoạch gốc)`.
+- Ví dụ: Cắt 55, hủy trước thu 9, thu hoạch gốc 46, hủy sau thu 2 → Excel hiển thị `CẮT 55 | HỦY 11 | THU 44 | TỒN 0`.
+- Cột Lũy kế cuối bảng tổng cộng dồn riêng CẮT, HỦY, THU ròng và TỒN.
 
 ### 9.2 Báo cáo Cắt bắp (`generate_cut_bap_excel`)
-- **Input**: `df_lots` (base_lots filtered), `df_stg` (stage_logs filtered), `df_des` (destruction_logs, `giai_doan == "Trước thu hoạch"`), `df_har` (harvest_logs).
+- **Input**: `df_lots` (base_lots filtered), `df_stg` (stage_logs filtered), `df_des` (destruction_logs, `giai_doan in ["Trước thu hoạch", "Sau thu hoạch"]`), `df_har` (harvest_logs).
 - **Layout**: Chia sheet theo năm. Mỗi sheet = 1 năm.
   - Cột A: Tên lô (sorted tự nhiên: 1A, 2A, 3A... không phải 10A, 11A, 1A).
   - Mỗi tuần = 4 cột (CẮT BẮP | XUẤT HỦY | Thu hoạch | Tồn trên lô).

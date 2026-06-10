@@ -449,13 +449,14 @@ Tài liệu này ghi lại chi tiết toàn bộ cấu trúc cơ sở dữ liệ
 **Ý nghĩa:** Log lưu quá trình xuất hủy cây chuối.
 
 **Ghi chú nghiệp vụ:**
-- Cột `mau_day` đã được xóa (migration 08/05/2026). Khi cần xác định màu dây cho xuất hủy "Trước thu hoạch", user chọn từ `ribbon_schedule` và hệ thống dùng `tuan` để cross-reference.
+- Cột `mau_day` đã được xóa (migration 08/05/2026). Khi cần xác định màu dây cho xuất hủy trước/sau thu hoạch, user chọn từ `ribbon_schedule` và hệ thống dùng `tuan` để cross-reference.
+- `Sau thu hoạch` dùng cho trường hợp hủy được ghi nhận sau khi màu dây/lứa đó đã thu. Báo cáo cắt bắp vẫn hiển thị ở cột XUẤT HỦY nhưng bù vào Thu hoạch ròng để không làm âm tồn trên lô.
 
 | Tên Trường (Field) | Kiểu Dữ Liệu (Type) | Bắt Buộc (Required) | Ý Nghĩa / Ghi Chú |
 |---|---|---|---|
 | id | integer | Có | - |
 | ngay_xuat_huy | date | Có | - |
-| giai_doan | text | Có | "Trước chích bắp" / "Trước cắt bắp" / "Trước thu hoạch" |
+| giai_doan | text | Có | "Trước chích bắp" / "Trước cắt bắp" / "Trước thu hoạch" / "Sau thu hoạch" |
 | ly_do | text | Có | - |
 | so_luong | integer | Có | - |
 | created_at | timestamp with time zone | Không | Thời gian tạo record |

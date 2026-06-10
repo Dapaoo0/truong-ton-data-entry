@@ -17,6 +17,7 @@ import plotly.graph_objects as go
 import io
 import uuid
 from openpyxl import Workbook
+from openpyxl.comments import Comment
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 import json
@@ -3612,7 +3613,7 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None, df_har=None) -> bytes:
     df_cut = df_stg[df_stg["giai_doan"] == "Cắt bắp"].copy() if not df_stg.empty and "giai_doan" in df_stg.columns else pd.DataFrame()
     df_xh = pd.DataFrame()
     if df_des is not None and not df_des.empty and "giai_doan" in df_des.columns:
-        df_xh = df_des[df_des["giai_doan"] == "Trước thu hoạch"].copy()
+        df_xh = df_des[df_des["giai_doan"].isin(["Trước thu hoạch", "Sau thu hoạch"])].copy()
     df_hv = df_har.copy() if df_har is not None and not df_har.empty else pd.DataFrame()
 
     wb = Workbook()
@@ -3703,6 +3704,8 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None, df_har=None) -> bytes:
         ws = wb.create_sheet(title=str(year))
         df_cut_yr = df_cut[df_cut["_year"] == year]
         df_xh_yr = df_xh[df_xh["_year"] == year] if not df_xh.empty and "_year" in df_xh.columns else pd.DataFrame()
+        df_xh_before_yr = df_xh_yr[df_xh_yr["giai_doan"] == "Trước thu hoạch"] if not df_xh_yr.empty and "giai_doan" in df_xh_yr.columns else pd.DataFrame()
+        df_xh_after_yr = df_xh_yr[df_xh_yr["giai_doan"] == "Sau thu hoạch"] if not df_xh_yr.empty and "giai_doan" in df_xh_yr.columns else pd.DataFrame()
 
         # Week-color map
         week_color = {}
@@ -3898,21 +3901,41 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None, df_har=None) -> bytes:
                 cell_c.border = thin_border; cell_c.alignment = center_align
                 lot_cut_total += val_cut
                 # XUẤT HỦY — filter by base_lot_id
-                val_des = 0
-                if not df_xh_yr.empty and "base_lot_id" in df_xh_yr.columns:
-                    des_mask = (df_xh_yr["base_lot_id"] == blid) & (df_xh_yr["tuan"] == week)
-                    val_des = int(df_xh_yr[des_mask]["so_luong"].sum())
-                elif not df_xh_yr.empty:
-                    val_des = int(df_xh_yr[(df_xh_yr["lo"] == lo_name) & (df_xh_yr["tuan"] == week)]["so_luong"].sum())
+                val_des_before = 0
+                val_des_after = 0
+                if not df_xh_before_yr.empty and "base_lot_id" in df_xh_before_yr.columns:
+                    des_mask = (df_xh_before_yr["base_lot_id"] == blid) & (df_xh_before_yr["tuan"] == week)
+                    val_des_before = int(df_xh_before_yr[des_mask]["so_luong"].sum())
+                elif not df_xh_before_yr.empty:
+                    val_des_before = int(df_xh_before_yr[(df_xh_before_yr["lo"] == lo_name) & (df_xh_before_yr["tuan"] == week)]["so_luong"].sum())
+                if not df_xh_after_yr.empty and "base_lot_id" in df_xh_after_yr.columns:
+                    des_after_mask = (df_xh_after_yr["base_lot_id"] == blid) & (df_xh_after_yr["tuan"] == week)
+                    val_des_after = int(df_xh_after_yr[des_after_mask]["so_luong"].sum())
+                elif not df_xh_after_yr.empty:
+                    val_des_after = int(df_xh_after_yr[(df_xh_after_yr["lo"] == lo_name) & (df_xh_after_yr["tuan"] == week)]["so_luong"].sum())
+                val_des = val_des_before + val_des_after
                 cell_d = ws.cell(row=row_idx, column=week_des_col[week], value=val_des if val_des > 0 else "")
                 cell_d.border = thin_border; cell_d.alignment = center_align
+                if val_des_after > 0:
+                    cell_d.comment = Comment(
+                        f"Trước thu hoạch: {val_des_before}\nSau thu hoạch: {val_des_after}",
+                        "Truong Ton App",
+                    )
                 lot_des_total += val_des
 
                 # THU HOẠCH — map từ harvest_logs.mau_day về tuần cắt bắp nguồn.
-                val_har = int(harvest_by_blid_week.get((int(blid), int(week)), 0))
+                val_har_gross = int(harvest_by_blid_week.get((int(blid), int(week)), 0))
+                val_har = max(0, val_har_gross - val_des_after)
                 cell_h = ws.cell(row=row_idx, column=week_har_col[week], value=val_har if val_har > 0 else "")
                 cell_h.font = Font(color="C00000")
                 cell_h.border = thin_border; cell_h.alignment = center_align
+                if val_des_after > 0 and val_har_gross > 0:
+                    cell_h.comment = Comment(
+                        f"Thu hoạch gốc: {val_har_gross}\n"
+                        f"Trừ xuất hủy sau thu hoạch: {val_des_after}\n"
+                        f"Thu hoạch ròng hiển thị: {val_har}",
+                        "Truong Ton App",
+                    )
                 lot_har_total += val_har
 
                 val_rem = val_cut - val_des - val_har
