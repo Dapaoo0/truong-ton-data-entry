@@ -3599,6 +3599,39 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None, df_har=None) -> bytes:
     total_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
     center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
+    def _clean_farm_name(value):
+        if value is None or pd.isna(value):
+            return ""
+        return str(value).strip()
+
+    def _farm_sort_key(farm_name):
+        m = re.search(r"(\d+)", _clean_farm_name(farm_name))
+        return (int(m.group(1)) if m else 9999, _clean_farm_name(farm_name))
+
+    def _farm_short_label(farm_name):
+        farm_name = _clean_farm_name(farm_name)
+        m = re.search(r"(\d+)", farm_name)
+        return m.group(1) if m else farm_name
+
+    def _forecast_offsets_for_farm(farm_name):
+        farm_name = _clean_farm_name(farm_name)
+        if farm_name == "Farm 126":
+            return [8]
+        if farm_name == "Farm 157":
+            return [9]
+        return [8, 9]
+
+    def _farm_names_from_frames(*frames):
+        names = []
+        for frame in frames:
+            if frame is None or frame.empty or "farm" not in frame.columns:
+                continue
+            for value in frame["farm"].dropna().unique().tolist():
+                farm_name = _clean_farm_name(value)
+                if farm_name and farm_name not in names:
+                    names.append(farm_name)
+        return sorted(names, key=_farm_sort_key)
+
     COLOR_MAP = {
         "đỏ": "FFB3B3", "cam": "FFD9B3", "vàng": "FFFFB3",
         "xanh lá": "B3FFB3", "xanh dương": "B3D9FF", "tím": "D9B3FF",
@@ -3615,6 +3648,8 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None, df_har=None) -> bytes:
     if df_des is not None and not df_des.empty and "giai_doan" in df_des.columns:
         df_xh = df_des[df_des["giai_doan"].isin(["Trước thu hoạch", "Sau thu hoạch"])].copy()
     df_hv = df_har.copy() if df_har is not None and not df_har.empty else pd.DataFrame()
+    report_farms = _farm_names_from_frames(df_cut, df_xh, df_hv, df_lots)
+    include_farm_col = len(_farm_names_from_frames(df_cut, df_xh, df_hv)) > 1
 
     wb = Workbook()
 
@@ -3648,16 +3683,27 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None, df_har=None) -> bytes:
     # ── Build lot display names (chia đợt giống chích bắp) ──
     import re as _re_cut
     lot_batch_keys = []
+    base_lot_farm = {}
     if not df_lots.empty and "id" in df_lots.columns:
-        lot_groups = df_lots.groupby("lo")
-        for lo_name, grp in lot_groups:
+        group_cols = ["farm", "lo"] if "farm" in df_lots.columns else ["lo"]
+        lot_groups = df_lots.groupby(group_cols, dropna=False)
+        for group_key, grp in lot_groups:
+            if "farm" in df_lots.columns:
+                farm_name, lo_name = group_key if isinstance(group_key, tuple) else ("", group_key)
+                farm_name = _clean_farm_name(farm_name)
+            else:
+                farm_name, lo_name = "", group_key
             if len(grp) > 1:
                 sorted_grp = grp.sort_values("ngay_trong") if "ngay_trong" in grp.columns else grp
                 for i, (_, b_row) in enumerate(sorted_grp.iterrows(), 1):
-                    lot_batch_keys.append((lo_name, b_row["id"], f"{lo_name} (đợt {i})"))
+                    blid = int(b_row["id"])
+                    base_lot_farm[blid] = farm_name
+                    lot_batch_keys.append((farm_name, lo_name, blid, f"{lo_name} (đợt {i})"))
             else:
                 for _, b_row in grp.iterrows():
-                    lot_batch_keys.append((lo_name, b_row["id"], lo_name))
+                    blid = int(b_row["id"])
+                    base_lot_farm[blid] = farm_name
+                    lot_batch_keys.append((farm_name, lo_name, blid, lo_name))
     # Also include lots from df_cut/df_xh that might not be in df_lots
     active_blids_cut = set()
     if not df_cut.empty and "base_lot_id" in df_cut.columns:
@@ -3665,34 +3711,36 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None, df_har=None) -> bytes:
     if not df_xh.empty and "base_lot_id" in df_xh.columns:
         active_blids_cut.update(df_xh["base_lot_id"].dropna().astype(int).unique())
     # Keep only lots that have data
-    lot_batch_keys = [x for x in lot_batch_keys if x[1] in active_blids_cut]
-    mapped_blids = {x[1] for x in lot_batch_keys}
+    lot_batch_keys = [x for x in lot_batch_keys if x[2] in active_blids_cut]
+    mapped_blids = {x[2] for x in lot_batch_keys}
     for blid in active_blids_cut - mapped_blids:
         lo_name = f"Lot_{blid}"
+        farm_name = ""
         if "lo" in df_cut.columns and "base_lot_id" in df_cut.columns:
             _m = df_cut[df_cut["base_lot_id"] == blid]["lo"]
             if not _m.empty:
                 lo_name = _m.iloc[0]
-        lot_batch_keys.append((lo_name, blid, lo_name))
+            if "farm" in df_cut.columns:
+                _f = df_cut[df_cut["base_lot_id"] == blid]["farm"]
+                if not _f.empty:
+                    farm_name = _clean_farm_name(_f.iloc[0])
+        base_lot_farm[int(blid)] = farm_name
+        lot_batch_keys.append((farm_name, lo_name, int(blid), lo_name))
 
     def _nat_sort_cut(item):
-        name = item[2]
+        farm_name, _, _, name = item
         m_batch = _re_cut.match(r"^(.+?)\s*\(đợt\s*(\d+)\)$", name)
         base_name, batch_num = (m_batch.group(1), int(m_batch.group(2))) if m_batch else (name, 0)
         m_num = _re_cut.match(r"^(\d+)(.*)", base_name)
-        return (int(m_num.group(1)), m_num.group(2), batch_num) if m_num else (9999, base_name, batch_num)
+        lot_key = (int(m_num.group(1)), m_num.group(2), batch_num) if m_num else (9999, base_name, batch_num)
+        return (_farm_sort_key(farm_name), *lot_key)
     lot_batch_keys.sort(key=_nat_sort_cut)
 
-    # Resolve farm_id for ribbon lookup
-    _excel_farm_id = None
-    if not df_lots.empty and "farm" in df_lots.columns:
-        _farm_name = df_lots["farm"].dropna().iloc[0] if not df_lots["farm"].dropna().empty else None
-        if _farm_name:
-            _excel_farm_id = get_farm_id_from_name(_farm_name)
-    if _excel_farm_id is None and "farm" in df_cut.columns:
-        _farm_name = df_cut["farm"].dropna().iloc[0] if not df_cut["farm"].dropna().empty else None
-        if _farm_name:
-            _excel_farm_id = get_farm_id_from_name(_farm_name)
+    farm_id_by_name = {
+        farm_name: get_farm_id_from_name(farm_name)
+        for farm_name in report_farms
+        if farm_name
+    }
 
     years = set(df_cut["_year"].dropna().astype(int).unique())
     if not df_xh.empty and "_year" in df_xh.columns:
@@ -3706,47 +3754,97 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None, df_har=None) -> bytes:
         df_xh_yr = df_xh[df_xh["_year"] == year] if not df_xh.empty and "_year" in df_xh.columns else pd.DataFrame()
         df_xh_before_yr = df_xh_yr[df_xh_yr["giai_doan"] == "Trước thu hoạch"] if not df_xh_yr.empty and "giai_doan" in df_xh_yr.columns else pd.DataFrame()
         df_xh_after_yr = df_xh_yr[df_xh_yr["giai_doan"] == "Sau thu hoạch"] if not df_xh_yr.empty and "giai_doan" in df_xh_yr.columns else pd.DataFrame()
+        df_hv_yr = df_hv[df_hv["_year"] == year] if not df_hv.empty and "_year" in df_hv.columns else pd.DataFrame()
 
         # Week-color map
-        week_color = {}
-        if _excel_farm_id:
-            _rb_res = supabase.table("ribbon_schedule").select("week_number, color_name") \
-                .eq("farm_id", _excel_farm_id).eq("year", int(year)).eq("is_deleted", False).execute()
-            for _rb in (_rb_res.data or []):
-                week_color[int(_rb["week_number"])] = _rb["color_name"]
+        year_farms = _farm_names_from_frames(df_cut_yr, df_xh_yr, df_hv_yr) or report_farms
+        week_color_by_farm = {farm_name: {} for farm_name in year_farms}
         all_weeks = set()
+        data_weeks_by_farm = {farm_name: set() for farm_name in year_farms}
+        for farm_name in year_farms:
+            farm_id = farm_id_by_name.get(farm_name)
+            if farm_id:
+                _rb_res = supabase.table("ribbon_schedule").select("week_number, color_name") \
+                    .eq("farm_id", farm_id).eq("year", int(year)).eq("is_deleted", False).execute()
+                for _rb in (_rb_res.data or []):
+                    week_number = int(_rb["week_number"])
+                    week_color_by_farm.setdefault(farm_name, {})[week_number] = _rb["color_name"]
+                    all_weeks.add(week_number)
+        if "farm" in df_cut_yr.columns:
+            for farm_name, grp in df_cut_yr.groupby("farm"):
+                farm_name = _clean_farm_name(farm_name)
+                data_weeks_by_farm.setdefault(farm_name, set()).update(int(t) for t in grp["tuan"].dropna().unique())
         for t in df_cut_yr["tuan"].dropna().unique(): all_weeks.add(int(t))
         if not df_xh_yr.empty:
+            if "farm" in df_xh_yr.columns:
+                for farm_name, grp in df_xh_yr.groupby("farm"):
+                    farm_name = _clean_farm_name(farm_name)
+                    data_weeks_by_farm.setdefault(farm_name, set()).update(int(t) for t in grp["tuan"].dropna().unique())
             for t in df_xh_yr["tuan"].dropna().unique(): all_weeks.add(int(t))
-        for wn in all_weeks:
-            if wn not in week_color:
-                week_color[wn] = ""
 
-        weeks = sorted(week_color.keys())
+        weeks = sorted(all_weeks)
         if not weeks:
             ws.cell(row=1, column=1, value=f"Chưa có dữ liệu năm {year}.")
             continue
 
+        def _farms_for_week(week):
+            farms = [
+                farm_name
+                for farm_name in year_farms
+                if week in week_color_by_farm.get(farm_name, {})
+                or week in data_weeks_by_farm.get(farm_name, set())
+            ]
+            return farms or year_farms
+
+        def _week_color_label(week):
+            entries = [
+                (farm_name, week_color_by_farm.get(farm_name, {}).get(week, ""))
+                for farm_name in _farms_for_week(week)
+            ]
+            entries = [(farm, color) for farm, color in entries if color]
+            if not entries:
+                return ""
+            if include_farm_col and len(entries) > 1:
+                return "\n".join(f"{_farm_short_label(farm)}: {color}" for farm, color in entries)
+            return entries[0][1]
+
+        def _week_color_fill(week):
+            colors = [
+                color for farm_name in _farms_for_week(week)
+                for color in [week_color_by_farm.get(farm_name, {}).get(week, "")]
+                if color
+            ]
+            base_colors = {str(color).split("-")[0].strip().lower() for color in colors}
+            if len(base_colors) == 1:
+                return get_mau_day_fill(colors[0])
+            return None
+
         harvest_by_blid_week = {}
-        if not df_hv.empty and {"base_lot_id", "mau_day", "ngay_thu_hoach", "so_luong"}.issubset(df_hv.columns):
-            color_to_weeks = {}
-            for wk, color in week_color.items():
-                if color:
-                    color_to_weeks.setdefault(str(color).strip(), []).append(int(wk))
-            for _, h_row in df_hv.iterrows():
+        if not df_hv_yr.empty and {"base_lot_id", "mau_day", "ngay_thu_hoach", "so_luong"}.issubset(df_hv_yr.columns):
+            color_to_weeks_by_farm = {}
+            for farm_name, farm_week_color in week_color_by_farm.items():
+                farm_color_to_weeks = {}
+                for wk, color in farm_week_color.items():
+                    if color:
+                        farm_color_to_weeks.setdefault(str(color).strip(), []).append(int(wk))
+                color_to_weeks_by_farm[farm_name] = farm_color_to_weeks
+            for _, h_row in df_hv_yr.iterrows():
                 blid = h_row.get("base_lot_id")
                 mau_day = str(h_row.get("mau_day") or "").strip()
                 ngay_har = h_row.get("ngay_thu_hoach")
                 if pd.isna(blid) or not mau_day or pd.isna(ngay_har):
                     continue
-                candidate_weeks = color_to_weeks.get(mau_day, [])
+                farm_name = _clean_farm_name(h_row.get("farm")) if "farm" in df_hv_yr.columns else ""
+                if not farm_name:
+                    farm_name = base_lot_farm.get(int(blid), "")
+                candidate_weeks = color_to_weeks_by_farm.get(farm_name, {}).get(mau_day, [])
                 if not candidate_weeks:
                     continue
                 har_pair = _iso_year_week(ngay_har)
+                forecast_week_offsets = [offset - 1 for offset in _forecast_offsets_for_farm(farm_name)]
                 exact_weeks = [
                     wk for wk in candidate_weeks
-                    if _shift_iso_week(year, wk, 7) == har_pair
-                    or _shift_iso_week(year, wk, 8) == har_pair
+                    if any(_shift_iso_week(year, wk, offset) == har_pair for offset in forecast_week_offsets)
                 ]
                 # Nếu màu dây chỉ xuất hiện một lần trong sheet, cho phép map dù thu hoạch lệch vài ngày.
                 target_weeks = exact_weeks or (candidate_weeks if len(candidate_weeks) == 1 else [])
@@ -3757,44 +3855,54 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None, df_har=None) -> bytes:
                 harvest_by_blid_week[key] = harvest_by_blid_week.get(key, 0) + qty
 
         # === Helper: forecast harvest label ===
-        def _forecast_harvest_label(cut_week, cut_year):
-            """Tạo label dự báo thu hoạch: '25 (+8)/26 (+9)'.
-            Nếu chuyển năm: '5-2027 (+8)/6-2027 (+9)'."""
+        def _shifted_week_label(cut_week, cut_year, inclusive_weeks):
             from datetime import date as _date
             dec_28 = _date(cut_year, 12, 28)
             max_week = dec_28.isocalendar()[1]  # 52 or 53
 
-            h8_week = cut_week + 7  # 8 tuần tính cả tuần cắt
-            h9_week = cut_week + 8  # 9 tuần tính cả tuần cắt
-            h8_year = cut_year
-            h9_year = cut_year
+            target_week = int(cut_week) + int(inclusive_weeks) - 1
+            target_year = int(cut_year)
 
-            if h8_week > max_week:
-                h8_week -= max_week
-                h8_year += 1
-            if h9_week > max_week:
-                h9_week -= max_week
-                h9_year += 1
+            if target_week > max_week:
+                target_week -= max_week
+                target_year += 1
 
-            # Cùng năm → chỉ số tuần; khác năm → kèm năm
-            h8_str = f"{h8_week}" if h8_year == cut_year else f"{h8_week}-{h8_year}"
-            h9_str = f"{h9_week}" if h9_year == cut_year else f"{h9_week}-{h9_year}"
+            week_str = f"{target_week}" if target_year == cut_year else f"{target_week}-{target_year}"
+            return f"{week_str} (+{inclusive_weeks})"
 
-            return f"{h8_str} (+8)/{h9_str} (+9)"
+        def _forecast_harvest_label(cut_week, cut_year, farm_names):
+            """Tạo label dự báo thu hoạch theo offset riêng từng farm."""
+            labels = []
+            for farm_name in farm_names:
+                offsets = _forecast_offsets_for_farm(farm_name)
+                farm_label = "/".join(_shifted_week_label(cut_week, cut_year, offset) for offset in offsets)
+                if include_farm_col and len(farm_names) > 1:
+                    farm_label = f"{_farm_short_label(farm_name)}: {farm_label}"
+                labels.append(farm_label)
+            return "\n".join(labels)
 
         forecast_fill = PatternFill(start_color="FFF9C4", end_color="FFF9C4", fill_type="solid")
 
         # === HEADER: 4 rows ===
-        # Row 1: "Lô" merged R1-R4 | Dự báo thu hoạch merged 4 cols
-        # Row 2: (merged)          | "Tuần X" merged across 4 cols
-        # Row 3: (merged)          | "CẮT BẮP" | "XUẤT HỦY" | "Thu hoạch" | "Tồn trên lô"
-        # Row 4: (merged)          | màu dây    | màu dây    | màu dây     | màu dây
-        ws.merge_cells(start_row=1, start_column=1, end_row=4, end_column=1)
-        c_lo = ws.cell(row=1, column=1, value="Lô")
+        # Row 1: "Farm" + "Lô" (khi gộp farm) | Dự báo thu hoạch merged 4 cols
+        # Row 2:                              | "Tuần X" merged across 4 cols
+        # Row 3:                              | "CẮT BẮP" | "XUẤT HỦY" | "Thu hoạch" | "Tồn trên lô"
+        # Row 4:                              | màu dây    | màu dây    | màu dây     | màu dây
+        label_col_count = 2 if include_farm_col else 1
+        if include_farm_col:
+            ws.merge_cells(start_row=1, start_column=1, end_row=4, end_column=1)
+            c_farm_header = ws.cell(row=1, column=1, value="Farm")
+            c_farm_header.font = Font(bold=True, size=10); c_farm_header.fill = header_fill
+            c_farm_header.border = thin_border; c_farm_header.alignment = center_align
+            ws.merge_cells(start_row=1, start_column=2, end_row=4, end_column=2)
+            c_lo = ws.cell(row=1, column=2, value="Lô")
+        else:
+            ws.merge_cells(start_row=1, start_column=1, end_row=4, end_column=1)
+            c_lo = ws.cell(row=1, column=1, value="Lô")
         c_lo.font = Font(bold=True, size=10); c_lo.fill = header_fill
         c_lo.border = thin_border; c_lo.alignment = center_align
 
-        col = 2
+        col = label_col_count + 1
         week_cut_col = {}   # week -> col index of CẮT BẮP
         week_des_col = {}   # week -> col index of XUẤT HỦY
         week_har_col = {}   # week -> col index of Thu hoạch
@@ -3808,11 +3916,11 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None, df_har=None) -> bytes:
             week_des_col[week] = des_col
             week_har_col[week] = har_col
             week_rem_col[week] = rem_col
-            color_name = week_color.get(week, "")
-            color_fill_cell = get_mau_day_fill(color_name)
+            color_name = _week_color_label(week)
+            color_fill_cell = _week_color_fill(week)
 
             # Row 1: Dự báo thu hoạch merged
-            forecast_label = _forecast_harvest_label(week, year)
+            forecast_label = _forecast_harvest_label(week, year, _farms_for_week(week))
             ws.merge_cells(start_row=1, start_column=cut_col, end_row=1, end_column=rem_col)
             c_fc = ws.cell(row=1, column=cut_col, value=forecast_label)
             c_fc.font = Font(bold=True, size=9, italic=True); c_fc.fill = forecast_fill
@@ -3883,19 +3991,29 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None, df_har=None) -> bytes:
             yr_blids.update(df_cut_yr["base_lot_id"].dropna().astype(int).unique())
         if not df_xh_yr.empty and "base_lot_id" in df_xh_yr.columns:
             yr_blids.update(df_xh_yr["base_lot_id"].dropna().astype(int).unique())
-        yr_lots = [x for x in lot_batch_keys if x[1] in yr_blids]
+        yr_lots = [x for x in lot_batch_keys if x[2] in yr_blids]
 
         data_start_row = 5
-        for li, (lo_name, blid, display_name) in enumerate(yr_lots):
+        for li, (farm_name, lo_name, blid, display_name) in enumerate(yr_lots):
             row_idx = data_start_row + li
-            c = ws.cell(row=row_idx, column=1, value=display_name)
+            if include_farm_col:
+                c_farm = ws.cell(row=row_idx, column=1, value=farm_name)
+                c_farm.font = Font(bold=True); c_farm.border = thin_border; c_farm.alignment = center_align
+                c = ws.cell(row=row_idx, column=2, value=display_name)
+            else:
+                c = ws.cell(row=row_idx, column=1, value=display_name)
             c.font = Font(bold=True); c.border = thin_border; c.alignment = center_align
             lot_cut_total = 0
             lot_des_total = 0
             lot_har_total = 0
             for week in weeks:
                 # CẮT BẮP — filter by base_lot_id
-                cut_mask = (df_cut_yr["base_lot_id"] == blid) & (df_cut_yr["tuan"] == week) if "base_lot_id" in df_cut_yr.columns else (df_cut_yr["lo"] == lo_name) & (df_cut_yr["tuan"] == week)
+                if "base_lot_id" in df_cut_yr.columns:
+                    cut_mask = (df_cut_yr["base_lot_id"] == blid) & (df_cut_yr["tuan"] == week)
+                else:
+                    cut_mask = (df_cut_yr["lo"] == lo_name) & (df_cut_yr["tuan"] == week)
+                    if "farm" in df_cut_yr.columns:
+                        cut_mask = cut_mask & (df_cut_yr["farm"] == farm_name)
                 val_cut = int(df_cut_yr[cut_mask]["so_luong"].sum())
                 cell_c = ws.cell(row=row_idx, column=week_cut_col[week], value=val_cut if val_cut > 0 else "")
                 cell_c.border = thin_border; cell_c.alignment = center_align
@@ -3907,12 +4025,18 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None, df_har=None) -> bytes:
                     des_mask = (df_xh_before_yr["base_lot_id"] == blid) & (df_xh_before_yr["tuan"] == week)
                     val_des_before = int(df_xh_before_yr[des_mask]["so_luong"].sum())
                 elif not df_xh_before_yr.empty:
-                    val_des_before = int(df_xh_before_yr[(df_xh_before_yr["lo"] == lo_name) & (df_xh_before_yr["tuan"] == week)]["so_luong"].sum())
+                    des_mask = (df_xh_before_yr["lo"] == lo_name) & (df_xh_before_yr["tuan"] == week)
+                    if "farm" in df_xh_before_yr.columns:
+                        des_mask = des_mask & (df_xh_before_yr["farm"] == farm_name)
+                    val_des_before = int(df_xh_before_yr[des_mask]["so_luong"].sum())
                 if not df_xh_after_yr.empty and "base_lot_id" in df_xh_after_yr.columns:
                     des_after_mask = (df_xh_after_yr["base_lot_id"] == blid) & (df_xh_after_yr["tuan"] == week)
                     val_des_after = int(df_xh_after_yr[des_after_mask]["so_luong"].sum())
                 elif not df_xh_after_yr.empty:
-                    val_des_after = int(df_xh_after_yr[(df_xh_after_yr["lo"] == lo_name) & (df_xh_after_yr["tuan"] == week)]["so_luong"].sum())
+                    des_after_mask = (df_xh_after_yr["lo"] == lo_name) & (df_xh_after_yr["tuan"] == week)
+                    if "farm" in df_xh_after_yr.columns:
+                        des_after_mask = des_after_mask & (df_xh_after_yr["farm"] == farm_name)
+                    val_des_after = int(df_xh_after_yr[des_after_mask]["so_luong"].sum())
                 val_des = val_des_before + val_des_after
                 cell_d = ws.cell(row=row_idx, column=week_des_col[week], value=val_des if val_des > 0 else "")
                 cell_d.border = thin_border; cell_d.alignment = center_align
@@ -3960,10 +4084,16 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None, df_har=None) -> bytes:
 
         # === TOTAL ROW ===
         total_row = data_start_row + len(yr_lots)
+        if include_farm_col:
+            ws.merge_cells(start_row=total_row, start_column=1, end_row=total_row, end_column=2)
         c = ws.cell(row=total_row, column=1, value="Tổng")
         c.font = Font(bold=True, size=11); c.fill = total_fill
         c.border = thin_border; c.alignment = center_align
-        for ci in range(2, last_col + 1):
+        if include_farm_col:
+            ws.cell(row=total_row, column=2).fill = total_fill
+            ws.cell(row=total_row, column=2).border = thin_border
+            ws.cell(row=total_row, column=2).alignment = center_align
+        for ci in range(label_col_count + 1, last_col + 1):
             values = [
                 int(ws.cell(row=r, column=ci).value)
                 for r in range(data_start_row, total_row)
@@ -3977,11 +4107,17 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None, df_har=None) -> bytes:
         # === EXPECTED HARVEST ROW ===
         # Dự kiến thu hoạch = round(97% tổng cắt bắp), chưa trừ xuất hủy/thu hoạch.
         expected_row = total_row + 1
+        if include_farm_col:
+            ws.merge_cells(start_row=expected_row, start_column=1, end_row=expected_row, end_column=2)
         c_exp_label = ws.cell(row=expected_row, column=1, value="Dự kiến thu\nhoạch")
         c_exp_label.font = Font(bold=True, size=11)
         c_exp_label.fill = total_fill
         c_exp_label.border = thin_border
         c_exp_label.alignment = center_align
+        if include_farm_col:
+            ws.cell(row=expected_row, column=2).fill = total_fill
+            ws.cell(row=expected_row, column=2).border = thin_border
+            ws.cell(row=expected_row, column=2).alignment = center_align
         ws.row_dimensions[expected_row].height = 36
 
         def _expected_harvest_from_cut(cut_value):
@@ -4018,9 +4154,11 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None, df_har=None) -> bytes:
         c_lk_exp.alignment = center_align
 
         ws.column_dimensions[get_column_letter(1)].width = 14
-        for ci in range(2, last_col + 1):
+        if include_farm_col:
+            ws.column_dimensions[get_column_letter(2)].width = 14
+        for ci in range(label_col_count + 1, last_col + 1):
             ws.column_dimensions[get_column_letter(ci)].width = 11
-        ws.freeze_panes = "B5"
+        ws.freeze_panes = "C5" if include_farm_col else "B5"
 
     output = io.BytesIO(); wb.save(output); output.seek(0)
     return output.getvalue()
@@ -4211,15 +4349,16 @@ def render_global_data_tab(c_farm):
                 st.download_button("⬇️ Tải về", data=chich_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
         with col_t4:
-            with st.popover("Báo cáo Cắt bắp", use_container_width=True, key="pop_cat"):
-                sel_cat = st.radio("Chọn Farm", available_farms, key="pop_farm_cat", horizontal=True)
-                fl = _filter_by_farm(df_lots_all, sel_cat)
-                fs = _filter_by_farm(df_stg_all, sel_cat)
-                fd = _filter_by_farm(df_des_all, sel_cat)
-                fh = _filter_by_farm(df_har_all, sel_cat)
-                cut_excel = generate_cut_bap_excel(fl, fs, fd, fh)
-                fn = f"Bao_cao_cat_bap_{sel_cat}_{report_stamp}.xlsx"
-                st.download_button("⬇️ Tải về", data=cut_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+            cut_excel = generate_cut_bap_excel(df_lots_all, df_stg_all, df_des_all, df_har_all)
+            fn = f"Bao_cao_cat_bap_tat_ca_farm_{report_stamp}.xlsx"
+            st.download_button(
+                "Báo cáo Cắt bắp",
+                data=cut_excel,
+                file_name=fn,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key="download_cut_bap_all_farms",
+            )
 
         with col_t5:
             with st.popover("Báo cáo Trồng mới", use_container_width=True, key="pop_trong"):

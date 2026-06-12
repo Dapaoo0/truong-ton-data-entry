@@ -382,15 +382,16 @@ Hệ thống phân biệt **2 loại diện tích**:
 ### 9.2 Báo cáo Cắt bắp (`generate_cut_bap_excel`)
 - **Input**: `df_lots` (base_lots filtered), `df_stg` (stage_logs filtered), `df_des` (destruction_logs, `giai_doan in ["Trước thu hoạch", "Sau thu hoạch"]`), `df_har` (harvest_logs).
 - **Layout**: Chia sheet theo năm. Mỗi sheet = 1 năm.
-  - Cột A: Tên lô (sorted tự nhiên: 1A, 2A, 3A... không phải 10A, 11A, 1A).
+  - Khi export 1 farm: Cột A là tên lô (sorted tự nhiên: 1A, 2A, 3A... không phải 10A, 11A, 1A).
+  - Khi export nhiều farm (Admin/Phòng Kinh doanh): thêm cột `Farm` trước cột `Lô`, tất cả farm nằm trong một file để đối chiếu chung.
   - Mỗi tuần = 4 cột (CẮT BẮP | XUẤT HỦY | Thu hoạch | Tồn trên lô).
   - Cột cuối: **Lũy kế** = tổng cộng dồn theo lô (CẮT, HỦY, THU, TỒN).
 - **Header 4 dòng** (`data_start_row = 5`, `freeze_panes = "B5"`):
-  - **Row 1 — Dự báo thu hoạch**: `_forecast_harvest_label(cut_week, year)` → format `"25 (+8)/26 (+9)"`. Tính 8 tuần (mùa nắng) / 9 tuần (mùa mưa) kể từ tuần cắt bắp (tính cả tuần cắt). Nền vàng pastel (`#FFF9C4`), chữ bold italic. Xử lý chuyển năm ISO (52/53 tuần): `"5-2027 (+8)/6-2027 (+9)"`. Cột Lũy kế để trống.
+  - **Row 1 — Dự báo thu hoạch**: `_forecast_harvest_label(cut_week, year)` theo farm. Farm 126 dùng `+8`, Farm 157 dùng `+9`; farm khác giữ fallback `+8/+9`. Khi file gộp nhiều farm, header hiển thị nhiều dòng như `126: 31 (+8)` và `157: 32 (+9)`. Cách tính `+8/+9` tính cả tuần cắt bắp. Nền vàng pastel (`#FFF9C4`), chữ bold italic. Xử lý chuyển năm ISO (52/53 tuần): `"5-2027 (+8)"`.
   - **Row 2 — Tuần X**: Số tuần ISO, merged 4 cột, nền xanh dương header (`#D9E1F2`).
   - **Row 3 — Sub-headers**: "CẮT BẮP" | "XUẤT HỦY" | "Thu hoạch" | "Tồn trên lô", nền trắng.
-  - **Row 4 — Màu dây**: Từ `ribbon_schedule` (farm_id, year, week_number), nền theo COLOR_MAP.
-- **Data matching**: `base_lot_id` (ưu tiên) hoặc fallback `df_cut["lo"] == lo_name`. Thu hoạch map bằng `harvest_logs.mau_day` về tuần cắt cùng màu dây, ưu tiên tuần có dự báo `+8/+9` trùng tuần thu hoạch thực tế.
+  - **Row 4 — Màu dây**: Từ `ribbon_schedule` (farm_id, year, week_number), nền theo COLOR_MAP. Khi file gộp nhiều farm và cùng tuần có màu khác nhau, cell màu dây hiển thị nhiều dòng theo farm.
+- **Data matching**: `base_lot_id` (ưu tiên) hoặc fallback `df_cut["farm"] + df_cut["lo"]`. Thu hoạch map bằng `harvest_logs.mau_day` về tuần cắt cùng màu dây trong đúng farm, ưu tiên tuần có dự báo theo offset farm (`+8` cho 126, `+9` cho 157) trùng tuần thu hoạch thực tế.
 - **Dòng `Dự kiến thu hoạch`**: nằm ngay dưới dòng `Tổng`. Mỗi tuần chỉ điền ở cột `Thu hoạch`, công thức `round(Tổng CẮT BẮP của tuần × 97%)`, chưa trừ xuất hủy và chưa trừ thu hoạch thực tế. Các cột còn lại hiển thị `-`.
 - **Type safety**: `tuan` → `pd.to_numeric().astype(int)`, `_year` → `.astype(int)`.
 - **Lot union**: Tên lô lấy từ CẢ `base_lots` VÀ `stage_logs`/`destruction_logs` (tránh miss lô chỉ tồn tại trong 1 nguồn).
