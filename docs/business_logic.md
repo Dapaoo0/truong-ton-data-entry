@@ -383,11 +383,12 @@ Hệ thống phân biệt **2 loại diện tích**:
 - **Input**: `df_lots` (base_lots filtered), `df_stg` (stage_logs filtered), `df_des` (destruction_logs, `giai_doan in ["Trước thu hoạch", "Sau thu hoạch"]`), `df_har` (harvest_logs).
 - **Layout**: Chia sheet theo năm. Mỗi sheet = 1 năm.
   - Khi export 1 farm: Cột A là tên lô (sorted tự nhiên: 1A, 2A, 3A... không phải 10A, 11A, 1A).
-  - Khi export nhiều farm (Admin/Phòng Kinh doanh): thêm cột `Farm` trước cột `Lô`, tất cả farm nằm trong một file để đối chiếu chung.
+  - Trên UI Admin/Phòng Kinh doanh: báo cáo Cắt bắp tải tách biệt theo farm qua popover chọn farm; mỗi file chỉ chứa dữ liệu của farm đã chọn.
+  - Hàm vẫn hỗ trợ input nhiều farm nếu được gọi trực tiếp: khi đó thêm cột `Farm` trước cột `Lô` để tránh trộn lô cùng tên giữa các farm.
   - Mỗi tuần = 4 cột (CẮT BẮP | XUẤT HỦY | Thu hoạch | Tồn trên lô).
   - Cột cuối: **Lũy kế** = tổng cộng dồn theo lô (CẮT, HỦY, THU, TỒN).
 - **Header 4 dòng** (`data_start_row = 5`, `freeze_panes = "B5"`):
-  - **Row 1 — Dự báo thu hoạch**: `_forecast_harvest_label(cut_week, year)` theo farm. Farm 126 dùng `+8`, Farm 157 dùng `+9`; farm khác giữ fallback `+8/+9`. Khi file gộp nhiều farm, header hiển thị nhiều dòng như `126: 31 (+8)` và `157: 32 (+9)`. Cách tính `+8/+9` tính cả tuần cắt bắp. Nền vàng pastel (`#FFF9C4`), chữ bold italic. Xử lý chuyển năm ISO (52/53 tuần): `"5-2027 (+8)"`.
+  - **Row 1 — Dự báo thu hoạch**: `_forecast_harvest_label(cut_week, year)` theo farm. Farm 126 dùng `+8`, Farm 157 dùng `+9`; farm khác giữ fallback `+8/+9`. Cách tính `+8/+9` tính cả tuần cắt bắp. Nền vàng pastel (`#FFF9C4`), chữ bold italic. Xử lý chuyển năm ISO (52/53 tuần): `"5-2027 (+8)"`.
   - **Row 2 — Tuần X**: Số tuần ISO, merged 4 cột, nền xanh dương header (`#D9E1F2`).
   - **Row 3 — Sub-headers**: "CẮT BẮP" | "XUẤT HỦY" | "Thu hoạch" | "Tồn trên lô", nền trắng.
   - **Row 4 — Màu dây**: Từ `ribbon_schedule` (farm_id, year, week_number), nền theo COLOR_MAP. Khi file gộp nhiều farm và cùng tuần có màu khác nhau, cell màu dây hiển thị nhiều dòng theo farm.

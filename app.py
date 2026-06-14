@@ -4349,10 +4349,15 @@ def render_global_data_tab(c_farm):
                 st.download_button("⬇️ Tải về", data=chich_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
         with col_t4:
-            cut_excel = generate_cut_bap_excel(df_lots_all, df_stg_all, df_des_all, df_har_all)
-            fn = f"Bao_cao_cat_bap_tat_ca_farm_{report_stamp}.xlsx"
-            href = _gen_dl_link(cut_excel, fn, "btn-cat", "Báo cáo Cắt bắp")
-            st.markdown(href, unsafe_allow_html=True)
+            with st.popover("Báo cáo Cắt bắp", use_container_width=True, key="pop_cat"):
+                sel_cat = st.radio("Chọn Farm", available_farms, key="pop_farm_cat", horizontal=True)
+                fl = _filter_by_farm(df_lots_all, sel_cat)
+                fs = _filter_by_farm(df_stg_all, sel_cat)
+                fd = _filter_by_farm(df_des_all, sel_cat)
+                fh = _filter_by_farm(df_har_all, sel_cat)
+                cut_excel = generate_cut_bap_excel(fl, fs, fd, fh)
+                fn = f"Bao_cao_cat_bap_{sel_cat}_{report_stamp}.xlsx"
+                st.download_button("⬇️ Tải về", data=cut_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
         with col_t5:
             with st.popover("Báo cáo Trồng mới", use_container_width=True, key="pop_trong"):
