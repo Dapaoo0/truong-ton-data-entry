@@ -313,6 +313,8 @@ Liên Farm
 | Quản lý farm | Xem farm mình (read-only) | 1 farm |
 | Đội Nông trường (NT1, NT2) | Xem + nhập liệu farm mình | 1 farm, 1 đội |
 
+- UI đội Nông trường không cung cấp tác vụ `Khởi tạo Lô trồng` và `Kiểm tra Fusarium`. Hai nhóm dữ liệu này được quản trị nhập trực tiếp trong database; schema và dữ liệu lịch sử vẫn được giữ nguyên.
+
 ### 6.3 Soft Deletion
 - Tất cả bảng dùng cờ `is_deleted = True/False`. **KHÔNG BAO GIỜ** hard delete.
 - Query luôn append `.eq("is_deleted", False)`.
@@ -415,7 +417,15 @@ Hệ thống phân biệt **2 loại diện tích**:
 - **Input**: `df_lots` (base_lots filtered), `df_stg` (stage_logs filtered, `giai_doan == "Chích bắp"`).
 - **Layout**: Tương tự Cắt bắp — chia sheet theo năm, 1 cột/tuần, có Lũy kế.
 
-### 9.5 Báo cáo Trồng mới (`generate_planting_excel`)
+### 9.5 Báo cáo Xuất hủy (`generate_destruction_excel`)
+- **Mục đích**: Tách toàn bộ dữ liệu xuất hủy khỏi báo cáo Cắt bắp để người đọc theo dõi riêng theo lô và ngày thực hiện.
+- **Phạm vi**: Bao gồm tất cả giai đoạn xuất hủy đang có trong `destruction_logs`, không chỉ xuất hủy trước/sau thu hoạch.
+- **Sheet `Theo lô`**: Dạng ngang; mỗi tuần ISO là một nhóm cột, bên trong gồm từng ngày xuất hủy thực tế và cột `Tổng tuần`. Cuối bảng có cột `Lũy kế / Tổng xuất hủy` và dòng `TỔNG`.
+- **Sheet `Chi tiết`**: Mỗi record gồm `Farm`, `Lô`, `Ngày xuất hủy`, `Tuần`, `Giai đoạn`, `Số lượng`, `Lý do` để truy ngược dữ liệu nguồn.
+- **Đợt trồng**: Ưu tiên `base_lot_id`; nếu một lô có nhiều đợt thì nhãn hiển thị `Lô (đợt N)`. Khi thiếu khóa đợt, fallback theo `farm + lo`.
+- **UI**: Account một farm tải trực tiếp file của farm đó. Admin/Phòng Kinh doanh chọn farm trong popover; mỗi file vẫn tách riêng theo farm.
+
+### 9.6 Báo cáo Trồng mới (`generate_planting_excel`)
 - **Input**: `df_lots` (base_lots filtered), `df_seasons` (seasons data).
 - **`loai_trong`**: Ưu tiên lấy trực tiếp từ `base_lots.loai_trong` (không cần join `seasons`). Fallback join nếu cột không tồn tại.
 - **Layout**: Danh sách đợt trồng kèm ngày, farm, lô, số lượng, loại trồng.

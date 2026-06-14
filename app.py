@@ -4446,6 +4446,238 @@ def generate_harvest_forecast_excel(df_lots, df_stg) -> bytes:
     output = io.BytesIO(); wb.save(output); output.seek(0)
     return output.getvalue()
 
+def generate_destruction_excel(df_lots, df_des) -> bytes:
+    """Create a horizontal destruction report grouped by ISO week and date."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Theo lô"
+    ws_detail = wb.create_sheet("Chi tiết")
+
+    thin_border = Border(
+        left=Side(style="thin"), right=Side(style="thin"),
+        top=Side(style="thin"), bottom=Side(style="thin"),
+    )
+    header_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    date_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+    week_total_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+    grand_total_fill = PatternFill(start_color="F4B183", end_color="F4B183", fill_type="solid")
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    def _write_empty_sheet(sheet):
+        cell = sheet.cell(row=1, column=1, value="Chưa có dữ liệu Xuất hủy.")
+        cell.font = Font(bold=True)
+        cell.alignment = center
+        sheet.column_dimensions["A"].width = 32
+
+    if df_des is None or df_des.empty or "ngay_xuat_huy" not in df_des.columns:
+        _write_empty_sheet(ws)
+        _write_empty_sheet(ws_detail)
+        output = io.BytesIO(); wb.save(output); output.seek(0)
+        return output.getvalue()
+
+    report = df_des.copy()
+    report["ngay_xuat_huy"] = pd.to_datetime(report["ngay_xuat_huy"], errors="coerce")
+    report["so_luong"] = pd.to_numeric(report.get("so_luong"), errors="coerce").fillna(0).astype(int)
+    report = report[report["ngay_xuat_huy"].notna()].copy()
+    if report.empty:
+        _write_empty_sheet(ws)
+        _write_empty_sheet(ws_detail)
+        output = io.BytesIO(); wb.save(output); output.seek(0)
+        return output.getvalue()
+
+    batch_labels = {}
+    if df_lots is not None and not df_lots.empty and {"id", "lo"}.issubset(df_lots.columns):
+        lot_frame = df_lots.copy()
+        if "farm" not in lot_frame.columns:
+            lot_frame["farm"] = ""
+        group_cols = ["farm", "lo"]
+        for (farm_name, lot_name), group in lot_frame.groupby(group_cols, dropna=False):
+            ordered = group.sort_values("ngay_trong") if "ngay_trong" in group.columns else group
+            multiple_batches = len(ordered) > 1
+            for batch_number, (_, row) in enumerate(ordered.iterrows(), 1):
+                if pd.isna(row.get("id")):
+                    continue
+                display_name = f"{lot_name} (đợt {batch_number})" if multiple_batches else str(lot_name)
+                batch_labels[int(row["id"])] = (str(farm_name or ""), display_name)
+
+    def _resolve_report_identity(row):
+        farm_name = str(row.get("farm") or "").strip()
+        lot_name = str(row.get("lo") or row.get("lot_id") or "").strip()
+        base_lot_id = row.get("base_lot_id")
+        if pd.notna(base_lot_id):
+            mapped = batch_labels.get(int(base_lot_id))
+            if mapped:
+                mapped_farm, mapped_lot = mapped
+                return farm_name or mapped_farm, mapped_lot
+        return farm_name, lot_name or "Chưa xác định"
+
+    identities = report.apply(_resolve_report_identity, axis=1)
+    report["_farm"] = [identity[0] for identity in identities]
+    report["_lot"] = [identity[1] for identity in identities]
+    iso_calendar = report["ngay_xuat_huy"].dt.isocalendar()
+    report["_iso_year"] = iso_calendar.year.astype(int)
+    report["_iso_week"] = iso_calendar.week.astype(int)
+
+    week_dates = []
+    for (iso_year, iso_week), group in report.groupby(["_iso_year", "_iso_week"], sort=True):
+        dates = sorted(group["ngay_xuat_huy"].dt.date.unique().tolist())
+        week_dates.append((int(iso_year), int(iso_week), dates))
+
+    for column, label in ((1, "Farm"), (2, "Lô")):
+        ws.merge_cells(start_row=1, start_column=column, end_row=2, end_column=column)
+        cell = ws.cell(row=1, column=column, value=label)
+        cell.font = Font(bold=True, size=11)
+        cell.fill = header_fill
+        cell.alignment = center
+        cell.border = thin_border
+
+    date_columns = {}
+    week_total_columns = {}
+    current_column = 3
+    for iso_year, iso_week, dates in week_dates:
+        start_column = current_column
+        for destruction_date in dates:
+            date_columns[destruction_date] = current_column
+            cell = ws.cell(row=2, column=current_column, value=destruction_date.strftime("%d/%m"))
+            cell.font = Font(bold=True)
+            cell.fill = date_fill
+            cell.alignment = center
+            cell.border = thin_border
+            current_column += 1
+
+        week_total_columns[(iso_year, iso_week)] = current_column
+        total_cell = ws.cell(row=2, column=current_column, value="Tổng tuần")
+        total_cell.font = Font(bold=True)
+        total_cell.fill = week_total_fill
+        total_cell.alignment = center
+        total_cell.border = thin_border
+
+        ws.merge_cells(start_row=1, start_column=start_column, end_row=1, end_column=current_column)
+        week_cell = ws.cell(row=1, column=start_column, value=f"Tuần {iso_week}/{iso_year}")
+        week_cell.font = Font(bold=True, size=11)
+        week_cell.fill = header_fill
+        week_cell.alignment = center
+        for column in range(start_column, current_column + 1):
+            ws.cell(row=1, column=column).border = thin_border
+        current_column += 1
+
+    cumulative_column = current_column
+    cumulative_cell = ws.cell(row=1, column=cumulative_column, value="Lũy kế")
+    cumulative_cell.font = Font(bold=True, size=11)
+    cumulative_cell.fill = grand_total_fill
+    cumulative_cell.alignment = center
+    cumulative_cell.border = thin_border
+    cumulative_subheader = ws.cell(row=2, column=cumulative_column, value="Tổng xuất hủy")
+    cumulative_subheader.font = Font(bold=True)
+    cumulative_subheader.fill = grand_total_fill
+    cumulative_subheader.alignment = center
+    cumulative_subheader.border = thin_border
+
+    def _natural_key(value):
+        return [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", str(value))]
+
+    lot_keys = sorted(
+        report[["_farm", "_lot"]].drop_duplicates().itertuples(index=False, name=None),
+        key=lambda item: (_natural_key(item[0]), _natural_key(item[1])),
+    )
+    data_start_row = 3
+    for offset, (farm_name, lot_name) in enumerate(lot_keys):
+        row_number = data_start_row + offset
+        lot_rows = report[(report["_farm"] == farm_name) & (report["_lot"] == lot_name)]
+        for column, value in ((1, farm_name), (2, lot_name)):
+            cell = ws.cell(row=row_number, column=column, value=value)
+            cell.font = Font(bold=column == 2)
+            cell.alignment = center
+            cell.border = thin_border
+
+        lot_total = 0
+        for iso_year, iso_week, dates in week_dates:
+            week_total = 0
+            for destruction_date in dates:
+                day_total = int(lot_rows[lot_rows["ngay_xuat_huy"].dt.date == destruction_date]["so_luong"].sum())
+                cell = ws.cell(
+                    row=row_number,
+                    column=date_columns[destruction_date],
+                    value=day_total if day_total > 0 else None,
+                )
+                cell.alignment = center
+                cell.border = thin_border
+                week_total += day_total
+            week_cell = ws.cell(
+                row=row_number,
+                column=week_total_columns[(iso_year, iso_week)],
+                value=week_total if week_total > 0 else None,
+            )
+            week_cell.font = Font(bold=True)
+            week_cell.fill = week_total_fill
+            week_cell.alignment = center
+            week_cell.border = thin_border
+            lot_total += week_total
+
+        total_cell = ws.cell(row=row_number, column=cumulative_column, value=lot_total)
+        total_cell.font = Font(bold=True)
+        total_cell.fill = grand_total_fill
+        total_cell.alignment = center
+        total_cell.border = thin_border
+
+    total_row = data_start_row + len(lot_keys)
+    for column in range(1, cumulative_column + 1):
+        if column == 1:
+            value = "TỔNG"
+        elif column == 2:
+            value = ""
+        else:
+            value = sum(
+                int(ws.cell(row=row_number, column=column).value or 0)
+                for row_number in range(data_start_row, total_row)
+            )
+        cell = ws.cell(row=total_row, column=column, value=value)
+        cell.font = Font(bold=True)
+        cell.fill = grand_total_fill
+        cell.alignment = center
+        cell.border = thin_border
+
+    ws.column_dimensions["A"].width = 14
+    ws.column_dimensions["B"].width = 18
+    for column in range(3, cumulative_column + 1):
+        ws.column_dimensions[get_column_letter(column)].width = 12
+    ws.freeze_panes = "C3"
+    ws.auto_filter.ref = f"A2:{get_column_letter(cumulative_column)}{total_row}"
+
+    detail_headers = ["Farm", "Lô", "Ngày xuất hủy", "Tuần", "Giai đoạn", "Số lượng", "Lý do"]
+    for column, label in enumerate(detail_headers, 1):
+        cell = ws_detail.cell(row=1, column=column, value=label)
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+        cell.alignment = center
+        cell.border = thin_border
+
+    detail_rows = report.sort_values(["ngay_xuat_huy", "_farm", "_lot"])
+    for row_number, (_, row) in enumerate(detail_rows.iterrows(), 2):
+        values = [
+            row["_farm"], row["_lot"], row["ngay_xuat_huy"].date(),
+            int(row["_iso_week"]), str(row.get("giai_doan") or ""),
+            int(row["so_luong"]), str(row.get("ly_do") or ""),
+        ]
+        for column, value in enumerate(values, 1):
+            cell = ws_detail.cell(row=row_number, column=column, value=value)
+            cell.alignment = center if column != 7 else Alignment(vertical="center", wrap_text=True)
+            cell.border = thin_border
+            if column == 3:
+                cell.number_format = "dd/mm/yyyy"
+            if column == 6:
+                cell.number_format = "#,##0"
+
+    detail_widths = {"A": 14, "B": 18, "C": 16, "D": 10, "E": 22, "F": 14, "G": 32}
+    for column, width in detail_widths.items():
+        ws_detail.column_dimensions[column].width = width
+    ws_detail.freeze_panes = "A2"
+    ws_detail.auto_filter.ref = f"A1:G{ws_detail.max_row}"
+
+    output = io.BytesIO(); wb.save(output); output.seek(0)
+    return output.getvalue()
+
+
 def generate_planting_excel(df_lots, df_seasons):
     """Tạo file Excel báo cáo Trồng mới, chia sheet theo năm."""
     wb = Workbook()
@@ -4566,6 +4798,7 @@ def render_global_data_tab(c_farm):
     .btn-forecast { background-color: #e3f2fd; color: #1565c0 !important; border: 1px solid #90caf9; }
     .btn-chich { background-color: #fff8e1; color: #f57f17 !important; border: 1px solid #ffe082; }
     .btn-cat   { background-color: #ffebee; color: #c62828 !important; border: 1px solid #ef9a9a; }
+    .btn-xh    { background-color: #f3e5f5; color: #7b1fa2 !important; border: 1px solid #ce93d8; }
     .btn-trong { background-color: #e8f5e9; color: #2e7d32 !important; border: 1px solid #a5d6a7; }
     /* Popover buttons cho Admin/KD — match original colors */
 
@@ -4579,6 +4812,11 @@ def render_global_data_tab(c_farm):
         border: 1px solid #ef9a9a !important; font-weight: 600;
         min-height: 64px; border-radius: 0.5rem;
     }
+    .st-key-pop_xh button {
+        background-color: #f3e5f5 !important; color: #7b1fa2 !important;
+        border: 1px solid #ce93d8 !important; font-weight: 600;
+        min-height: 64px; border-radius: 0.5rem;
+    }
     .st-key-pop_trong button {
         background-color: #e8f5e9 !important; color: #2e7d32 !important;
         border: 1px solid #a5d6a7 !important; font-weight: 600;
@@ -4586,6 +4824,7 @@ def render_global_data_tab(c_farm):
     }
     .st-key-pop_chich button:hover,
     .st-key-pop_cat button:hover,
+    .st-key-pop_xh button:hover,
     .st-key-pop_trong button:hover {
         opacity: 0.85 !important; filter: brightness(0.95) !important;
     }
@@ -4607,7 +4846,7 @@ def render_global_data_tab(c_farm):
         b64 = base64.b64encode(data_bytes if isinstance(data_bytes, bytes) else data_bytes).decode()
         return f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{filename}" class="custom-dl-btn {css_class}">{label}</a>'
 
-    col_t1, col_t2, col_t3, col_t4, col_t5 = st.columns([1.8, 1, 1, 1, 1])
+    col_t1, col_t2, col_t3, col_t4, col_t5, col_t6 = st.columns([1.8, 1, 1, 1, 1, 1])
     report_generated_at = datetime.now()
     report_stamp = report_generated_at.strftime("%Y%m%d_%H%M%S")
 
@@ -4619,7 +4858,7 @@ def render_global_data_tab(c_farm):
     if is_multi_farm and available_farms:
         # ── Admin/KD: mỗi nút download là popover chọn farm ──
         # Dùng session_state để đảm bảo radio value không bị reset khi download rerun
-        for _k in ["pop_farm_chich", "pop_farm_cat", "pop_farm_trong"]:
+        for _k in ["pop_farm_chich", "pop_farm_cat", "pop_farm_xh", "pop_farm_trong"]:
             if _k not in st.session_state:
                 st.session_state[_k] = available_farms[0]
 
@@ -4650,6 +4889,15 @@ def render_global_data_tab(c_farm):
                 st.download_button("⬇️ Tải về", data=cut_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
         with col_t5:
+            with st.popover("Báo cáo Xuất hủy", use_container_width=True, key="pop_xh"):
+                sel_xh = st.radio("Chọn Farm", available_farms, key="pop_farm_xh", horizontal=True)
+                fl = _filter_by_farm(df_lots_all, sel_xh)
+                fd = _filter_by_farm(df_des_all, sel_xh)
+                destruction_excel = generate_destruction_excel(fl, fd)
+                fn = f"Bao_cao_xuat_huy_{sel_xh}_{report_stamp}.xlsx"
+                st.download_button("⬇️ Tải về", data=destruction_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+
+        with col_t6:
             with st.popover("Báo cáo Trồng mới", use_container_width=True, key="pop_trong"):
                 sel_trong = st.radio("Chọn Farm", available_farms, key="pop_farm_trong", horizontal=True)
                 fl = _filter_by_farm(df_lots_all, sel_trong)
@@ -4678,6 +4926,12 @@ def render_global_data_tab(c_farm):
             st.markdown(href, unsafe_allow_html=True)
 
         with col_t5:
+            destruction_excel = generate_destruction_excel(df_lots_all, df_des_all)
+            fn = f"Bao_cao_xuat_huy_{c_farm}_{report_stamp}.xlsx"
+            href = _gen_dl_link(destruction_excel, fn, "btn-xh", "Báo cáo Xuất hủy")
+            st.markdown(href, unsafe_allow_html=True)
+
+        with col_t6:
             plant_excel = generate_planting_excel(df_lots_all, df_seasons)
             fn = f"Bao_cao_trong_moi_{c_farm}_{report_stamp}.xlsx"
             href = _gen_dl_link(plant_excel, fn, "btn-trong", "Báo cáo Trồng mới")
@@ -8852,6 +9106,25 @@ def render_container_allocation_calculator():
 # =====================================================
 # GIAO DIỆN CHÍNH (MAIN APP) - ROLE BASED 
 # =====================================================
+def get_nt_tab_options(team: str) -> list:
+    """Return operational tabs exposed to farm field teams."""
+    if team == "Đội BVTV":
+        return [
+            "🌐 Dữ liệu toàn cục",
+            "💰 Chi phí",
+            "📈 Cập nhật Tiến độ",
+        ]
+    return [
+        "🌐 Dữ liệu toàn cục",
+        "💰 Chi phí",
+        "📈 Cập nhật Tiến độ",
+        "📏 Đo Size",
+        "🗑️ Cập nhật Xuất hủy",
+        "🌳 Kiểm kê cây",
+        "🧪 Đo pH Đất",
+    ]
+
+
 def render_main_app():
     c_farm = st.session_state["current_farm"]
     c_team = st.session_state["current_team"]
@@ -9008,11 +9281,10 @@ def render_main_app():
     # MODULE 1: ĐỘI NÔNG TRƯỜNG (NT1, NT2)
     # =================================================
     if c_team in ["NT1", "NT2", "Đội BVTV"]:
-        if c_team == "Đội BVTV":
-            tab_opts = ["🌐 Dữ liệu toàn cục", "💰 Chi phí", "📈 Cập nhật Tiến độ"]
-        else:
-            tab_opts = ["🌐 Dữ liệu toàn cục", "💰 Chi phí", "🌱 Khởi tạo Lô trồng", "📈 Cập nhật Tiến độ", "📏 Đo Size", "🗑️ Cập nhật Xuất hủy", "🌳 Kiểm kê cây", "🧪 Đo pH Đất", "🦠 Kiểm tra Fusarium"]
-            
+        tab_opts = get_nt_tab_options(c_team)
+        if st.session_state.get("tab_nt_menu") not in [None, *tab_opts]:
+            st.session_state.pop("tab_nt_menu", None)
+
         active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_nt_menu", default=tab_opts[0])
         if active_tab is None: active_tab = tab_opts[0] # Prevent empty state
 
