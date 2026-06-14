@@ -247,7 +247,16 @@ Hệ thống tự động liên kết log entries (stage_logs, harvest_logs, des
 - **Trước cắt bắp**: Gộp tất cả record chích bắp từ mọi batch, sort by `ngay_thuc_hien` ASC (tiebreak `ngay_trong`). Phân bổ record-level để handle xen-kẽ giữa các đợt.
 - **Trước thu hoạch**: Bắt buộc chọn `mau_day` từ `ribbon_schedule`. Tìm tất cả record cắt bắp có `tuan` khớp với tuần của màu dây đó, chọn tuần gần nhất với ngày xuất hủy (closest-date). Trừ harvest + destruction cùng `base_lot_id` đã có.
 
-### 4.6 Ribbon Schedule (Quản lý Màu dây Tập trung)
+### 4.6 Biên bản PDF cho một lần lưu Xuất hủy
+- Mỗi lần bấm lưu queue Xuất hủy bắt buộc có đúng một PDF tối đa 10 MB. UI nhắc PDF phải có chữ ký người phụ trách nhưng không OCR hoặc xác minh chữ ký.
+- Một biên bản áp dụng cho toàn bộ item trong queue và mọi dòng phát sinh khi FIFO chia item qua nhiều đợt trồng.
+- Luồng lưu: kiểm tra PDF và toàn bộ capacity → tính hết FIFO rows → upload bucket private → tạo `destruction_documents` → bulk insert `destruction_logs` dùng chung `document_id`.
+- Nếu metadata hoặc bulk insert lỗi, backend xóa metadata/file vừa tải để tránh file rác. Multi-row insert dùng một request để không lưu dở một phần queue.
+- Dữ liệu lịch sử giữ `document_id = null` và hiện `Chưa có biên bản`. Chọn dòng mới có biên bản sẽ mở signed URL có hiệu lực 10 phút.
+- Xóa hoặc sửa một dòng không tự xóa PDF vì cùng biên bản có thể đang được nhiều dòng tham chiếu.
+- Storage chỉ sử dụng client `service_role` ở backend; app cần secret `SUPABASE_SERVICE_ROLE_KEY` trên Streamlit production.
+
+### 4.7 Ribbon Schedule (Quản lý Màu dây Tập trung)
 
 **Bảng `ribbon_schedule`** là nguồn chuẩn cho màu dây theo `(farm_id, year, week_number)`. `stage_logs` và `destruction_logs` resolve màu dây qua tuần; riêng `harvest_logs` lưu thêm `mau_day` ở cấp record vì một lô có thể thu nhiều màu dây trong cùng ngày.
 

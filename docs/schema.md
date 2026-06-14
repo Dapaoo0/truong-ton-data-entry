@@ -464,6 +464,25 @@ Tài liệu này ghi lại chi tiết toàn bộ cấu trúc cơ sở dữ liệ
 | is_deleted | boolean | Không | Cờ đánh dấu soft delete (True=Đã xóa) |
 | dim_lo_id | integer | Không | ID định danh/Khóa ngoại |
 | base_lot_id | integer | Không | FK → base_lots.id — Đợt trồng tương ứng, auto-resolved bằng timeline sinh trưởng |
+| document_id | uuid | Không | FK → `destruction_documents.id`; null với dữ liệu lịch sử chưa có biên bản PDF |
+
+## public.destruction_documents
+**Ý nghĩa:** Metadata của biên bản PDF dùng chung cho toàn bộ dòng xuất hủy được lưu trong cùng một lần.
+
+| Tên Trường (Field) | Kiểu Dữ Liệu (Type) | Bắt Buộc (Required) | Ý Nghĩa / Ghi Chú |
+|---|---|---|---|
+| id | uuid | Có | Khóa chính, sinh tự động |
+| farm | text | Có | Farm thực hiện lần lưu |
+| team | text | Có | Đội/account thực hiện lần lưu |
+| storage_path | text | Có | Đường dẫn duy nhất trong bucket private `destruction-minutes` |
+| original_file_name | text | Có | Tên PDF người dùng tải lên |
+| file_size_bytes | bigint | Có | Kích thước > 0 và tối đa 10 MB |
+| mime_type | text | Có | Cố định `application/pdf` |
+| created_at | timestamp with time zone | Có | Thời điểm tải biên bản |
+
+- RLS được bật; `anon` và `authenticated` không có quyền Data API trên bảng.
+- Backend Streamlit dùng `service_role` để upload, tạo signed URL 10 phút và đọc metadata.
+- Bucket `destruction-minutes` là private, chỉ nhận `application/pdf`, tối đa `10,485,760` bytes.
 
 ## public.harvest_logs
 **Ý nghĩa:** Log lưu quá trình thu hoạch chuối.

@@ -20,6 +20,12 @@ from openpyxl import Workbook
 from openpyxl.comments import Comment
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+from destruction_documents import (
+    build_destruction_storage_path,
+    create_destruction_document_signed_url,
+    persist_destruction_batch,
+    validate_destruction_pdf,
+)
 import json
 import html
 import re
@@ -605,8 +611,21 @@ def configured_dialog_decorator(title, *args, **kwargs):
 load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+supabase_service: Client | None = (
+    create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+    if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
+    else None
+)
+
+
+@st.cache_data(ttl=540)
+def get_destruction_document_view_url(document_id: str) -> str:
+    if supabase_service is None:
+        raise RuntimeError("Thiếu cấu hình SUPABASE_SERVICE_ROLE_KEY.")
+    return create_destruction_document_signed_url(supabase_service, str(document_id))
 
 st.set_page_config(
     page_title="Trường Tồn - Quản lý Tiến độ Chuối",
@@ -649,6 +668,42 @@ VU_OPTIONS = ["F0", "F1", "F2", "F3", "F4", "F5"]
 LOAI_TRONG_OPTIONS = ["Trồng mới", "Trồng dặm"]
 STAGE_NT_OPTIONS = ["Chích bắp", "Cắt bắp"]  # Không còn Thu Hoạch ở đây
 DESTRUCTION_STAGE_OPTIONS = ["Trước chích bắp", "Trước cắt bắp", "Trước thu hoạch"]
+
+
+def get_destruction_pdf_instruction() -> str:
+    return (
+        "Bắt buộc tải lên 01 biên bản PDF tối đa 10 MB, có chữ ký của người phụ trách. "
+        "Biên bản này áp dụng cho tất cả dữ liệu xuất hủy trong cùng lần lưu."
+    )
+
+
+def prepare_destruction_rows(queue: list[dict], farm_name: str, allocator) -> list[dict]:
+    """Resolve every queue item to database rows before uploading its shared PDF."""
+    rows = []
+    for item in queue:
+        is_valid, message, allocations = allocator(
+            farm_name,
+            item["Lô"],
+            item["Số lượng"],
+            "destruction",
+            item["Ngày"],
+            "Xuất hủy",
+            giai_doan=item.get("Giai đoạn"),
+            mau_day=item.get("Màu dây"),
+        )
+        if not is_valid:
+            raise ValueError(message)
+        for allocation in allocations:
+            rows.append({
+                "ngay_xuat_huy": item["Ngày"],
+                "giai_doan": item["Giai đoạn"],
+                "ly_do": item["Lý do"],
+                "tuan": item["Tuần"],
+                "dim_lo_id": allocation["dim_lo_id"],
+                "so_luong": allocation["so_luong"],
+                "base_lot_id": allocation.get("base_lot_id"),
+            })
+    return rows
 PLANTING_DENSITY_TREES_PER_HA = 2190
 
 # =====================================================
@@ -9765,6 +9820,17 @@ def render_main_app():
                             st.text_input("📍 Tuần", value=str(ngay.isocalendar()[1]), disabled=True, key=f"main_w_des_{ngay}")
                         sl = st.number_input("🔢 Số lượng cây xuất hủy", min_value=0, step=10, key="add_des_sl")
 
+                    upload_version = st.session_state.get("destruction_pdf_upload_version", 0)
+                    destruction_pdf = st.file_uploader(
+                        "📄 Biên bản xuất hủy",
+                        type=["pdf"],
+                        key=f"add_des_pdf_{upload_version}",
+                        help=get_destruction_pdf_instruction(),
+                    )
+                    st.caption(get_destruction_pdf_instruction())
+                    if supabase_service is None:
+                        st.warning("⚠️ Chưa cấu hình Storage bảo mật. Cần thêm SUPABASE_SERVICE_ROLE_KEY vào Streamlit Secrets trước khi lưu.")
+
                     if st.button("➕ Thêm vào Danh sách", key="btn_add_des", use_container_width=True, type="secondary"):
                         if sl <= 0: st.error("❌ Nhập số lượng > 0.")
                         elif selected_reason == "Khác" and not ly_do.strip(): st.error("❌ Cần ghi rõ chi tiết lý do (khi chọn Khác).")
@@ -9777,6 +9843,15 @@ def render_main_app():
 
                 def process_des_queue():
                     queue = st.session_state["queue_des"]
+                    if supabase_service is None:
+                        st.error("❌ Thiếu cấu hình SUPABASE_SERVICE_ROLE_KEY nên chưa thể tải biên bản lên Storage.")
+                        return
+                    try:
+                        validated_pdf = validate_destruction_pdf(destruction_pdf)
+                    except ValueError as exc:
+                        st.error(f"❌ {exc}")
+                        return
+
                     lot_reqs = {}
                     for item in queue:
                         lot_reqs[item["Lô"]] = lot_reqs.get(item["Lô"], 0) + item["Số lượng"]
@@ -9785,30 +9860,48 @@ def render_main_app():
                         if not valid:
                             st.error(f"❌ Lỗi tổng số lượng ở Lô {l_id}: {msg}")
                             return
-                    success_count = 0
-                    for item in queue:
-                        is_valid, msg, allocations = allocate_fifo_quantity(c_farm, item["Lô"], item["Số lượng"], "destruction", item["Ngày"], "Xuất hủy", giai_doan=item.get("Giai đoạn"), mau_day=item.get("Màu dây"))
-                        if is_valid:
-                            for alloc in allocations:
-                                data = {"farm": c_farm, "team": c_team, "ngay_xuat_huy": item["Ngày"], "giai_doan": item["Giai đoạn"], "ly_do": item["Lý do"], "tuan": item["Tuần"], "lot_id": alloc["lot_id"], "so_luong": alloc["so_luong"], "base_lot_id": alloc.get("base_lot_id")}
-                                if not insert_to_db("destruction_logs", data):
-                                    st.error(f"❌ Lỗi ghi phân rã {alloc['lot_id']}")
-                                    return
-                            success_count += 1
-                        else:
-                            st.error(msg)
-                            return
+                    try:
+                        destruction_rows = prepare_destruction_rows(queue, c_farm, allocate_fifo_quantity)
+                    except ValueError as exc:
+                        st.error(f"❌ {exc}")
+                        return
+
+                    storage_path = build_destruction_storage_path(c_farm, date.today())
+                    try:
+                        persist_destruction_batch(
+                            supabase_service,
+                            pdf=validated_pdf,
+                            storage_path=storage_path,
+                            document_metadata={"farm": c_farm, "team": c_team},
+                            destruction_rows=destruction_rows,
+                        )
+                    except Exception as exc:
+                        st.error(f"❌ Không thể lưu xuất hủy và biên bản PDF: {exc}")
+                        return
+
                     st.session_state["queue_des"] = []
+                    st.session_state["destruction_pdf_upload_version"] = upload_version + 1
                     st.cache_data.clear()
-                    st.session_state["toast"] = f"✅ Đã lưu xuất hủy {success_count} dòng!"
+                    st.session_state["toast"] = f"✅ Đã lưu {len(queue)} dòng xuất hủy cùng 01 biên bản PDF!"
                     st.rerun()
 
                 render_queue_ui("queue_des", ["Lô", "Giai đoạn", "Màu dây", "Lý do", "Số lượng", "Ngày", "Tuần"], process_des_queue)
 
                 st.markdown("---")
-                col_t, col_e, col_d = st.columns([5, 1.5, 1.5])
+                col_t, col_v, col_e, col_d = st.columns([4, 1.7, 1.5, 1.5])
                 with col_t:
                     st.markdown('<p class="dataframe-header" style="margin-top:0.5rem;">Dữ liệu của đội bạn (Click 1 dòng để sửa/xóa)</p>', unsafe_allow_html=True)
+                if is_editing:
+                    with col_v:
+                        document_id = editing_row.get("document_id")
+                        if document_id and not pd.isna(document_id):
+                            try:
+                                document_url = get_destruction_document_view_url(str(document_id))
+                                st.link_button("📄 Xem biên bản", document_url, use_container_width=True)
+                            except Exception as exc:
+                                st.button("📄 Xem biên bản", disabled=True, use_container_width=True, help=str(exc))
+                        else:
+                            st.caption("Chưa có biên bản")
                 if is_editing and is_within_48h:
                     with col_e:
                         if st.button("✏️ Chỉnh sửa", key="edit_des_nt", use_container_width=True):
