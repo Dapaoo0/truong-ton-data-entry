@@ -2409,6 +2409,29 @@ def _shift_iso_week(year: int, week: int, week_offset: int):
     iso = shifted.isocalendar()
     return int(iso.year), int(iso.week)
 
+def _report_clean_farm_name(value):
+    if value is None or pd.isna(value):
+        return ""
+    return str(value).strip()
+
+def _report_farm_sort_key(farm_name):
+    farm_name = _report_clean_farm_name(farm_name)
+    m = re.search(r"(\d+)", farm_name)
+    return (int(m.group(1)) if m else 9999, farm_name)
+
+def _report_forecast_offsets_for_farm(farm_name):
+    farm_name = _report_clean_farm_name(farm_name)
+    if farm_name == "Farm 126":
+        return [8]
+    if farm_name == "Farm 157":
+        return [9]
+    return [8, 9]
+
+def _report_expected_harvest_from_cut(cut_value):
+    if not isinstance(cut_value, (int, float)) or cut_value <= 0:
+        return 0
+    return int(float(cut_value) * 0.97 + 0.5)
+
 def get_ribbon_cut_week_candidates_for_harvest(farm_id, mau_day, harvest_date):
     """Trả về các tuần cắt bắp ứng với màu dây thu hoạch.
 
@@ -4163,6 +4186,192 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None, df_har=None) -> bytes:
     output = io.BytesIO(); wb.save(output); output.seek(0)
     return output.getvalue()
 
+def generate_harvest_forecast_excel(df_lots, df_stg) -> bytes:
+    """Tạo file dự báo thu hoạch từ dữ liệu Cắt bắp.
+
+    Farm 126 dùng +8 tuần, Farm 157 dùng +9 tuần. Cách đếm inclusive:
+    cắt tuần 20, +8 sẽ rơi vào tuần thu hoạch dự báo 27.
+    Số dự báo = round(số cắt bắp * 97%).
+    """
+    wb = Workbook()
+    thin_border = Border(
+        left=Side(style="thin"), right=Side(style="thin"),
+        top=Side(style="thin"), bottom=Side(style="thin")
+    )
+    header_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    total_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+    center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    if df_stg is None or df_stg.empty or "giai_doan" not in df_stg.columns:
+        ws = wb.active
+        ws.title = "Dự báo Thu hoạch"
+        ws.cell(row=1, column=1, value="Chưa có dữ liệu Cắt bắp.")
+        output = io.BytesIO(); wb.save(output); output.seek(0)
+        return output.getvalue()
+
+    df_cut = df_stg[df_stg["giai_doan"] == "Cắt bắp"].copy()
+    if df_cut.empty:
+        ws = wb.active
+        ws.title = "Dự báo Thu hoạch"
+        ws.cell(row=1, column=1, value="Chưa có dữ liệu Cắt bắp.")
+        output = io.BytesIO(); wb.save(output); output.seek(0)
+        return output.getvalue()
+
+    lot_lookup = {}
+    if df_lots is not None and not df_lots.empty and "id" in df_lots.columns:
+        for _, lot_row in df_lots.iterrows():
+            raw_id = lot_row.get("id")
+            if pd.isna(raw_id):
+                continue
+            blid = int(raw_id)
+            lot_lookup[blid] = {
+                "farm": _report_clean_farm_name(lot_row.get("farm")) if "farm" in df_lots.columns else "",
+                "lo": lot_row.get("lo") if "lo" in df_lots.columns else "",
+            }
+
+    parsed_rows = []
+    farm_years = {}
+    for _, row in df_cut.iterrows():
+        ngay_cut = pd.to_datetime(row.get("ngay_thuc_hien"), errors="coerce")
+        if pd.isna(ngay_cut):
+            continue
+        iso = ngay_cut.isocalendar()
+        cut_year = int(iso.year)
+        cut_week = int(row.get("tuan")) if pd.notna(row.get("tuan")) else int(iso.week)
+        blid = row.get("base_lot_id")
+        blid_int = int(blid) if pd.notna(blid) else None
+        fallback_lot = lot_lookup.get(blid_int, {}) if blid_int is not None else {}
+        farm_name = _report_clean_farm_name(row.get("farm")) if "farm" in df_cut.columns else ""
+        if not farm_name:
+            farm_name = fallback_lot.get("farm", "")
+        lo_name = row.get("lo") if "lo" in df_cut.columns else ""
+        if not lo_name:
+            lo_name = fallback_lot.get("lo", "")
+        cut_qty = pd.to_numeric(pd.Series([row.get("so_luong")]), errors="coerce").fillna(0).iloc[0]
+        cut_qty = int(cut_qty)
+        if cut_qty <= 0:
+            continue
+        parsed_rows.append({
+            "farm": farm_name,
+            "cut_year": cut_year,
+            "cut_week": cut_week,
+            "lo": lo_name,
+            "base_lot_id": blid_int,
+            "cut_qty": cut_qty,
+        })
+        if farm_name:
+            farm_years.setdefault(farm_name, set()).add(cut_year)
+
+    if not parsed_rows:
+        ws = wb.active
+        ws.title = "Dự báo Thu hoạch"
+        ws.cell(row=1, column=1, value="Chưa có dữ liệu Cắt bắp hợp lệ.")
+        output = io.BytesIO(); wb.save(output); output.seek(0)
+        return output.getvalue()
+
+    ribbon_lookup = {}
+    for farm_name, years in farm_years.items():
+        farm_id = get_farm_id_from_name(farm_name)
+        if not farm_id:
+            continue
+        for year in sorted(years):
+            res = supabase.table("ribbon_schedule").select("week_number, color_name") \
+                .eq("farm_id", farm_id).eq("year", int(year)).eq("is_deleted", False).execute()
+            for rb in (res.data or []):
+                ribbon_lookup[(farm_name, int(year), int(rb["week_number"]))] = rb.get("color_name") or ""
+
+    detail_rows = []
+    for row in parsed_rows:
+        offsets = _report_forecast_offsets_for_farm(row["farm"])
+        for inclusive_offset in offsets:
+            forecast_year, forecast_week = _shift_iso_week(row["cut_year"], row["cut_week"], inclusive_offset - 1)
+            forecast_qty = _report_expected_harvest_from_cut(row["cut_qty"])
+            detail_rows.append({
+                "Năm TH dự báo": forecast_year,
+                "Tuần TH dự báo": forecast_week,
+                "Farm": row["farm"],
+                "Năm cắt bắp": row["cut_year"],
+                "Tuần cắt bắp": row["cut_week"],
+                "Màu dây": ribbon_lookup.get((row["farm"], row["cut_year"], row["cut_week"]), ""),
+                "Lô": row["lo"],
+                "Base lot": row["base_lot_id"] if row["base_lot_id"] is not None else "",
+                "Số cắt bắp": row["cut_qty"],
+                "Dự kiến thu hoạch 97%": forecast_qty,
+                "Cách dự báo": f"+{inclusive_offset}",
+            })
+
+    detail_rows.sort(key=lambda r: (
+        int(r["Năm TH dự báo"]),
+        int(r["Tuần TH dự báo"]),
+        _report_farm_sort_key(r["Farm"]),
+        str(r["Màu dây"]),
+        str(r["Lô"]),
+    ))
+    farms = sorted({r["Farm"] for r in detail_rows if r["Farm"]}, key=_report_farm_sort_key)
+
+    ws_summary = wb.active
+    ws_summary.title = "Tổng hợp"
+    summary_headers = ["Năm TH dự báo", "Tuần TH dự báo", "Tổng dự kiến", *farms, "Ghi chú"]
+    for col_idx, header in enumerate(summary_headers, 1):
+        cell = ws_summary.cell(row=1, column=col_idx, value=header)
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+        cell.border = thin_border
+        cell.alignment = center_align
+
+    summary_map = {}
+    for row in detail_rows:
+        key = (row["Năm TH dự báo"], row["Tuần TH dự báo"])
+        summary_map.setdefault(key, {"Tổng dự kiến": 0, **{farm: 0 for farm in farms}})
+        summary_map[key]["Tổng dự kiến"] += row["Dự kiến thu hoạch 97%"]
+        if row["Farm"] in farms:
+            summary_map[key][row["Farm"]] += row["Dự kiến thu hoạch 97%"]
+
+    for row_idx, (key, values) in enumerate(sorted(summary_map.items()), 2):
+        forecast_year, forecast_week = key
+        row_values = [forecast_year, forecast_week, values["Tổng dự kiến"]]
+        row_values.extend(values.get(farm, 0) or "" for farm in farms)
+        row_values.append("Đã nhân 97% từ số cắt bắp")
+        for col_idx, value in enumerate(row_values, 1):
+            cell = ws_summary.cell(row=row_idx, column=col_idx, value=value)
+            cell.border = thin_border
+            cell.alignment = center_align
+    ws_summary.freeze_panes = "A2"
+
+    ws_detail = wb.create_sheet("Chi tiết nguồn")
+    detail_headers = [
+        "Năm TH dự báo", "Tuần TH dự báo", "Farm", "Năm cắt bắp", "Tuần cắt bắp",
+        "Màu dây", "Lô", "Base lot", "Số cắt bắp", "Dự kiến thu hoạch 97%", "Cách dự báo"
+    ]
+    for col_idx, header in enumerate(detail_headers, 1):
+        cell = ws_detail.cell(row=1, column=col_idx, value=header)
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+        cell.border = thin_border
+        cell.alignment = center_align
+    for row_idx, row in enumerate(detail_rows, 2):
+        for col_idx, header in enumerate(detail_headers, 1):
+            cell = ws_detail.cell(row=row_idx, column=col_idx, value=row.get(header, ""))
+            cell.border = thin_border
+            cell.alignment = center_align
+    ws_detail.freeze_panes = "A2"
+
+    for ws in (ws_summary, ws_detail):
+        for col_idx in range(1, ws.max_column + 1):
+            column_letter = get_column_letter(col_idx)
+            max_len = max(len(str(ws.cell(row=row_idx, column=col_idx).value or "")) for row_idx in range(1, ws.max_row + 1))
+            ws.column_dimensions[column_letter].width = min(max(max_len + 2, 12), 28)
+        for row_idx in range(1, ws.max_row + 1):
+            for col_idx in range(1, ws.max_column + 1):
+                if row_idx > 1 and col_idx in (3, *range(4, 4 + len(farms))):
+                    ws.cell(row=row_idx, column=col_idx).number_format = "#,##0"
+        if ws.max_row >= 2:
+            for col_idx in range(1, ws.max_column + 1):
+                ws.cell(row=ws.max_row, column=col_idx).border = thin_border
+
+    output = io.BytesIO(); wb.save(output); output.seek(0)
+    return output.getvalue()
+
 def generate_planting_excel(df_lots, df_seasons):
     """Tạo file Excel báo cáo Trồng mới, chia sheet theo năm."""
     wb = Workbook()
@@ -4280,6 +4489,7 @@ def render_global_data_tab(c_farm):
         filter: brightness(0.95);
     }
 
+    .btn-forecast { background-color: #e3f2fd; color: #1565c0 !important; border: 1px solid #90caf9; }
     .btn-chich { background-color: #fff8e1; color: #f57f17 !important; border: 1px solid #ffe082; }
     .btn-cat   { background-color: #ffebee; color: #c62828 !important; border: 1px solid #ef9a9a; }
     .btn-trong { background-color: #e8f5e9; color: #2e7d32 !important; border: 1px solid #a5d6a7; }
@@ -4323,7 +4533,7 @@ def render_global_data_tab(c_farm):
         b64 = base64.b64encode(data_bytes if isinstance(data_bytes, bytes) else data_bytes).decode()
         return f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{filename}" class="custom-dl-btn {css_class}">{label}</a>'
 
-    col_t1, col_t3, col_t4, col_t5 = st.columns([2, 1, 1, 1])
+    col_t1, col_t2, col_t3, col_t4, col_t5 = st.columns([1.8, 1, 1, 1, 1])
     report_generated_at = datetime.now()
     report_stamp = report_generated_at.strftime("%Y%m%d_%H%M%S")
 
@@ -4338,6 +4548,12 @@ def render_global_data_tab(c_farm):
         for _k in ["pop_farm_chich", "pop_farm_cat", "pop_farm_trong"]:
             if _k not in st.session_state:
                 st.session_state[_k] = available_farms[0]
+
+        with col_t2:
+            forecast_excel = generate_harvest_forecast_excel(df_lots_all, df_stg_all)
+            fn = f"Bao_cao_du_bao_thu_hoach_tat_ca_farm_{report_stamp}.xlsx"
+            href = _gen_dl_link(forecast_excel, fn, "btn-forecast", "Dự báo Thu hoạch")
+            st.markdown(href, unsafe_allow_html=True)
 
         with col_t3:
             with st.popover("Báo cáo Chích bắp", use_container_width=True, key="pop_chich"):
@@ -4369,6 +4585,12 @@ def render_global_data_tab(c_farm):
                 st.download_button("⬇️ Tải về", data=plant_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
     else:
         # ── User thường: download trực tiếp (giữ nguyên) ──
+        with col_t2:
+            forecast_excel = generate_harvest_forecast_excel(df_lots_all, df_stg_all)
+            fn = f"Bao_cao_du_bao_thu_hoach_{c_farm}_{report_stamp}.xlsx"
+            href = _gen_dl_link(forecast_excel, fn, "btn-forecast", "Dự báo Thu hoạch")
+            st.markdown(href, unsafe_allow_html=True)
+
         with col_t3:
             chich_excel = generate_chich_bap_excel(df_lots_all, df_stg_all)
             fn = f"Bao_cao_chich_bap_{c_farm}_{report_stamp}.xlsx"

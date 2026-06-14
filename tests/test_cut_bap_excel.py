@@ -154,3 +154,86 @@ def test_cut_report_multi_farm_adds_farm_column_and_specific_forecasts(monkeypat
     assert ws.cell(row=4, column=3).value == "126: Cam\n157: Trắng"
     assert ws.cell(row=5, column=1).value == "Farm 126"
     assert ws.cell(row=6, column=1).value == "Farm 157"
+
+
+def test_harvest_forecast_report_groups_cut_bap_by_farm_specific_harvest_week(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "get_farm_id_from_name",
+        lambda farm_name: {"Farm 126": 1, "Farm 157": 2}.get(farm_name),
+    )
+    monkeypatch.setattr(
+        app,
+        "supabase",
+        _FakeSupabase(
+            [
+                {
+                    "farm_id": 1,
+                    "year": 2026,
+                    "week_number": 24,
+                    "color_name": "Cam",
+                    "is_deleted": False,
+                },
+                {
+                    "farm_id": 2,
+                    "year": 2026,
+                    "week_number": 24,
+                    "color_name": "Trắng",
+                    "is_deleted": False,
+                },
+            ]
+        ),
+    )
+    df_lots = pd.DataFrame(
+        [
+            {"id": 1, "farm": "Farm 126", "lo": "A8", "ngay_trong": "2025-10-02"},
+            {"id": 2, "farm": "Farm 157", "lo": "1A", "ngay_trong": "2025-10-15"},
+        ]
+    )
+    df_stg = pd.DataFrame(
+        [
+            {
+                "giai_doan": "Cắt bắp",
+                "ngay_thuc_hien": "2026-06-10",
+                "tuan": 24,
+                "base_lot_id": 1,
+                "farm": "Farm 126",
+                "lo": "A8",
+                "so_luong": 88,
+            },
+            {
+                "giai_doan": "Cắt bắp",
+                "ngay_thuc_hien": "2026-06-10",
+                "tuan": 24,
+                "base_lot_id": 2,
+                "farm": "Farm 157",
+                "lo": "1A",
+                "so_luong": 100,
+            },
+        ]
+    )
+
+    excel_bytes = app.generate_harvest_forecast_excel(df_lots, df_stg)
+    wb = openpyxl.load_workbook(io.BytesIO(excel_bytes), data_only=True)
+    ws_summary = wb["Tổng hợp"]
+    ws_detail = wb["Chi tiết nguồn"]
+
+    assert ws_summary.cell(row=1, column=1).value == "Năm TH dự báo"
+    assert ws_summary.cell(row=2, column=2).value == 31
+    assert ws_summary.cell(row=2, column=3).value == 85
+    assert ws_summary.cell(row=2, column=4).value == 85
+    assert ws_summary.cell(row=3, column=2).value == 32
+    assert ws_summary.cell(row=3, column=3).value == 97
+    assert ws_summary.cell(row=3, column=5).value == 97
+
+    assert ws_detail.cell(row=1, column=1).value == "Năm TH dự báo"
+    assert ws_detail.cell(row=2, column=2).value == 31
+    assert ws_detail.cell(row=2, column=3).value == "Farm 126"
+    assert ws_detail.cell(row=2, column=6).value == "Cam"
+    assert ws_detail.cell(row=2, column=9).value == 88
+    assert ws_detail.cell(row=2, column=10).value == 85
+    assert ws_detail.cell(row=3, column=2).value == 32
+    assert ws_detail.cell(row=3, column=3).value == "Farm 157"
+    assert ws_detail.cell(row=3, column=6).value == "Trắng"
+    assert ws_detail.cell(row=3, column=9).value == 100
+    assert ws_detail.cell(row=3, column=10).value == 97

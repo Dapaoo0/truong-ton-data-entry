@@ -397,11 +397,23 @@ Hệ thống phân biệt **2 loại diện tích**:
 - **Type safety**: `tuan` → `pd.to_numeric().astype(int)`, `_year` → `.astype(int)`.
 - **Lot union**: Tên lô lấy từ CẢ `base_lots` VÀ `stage_logs`/`destruction_logs` (tránh miss lô chỉ tồn tại trong 1 nguồn).
 
-### 9.3 Báo cáo Chích bắp (`generate_chich_bap_excel`)
+### 9.3 Báo cáo Dự báo Thu hoạch (`generate_harvest_forecast_excel`)
+- **Mục đích**: Tải một file riêng để xem mỗi tuần thu hoạch dự báo có bao nhiêu buồng, tách được nguồn đến từ farm nào và màu dây nào.
+- **Input**: `df_lots`, `df_stg` với `stage_logs.giai_doan == "Cắt bắp"`.
+- **Cách dịch tuần**:
+  - Farm 126: `+8` tuần inclusive, tức cắt tuần 20 → dự báo thu hoạch tuần 27.
+  - Farm 157: `+9` tuần inclusive, tức cắt tuần 20 → dự báo thu hoạch tuần 28.
+  - Farm khác: fallback `+8/+9` nếu gọi trực tiếp ngoài luồng hiện tại.
+- **Số lượng dự báo**: `round(Số cắt bắp × 97%)`. Đây là số sau khi nhân 97%, không phải số cắt bắp gốc.
+- **Sheet `Tổng hợp`**: mỗi dòng là một tuần thu hoạch dự báo, gồm tổng dự kiến và các cột farm để thấy phần đóng góp của từng farm.
+- **Sheet `Chi tiết nguồn`**: mỗi dòng truy ngược về `Farm`, `Năm/Tuần cắt bắp`, `Màu dây`, `Lô`, `Base lot`, `Số cắt bắp`, `Dự kiến thu hoạch 97%`, `Cách dự báo`.
+- **UI**: Admin/Phòng Kinh doanh tải một file gộp tất cả farm; account farm tải theo scope farm đang đăng nhập. Báo cáo Cắt bắp vẫn tải tách biệt theo farm.
+
+### 9.4 Báo cáo Chích bắp (`generate_chich_bap_excel`)
 - **Input**: `df_lots` (base_lots filtered), `df_stg` (stage_logs filtered, `giai_doan == "Chích bắp"`).
 - **Layout**: Tương tự Cắt bắp — chia sheet theo năm, 1 cột/tuần, có Lũy kế.
 
-### 9.4 Báo cáo Trồng mới (`generate_planting_excel`)
+### 9.5 Báo cáo Trồng mới (`generate_planting_excel`)
 - **Input**: `df_lots` (base_lots filtered), `df_seasons` (seasons data).
 - **`loai_trong`**: Ưu tiên lấy trực tiếp từ `base_lots.loai_trong` (không cần join `seasons`). Fallback join nếu cột không tồn tại.
 - **Layout**: Danh sách đợt trồng kèm ngày, farm, lô, số lượng, loại trồng.
