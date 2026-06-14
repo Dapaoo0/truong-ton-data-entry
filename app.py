@@ -984,13 +984,56 @@ def insert_access_log(farm: str, team: str, action: str):
 # =====================================================
 # HÀM TƯƠNG TÁC DB (SUPABASE DATA FETCHERS)
 # =====================================================
+FARM_POLYGON_FILES = {
+    "Farm 126": "farm_126_polygons.json",
+    "Farm 157": "farm_157_polygons.json",
+    "Farm 195": "farm_195_polygons.json",
+}
+FARM_POLYGON_BASE_DIR = os.path.dirname(__file__)
+
+
+def get_map_lots_by_farm(farm: str) -> list:
+    """Return unique lot names in the same order as the farm map."""
+    polygon_filename = FARM_POLYGON_FILES.get(farm)
+    if not polygon_filename:
+        return []
+
+    polygon_path = os.path.join(FARM_POLYGON_BASE_DIR, polygon_filename)
+    if not os.path.exists(polygon_path):
+        return []
+
+    try:
+        with open(polygon_path, "r", encoding="utf-8") as polygon_file:
+            polygon_data = json.load(polygon_file)
+    except (OSError, ValueError, TypeError):
+        return []
+
+    lot_names = []
+    for lot in polygon_data.get("lots", []):
+        lot_name = str(lot.get("name") or "").strip()
+        if lot_name and lot_name not in lot_names:
+            lot_names.append(lot_name)
+    return lot_names
+
+
 def get_lots_by_farm(farm: str) -> list:
-    """Lấy danh sách Tên Lô gốc từ dim_lo (đã chuẩn hóa)."""
+    """Return active DB lots that are also present on the farm map."""
     res = supabase.table("dim_lo").select("lo_name, dim_farm!inner(farm_name)") \
         .eq("dim_farm.farm_name", farm).eq("is_active", True).order("lo_name").execute()
-    if res.data:
-        return list(dict.fromkeys(r["lo_name"] for r in res.data))  # unique, preserve order
-    return []
+    active_lots = list(dict.fromkeys(
+        str(row.get("lo_name") or "").strip()
+        for row in (res.data or [])
+        if str(row.get("lo_name") or "").strip()
+    ))
+    if not active_lots:
+        return []
+
+    map_lots = get_map_lots_by_farm(farm)
+    if not map_lots:
+        return active_lots
+
+    active_lot_set = set(active_lots)
+    return [lot_name for lot_name in map_lots if lot_name in active_lot_set]
 
 def fetch_table_data(table_name: str, farm: str) -> pd.DataFrame:
     """Hàm chung lấy dữ liệu. Quản trị viên (Admin) sẽ lấy của tất cả các farm."""

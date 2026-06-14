@@ -357,6 +357,8 @@ Hệ thống phân biệt **2 loại diện tích**:
 ### 8.3 Inactive lots
 - Tất cả query đều filter `dim_lo.is_active = True`.
 - Lô bị vô hiệu hóa (VD: Lô 11 = gộp 11A + 11B) bị loại khỏi mọi aggregation.
+- Dropdown nhập tác vụ chỉ hiển thị giao của hai tập: lô `dim_lo` đang active và tên lô có polygon trên bản đồ của farm. Vì vậy lô lịch sử còn sót trong DB nhưng không còn trên bản đồ sẽ không xuất hiện để người dùng nhập nhầm.
+- Nếu một farm chưa có file polygon, dropdown fallback về danh sách `dim_lo` active để không chặn vận hành.
 
 ### 8.4 Lô chưa có dữ liệu trồng
 - Lô có polygon trên bản đồ nhưng chưa có record trong `base_lots` (VD: Lô 10):
