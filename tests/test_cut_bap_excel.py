@@ -53,13 +53,13 @@ def _load_cut_report(monkeypatch, df_lots, df_stg):
                     "color_name": "Cam",
                     "is_deleted": False,
                 },
-                {
-                    "farm_id": 2,
-                    "year": 2026,
-                    "week_number": 24,
-                    "color_name": "Trắng",
-                    "is_deleted": False,
-                },
+            {
+                "farm_id": 2,
+                "year": 2026,
+                "week_number": 24,
+                "color_name": "Trắng",
+                "is_deleted": False,
+            },
             ]
         ),
     )
@@ -177,7 +177,7 @@ def test_harvest_forecast_report_groups_cut_bap_by_farm_specific_harvest_week(mo
                 {
                     "farm_id": 2,
                     "year": 2026,
-                    "week_number": 24,
+                    "week_number": 23,
                     "color_name": "Trắng",
                     "is_deleted": False,
                 },
@@ -203,8 +203,8 @@ def test_harvest_forecast_report_groups_cut_bap_by_farm_specific_harvest_week(mo
             },
             {
                 "giai_doan": "Cắt bắp",
-                "ngay_thuc_hien": "2026-06-10",
-                "tuan": 24,
+                "ngay_thuc_hien": "2026-06-03",
+                "tuan": 23,
                 "base_lot_id": 2,
                 "farm": "Farm 157",
                 "lo": "1A",
@@ -218,22 +218,27 @@ def test_harvest_forecast_report_groups_cut_bap_by_farm_specific_harvest_week(mo
     ws_summary = wb["Tổng hợp"]
     ws_detail = wb["Chi tiết nguồn"]
 
-    assert ws_summary.cell(row=1, column=1).value == "Năm TH dự báo"
-    assert ws_summary.cell(row=2, column=2).value == 31
-    assert ws_summary.cell(row=2, column=3).value == 85
-    assert ws_summary.cell(row=2, column=4).value == 85
-    assert ws_summary.cell(row=3, column=2).value == 32
-    assert ws_summary.cell(row=3, column=3).value == 97
-    assert ws_summary.cell(row=3, column=5).value == 97
+    assert ws_summary.cell(row=1, column=1).value == "Chỉ tiêu"
+    assert ws_summary.cell(row=1, column=2).value == "Tuần 31/2026"
+    assert ws_summary.cell(row=2, column=1).value == "Dự kiến thu hoạch"
+    assert ws_summary.cell(row=2, column=2).value == 182
+    assert ws_summary.cell(row=3, column=1).value == "Nguồn"
+    source_note = ws_summary.cell(row=3, column=2).value
+    assert "Farm 126 - Cam: 85" in source_note
+    assert "Farm 157 - Trắng: 97" in source_note
+    assert "Ghi chú" not in [ws_summary.cell(row=1, column=i).value for i in range(1, 8)]
 
     assert ws_detail.cell(row=1, column=1).value == "Năm TH dự báo"
+    assert "Base lot" not in [ws_detail.cell(row=1, column=i).value for i in range(1, 12)]
     assert ws_detail.cell(row=2, column=2).value == 31
     assert ws_detail.cell(row=2, column=3).value == "Farm 126"
     assert ws_detail.cell(row=2, column=6).value == "Cam"
-    assert ws_detail.cell(row=2, column=9).value == 88
-    assert ws_detail.cell(row=2, column=10).value == 85
-    assert ws_detail.cell(row=3, column=2).value == 32
+    assert ws_detail.cell(row=2, column=8).value == 88
+    assert ws_detail.cell(row=2, column=9).value == 85
+    assert ws_detail.cell(row=2, column=4).value == 2026
+    assert ws_detail.cell(row=2, column=4).number_format != "#,##0"
+    assert ws_detail.cell(row=3, column=2).value == 31
     assert ws_detail.cell(row=3, column=3).value == "Farm 157"
     assert ws_detail.cell(row=3, column=6).value == "Trắng"
-    assert ws_detail.cell(row=3, column=9).value == 100
-    assert ws_detail.cell(row=3, column=10).value == 97
+    assert ws_detail.cell(row=3, column=8).value == 100
+    assert ws_detail.cell(row=3, column=9).value == 97

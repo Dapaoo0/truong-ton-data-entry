@@ -405,8 +405,8 @@ Hệ thống phân biệt **2 loại diện tích**:
   - Farm 157: `+9` tuần inclusive, tức cắt tuần 20 → dự báo thu hoạch tuần 28.
   - Farm khác: fallback `+8/+9` nếu gọi trực tiếp ngoài luồng hiện tại.
 - **Số lượng dự báo**: `round(Số cắt bắp × 97%)`. Đây là số sau khi nhân 97%, không phải số cắt bắp gốc.
-- **Sheet `Tổng hợp`**: mỗi dòng là một tuần thu hoạch dự báo, gồm tổng dự kiến và các cột farm để thấy phần đóng góp của từng farm.
-- **Sheet `Chi tiết nguồn`**: mỗi dòng truy ngược về `Farm`, `Năm/Tuần cắt bắp`, `Màu dây`, `Lô`, `Base lot`, `Số cắt bắp`, `Dự kiến thu hoạch 97%`, `Cách dự báo`.
+- **Sheet `Tổng hợp`**: dạng ngang để dễ đọc; mỗi cột là một tuần thu hoạch dự báo. Dòng `Dự kiến thu hoạch` là tổng đã gom toàn bộ farm/màu dây trong tuần đó; dòng `Nguồn` ghi rõ từng phần đóng góp dạng `Farm 126 - Cam: 500 cây`.
+- **Sheet `Chi tiết nguồn`**: mỗi dòng truy ngược về `Farm`, `Năm/Tuần cắt bắp`, `Màu dây`, `Lô`, `Số cắt bắp`, `Dự kiến thu hoạch 97%`, `Cách dự báo`. Không hiển thị cột kỹ thuật `Base lot`.
 - **UI**: Admin/Phòng Kinh doanh tải một file gộp tất cả farm; account farm tải theo scope farm đang đăng nhập. Báo cáo Cắt bắp vẫn tải tách biệt theo farm.
 
 ### 9.4 Báo cáo Chích bắp (`generate_chich_bap_excel`)

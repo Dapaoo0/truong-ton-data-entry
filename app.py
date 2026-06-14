@@ -4311,37 +4311,72 @@ def generate_harvest_forecast_excel(df_lots, df_stg) -> bytes:
 
     ws_summary = wb.active
     ws_summary.title = "Tổng hợp"
-    summary_headers = ["Năm TH dự báo", "Tuần TH dự báo", "Tổng dự kiến", *farms, "Ghi chú"]
-    for col_idx, header in enumerate(summary_headers, 1):
-        cell = ws_summary.cell(row=1, column=col_idx, value=header)
+    summary_map = {}
+    source_map = {}
+    for row in detail_rows:
+        key = (row["Năm TH dự báo"], row["Tuần TH dự báo"])
+        summary_map[key] = summary_map.get(key, 0) + row["Dự kiến thu hoạch 97%"]
+        source_key = (row["Farm"], row["Màu dây"] or "Chưa rõ màu")
+        source_map.setdefault(key, {})
+        source_map[key][source_key] = source_map[key].get(source_key, 0) + row["Dự kiến thu hoạch 97%"]
+
+    summary_labels = ["Chỉ tiêu", "Dự kiến thu hoạch", "Nguồn"]
+    for row_idx, label in enumerate(summary_labels, 1):
+        cell = ws_summary.cell(row=row_idx, column=1, value=label)
         cell.font = Font(bold=True)
-        cell.fill = header_fill
+        cell.fill = header_fill if row_idx == 1 else total_fill
         cell.border = thin_border
         cell.alignment = center_align
 
-    summary_map = {}
-    for row in detail_rows:
-        key = (row["Năm TH dự báo"], row["Tuần TH dự báo"])
-        summary_map.setdefault(key, {"Tổng dự kiến": 0, **{farm: 0 for farm in farms}})
-        summary_map[key]["Tổng dự kiến"] += row["Dự kiến thu hoạch 97%"]
-        if row["Farm"] in farms:
-            summary_map[key][row["Farm"]] += row["Dự kiến thu hoạch 97%"]
-
-    for row_idx, (key, values) in enumerate(sorted(summary_map.items()), 2):
+    for col_idx, key in enumerate(sorted(summary_map.keys()), 2):
         forecast_year, forecast_week = key
-        row_values = [forecast_year, forecast_week, values["Tổng dự kiến"]]
-        row_values.extend(values.get(farm, 0) or "" for farm in farms)
-        row_values.append("Đã nhân 97% từ số cắt bắp")
-        for col_idx, value in enumerate(row_values, 1):
-            cell = ws_summary.cell(row=row_idx, column=col_idx, value=value)
-            cell.border = thin_border
-            cell.alignment = center_align
-    ws_summary.freeze_panes = "A2"
+        header = ws_summary.cell(row=1, column=col_idx, value=f"Tuần {forecast_week}/{forecast_year}")
+        header.font = Font(bold=True)
+        header.fill = header_fill
+        header.border = thin_border
+        header.alignment = center_align
+
+        total_cell = ws_summary.cell(row=2, column=col_idx, value=summary_map[key])
+        total_cell.font = Font(bold=True)
+        total_cell.fill = total_fill
+        total_cell.border = thin_border
+        total_cell.alignment = center_align
+        total_cell.number_format = "#,##0"
+
+        source_lines = []
+        for (farm_name, color_name), qty in sorted(
+            source_map.get(key, {}).items(),
+            key=lambda item: (_report_farm_sort_key(item[0][0]), str(item[0][1])),
+        ):
+            source_lines.append(f"{farm_name} - {color_name}: {qty:,} cây")
+        source_cell = ws_summary.cell(row=3, column=col_idx, value="\n".join(source_lines))
+        source_cell.border = thin_border
+        source_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    ws_summary.row_dimensions[3].height = 42
+    ws_summary.column_dimensions["A"].width = 22
+    for col_idx in range(2, ws_summary.max_column + 1):
+        ws_summary.column_dimensions[get_column_letter(col_idx)].width = 28
+    ws_summary.freeze_panes = "B2"
 
     ws_detail = wb.create_sheet("Chi tiết nguồn")
     detail_headers = [
         "Năm TH dự báo", "Tuần TH dự báo", "Farm", "Năm cắt bắp", "Tuần cắt bắp",
-        "Màu dây", "Lô", "Base lot", "Số cắt bắp", "Dự kiến thu hoạch 97%", "Cách dự báo"
+        "Màu dây", "Lô", "Số cắt bắp", "Dự kiến thu hoạch 97%", "Cách dự báo"
+    ]
+    detail_row_values = [
+        [
+            row["Năm TH dự báo"],
+            row["Tuần TH dự báo"],
+            row["Farm"],
+            row["Năm cắt bắp"],
+            row["Tuần cắt bắp"],
+            row["Màu dây"],
+            row["Lô"],
+            row["Số cắt bắp"],
+            row["Dự kiến thu hoạch 97%"],
+            row["Cách dự báo"],
+        ]
+        for row in detail_rows
     ]
     for col_idx, header in enumerate(detail_headers, 1):
         cell = ws_detail.cell(row=1, column=col_idx, value=header)
@@ -4349,25 +4384,21 @@ def generate_harvest_forecast_excel(df_lots, df_stg) -> bytes:
         cell.fill = header_fill
         cell.border = thin_border
         cell.alignment = center_align
-    for row_idx, row in enumerate(detail_rows, 2):
-        for col_idx, header in enumerate(detail_headers, 1):
-            cell = ws_detail.cell(row=row_idx, column=col_idx, value=row.get(header, ""))
+    for row_idx, values in enumerate(detail_row_values, 2):
+        for col_idx, value in enumerate(values, 1):
+            cell = ws_detail.cell(row=row_idx, column=col_idx, value=value)
             cell.border = thin_border
             cell.alignment = center_align
+            if col_idx in (1, 2, 4, 5):
+                cell.number_format = "0"
+            elif col_idx in (8, 9):
+                cell.number_format = "#,##0"
     ws_detail.freeze_panes = "A2"
 
-    for ws in (ws_summary, ws_detail):
-        for col_idx in range(1, ws.max_column + 1):
-            column_letter = get_column_letter(col_idx)
-            max_len = max(len(str(ws.cell(row=row_idx, column=col_idx).value or "")) for row_idx in range(1, ws.max_row + 1))
-            ws.column_dimensions[column_letter].width = min(max(max_len + 2, 12), 28)
-        for row_idx in range(1, ws.max_row + 1):
-            for col_idx in range(1, ws.max_column + 1):
-                if row_idx > 1 and col_idx in (3, *range(4, 4 + len(farms))):
-                    ws.cell(row=row_idx, column=col_idx).number_format = "#,##0"
-        if ws.max_row >= 2:
-            for col_idx in range(1, ws.max_column + 1):
-                ws.cell(row=ws.max_row, column=col_idx).border = thin_border
+    for col_idx in range(1, ws_detail.max_column + 1):
+        column_letter = get_column_letter(col_idx)
+        max_len = max(len(str(ws_detail.cell(row=row_idx, column=col_idx).value or "")) for row_idx in range(1, ws_detail.max_row + 1))
+        ws_detail.column_dimensions[column_letter].width = min(max(max_len + 2, 12), 24)
 
     output = io.BytesIO(); wb.save(output); output.seek(0)
     return output.getvalue()
