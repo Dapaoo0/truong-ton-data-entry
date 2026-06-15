@@ -599,7 +599,7 @@ Tài liệu này ghi lại chi tiết toàn bộ cấu trúc cơ sở dữ liệ
 |---|---|---|---|
 | id | integer | Có | - |
 | mau_day | text | Có | - |
-| lan_do | integer | Có | - |
+| lan_do | integer | Có | Thứ tự đo size: `1`, `2` hoặc `3` |
 | so_luong_mau | integer | Có | - |
 | ngay_do | date | Có | - |
 | tuan | integer | Không | - |
@@ -698,7 +698,7 @@ Các constraint hiện có đã được đối chiếu trực tiếp từ Supab
 | `ribbon_schedule` | `ribbon_schedule_week_number_check` | CHECK | `week_number` nằm trong `1..53` |
 | `ribbon_schedule` | `ribbon_schedule_farm_id_fkey` | FK | `farm_id` → `dim_farm(farm_id)` |
 | `size_measure_logs` | `size_measure_logs_pkey` | PK | Khóa chính `id` |
-| `size_measure_logs` | `size_measure_logs_lan_do_check` | CHECK | `lan_do` chỉ nhận `1` hoặc `2` |
+| `size_measure_logs` | `size_measure_logs_lan_do_check` | CHECK | `lan_do` chỉ nhận `1`, `2` hoặc `3` |
 | `size_measure_logs` | `fk_size_dim_lo` | FK | `dim_lo_id` → `dim_lo(lo_id)` |
 | `bsr_logs` | `bsr_logs_pkey` | PK | Khóa chính `id` |
 | `bsr_logs` | `fk_bsr_dim_lo` | FK | `dim_lo_id` → `dim_lo(lo_id)` |

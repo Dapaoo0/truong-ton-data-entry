@@ -2,6 +2,15 @@
 
 Lịch sử các thay đổi và tính năng mới được triển khai vào dự án.
 
+## [15/06/2026] - Báo cáo Đo size và dự báo chuẩn bị thu hoạch
+
+- Mở rộng `size_measure_logs.lan_do` từ 2 lên 3 lần đo.
+- UI bắt buộc Lần 2 có Lần 1, Lần 3 có Lần 2 và giữ cùng `Hàng kiểm tra` theo lô/màu dây.
+- Thêm báo cáo Excel `Báo cáo Đo size` theo từng farm, có mức tăng size trung bình và cảnh báo đạt/gần đạt `36/37 cal`.
+- Nhóm đã đủ 3 lần đo được giữ trong báo cáo 30 ngày tính từ ngày đo cuối.
+
+---
+
 ## [07/06/2026] - Tích hợp dashboard chi phí raw vào app input
 
 #### Feature: Tab `Chi phí` dùng chung cho mọi account (`app.py`, `cost_dashboard.py`)

@@ -26,6 +26,10 @@ from destruction_documents import (
     persist_destruction_batch,
     validate_destruction_pdf,
 )
+from size_report import (
+    generate_size_measure_excel,
+    validate_size_measurement_sequence,
+)
 import json
 import html
 import re
@@ -2345,6 +2349,26 @@ def get_all_ribbons_for_farm(farm_id):
         .order("year", desc=True).order("week_number", desc=True).execute()
     return res.data or []
 
+
+@st.cache_data(ttl=300)
+def fetch_ribbon_schedule_data(farm: str) -> pd.DataFrame:
+    query = (
+        supabase.table("ribbon_schedule")
+        .select("farm_id,year,week_number,color_name,is_deleted,dim_farm!inner(farm_name)")
+        .eq("is_deleted", False)
+    )
+    if farm not in ["Admin", "Phòng Kinh doanh"] and farm:
+        query = query.eq("dim_farm.farm_name", farm)
+    response = query.order("year").order("week_number").execute()
+    if not response.data:
+        return pd.DataFrame()
+    data = pd.DataFrame(response.data)
+    data["farm"] = data["dim_farm"].apply(
+        lambda value: value.get("farm_name") if isinstance(value, dict) else None
+    )
+    return data
+
+
 def build_color_selectbox(key_prefix, default_color=None):
     """Render dual selectbox (primary + secondary color). Returns standardized color string."""
     c1, c2 = st.columns(2)
@@ -3350,7 +3374,13 @@ def edit_size_measure_dialog(editing_row, available_lots):
             st.text_input("🏷️ Lứa (Mã hệ thống)", value=editing_row["lot_id"], disabled=True, key="dlg_sm_lot")
             lot_id = editing_row["lot_id"]
             mau_day_color = build_color_selectbox("dlg_sm", default_color=def_mau)
-            lan_do = st.radio("📏 Lần đo", options=[1, 2], index=def_lan_do-1, horizontal=True, key="dlg_sm_lando")
+            lan_do = st.radio(
+                "📏 Lần đo",
+                options=[1, 2, 3],
+                index=min(max(int(def_lan_do), 1), 3) - 1,
+                horizontal=True,
+                key="dlg_sm_lando",
+            )
         with col_b:
             col_b1, col_b2 = st.columns([2, 1])
             with col_b1:
@@ -3370,6 +3400,27 @@ def edit_size_measure_dialog(editing_row, available_lots):
             else:
                 # Auto-create/validate ribbon
                 farm_id = get_farm_id_from_name(editing_row["farm"])
+                dim_lo_id = editing_row.get("dim_lo_id") or get_dim_lo_id(editing_row["farm"], lot_id)
+                existing_group = pd.DataFrame()
+                if dim_lo_id:
+                    group_response = (
+                        supabase.table("size_measure_logs")
+                        .select("id,lan_do,hang_kiem_tra,is_deleted")
+                        .eq("dim_lo_id", dim_lo_id)
+                        .eq("mau_day", mau_day_color)
+                        .eq("is_deleted", False)
+                        .execute()
+                    )
+                    existing_group = pd.DataFrame(group_response.data or [])
+                validation_error = validate_size_measurement_sequence(
+                    existing_group,
+                    lan_do,
+                    hang_kiem_tra,
+                    exclude_id=editing_row["id"],
+                )
+                if validation_error:
+                    st.error(f"❌ {validation_error}")
+                    st.stop()
                 iso = ngay.isocalendar()
                 _, err = get_or_create_ribbon(farm_id, iso[0], iso[1], mau_day_color)
                 if err:
@@ -4815,6 +4866,8 @@ def render_global_data_tab(c_farm):
     df_har_all = fetch_table_data("harvest_logs", c_farm)
     df_bsr_all = fetch_table_data("bsr_logs", c_farm)
     df_tree_inv_all = fetch_table_data("tree_inventory_logs", c_farm)
+    df_size_all = fetch_table_data("size_measure_logs", c_farm)
+    df_ribbon_all = fetch_ribbon_schedule_data(c_farm)
     df_seasons = fetch_table_data("seasons", c_farm)
 
     # ─── Phân loại Trồng mới vs Trồng dặm ───
@@ -4855,6 +4908,7 @@ def render_global_data_tab(c_farm):
     .btn-cat   { background-color: #ffebee; color: #c62828 !important; border: 1px solid #ef9a9a; }
     .btn-xh    { background-color: #f3e5f5; color: #7b1fa2 !important; border: 1px solid #ce93d8; }
     .btn-trong { background-color: #e8f5e9; color: #2e7d32 !important; border: 1px solid #a5d6a7; }
+    .btn-size  { background-color: #e0f2f1; color: #00695c !important; border: 1px solid #80cbc4; }
     /* Popover buttons cho Admin/KD — match original colors */
 
     .st-key-pop_chich button {
@@ -4877,10 +4931,16 @@ def render_global_data_tab(c_farm):
         border: 1px solid #a5d6a7 !important; font-weight: 600;
         min-height: 64px; border-radius: 0.5rem;
     }
+    .st-key-pop_size button {
+        background-color: #e0f2f1 !important; color: #00695c !important;
+        border: 1px solid #80cbc4 !important; font-weight: 600;
+        min-height: 64px; border-radius: 0.5rem;
+    }
     .st-key-pop_chich button:hover,
     .st-key-pop_cat button:hover,
     .st-key-pop_xh button:hover,
-    .st-key-pop_trong button:hover {
+    .st-key-pop_trong button:hover,
+    .st-key-pop_size button:hover {
         opacity: 0.85 !important; filter: brightness(0.95) !important;
     }
     </style>
@@ -4901,7 +4961,7 @@ def render_global_data_tab(c_farm):
         b64 = base64.b64encode(data_bytes if isinstance(data_bytes, bytes) else data_bytes).decode()
         return f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{filename}" class="custom-dl-btn {css_class}">{label}</a>'
 
-    col_t1, col_t2, col_t3, col_t4, col_t5, col_t6 = st.columns([1.8, 1, 1, 1, 1, 1])
+    col_t1, col_t2, col_t3, col_t4, col_t5, col_t6, col_t7 = st.columns([1.8, 1, 1, 1, 1, 1, 1])
     report_generated_at = datetime.now()
     report_stamp = report_generated_at.strftime("%Y%m%d_%H%M%S")
 
@@ -4913,7 +4973,7 @@ def render_global_data_tab(c_farm):
     if is_multi_farm and available_farms:
         # ── Admin/KD: mỗi nút download là popover chọn farm ──
         # Dùng session_state để đảm bảo radio value không bị reset khi download rerun
-        for _k in ["pop_farm_chich", "pop_farm_cat", "pop_farm_xh", "pop_farm_trong"]:
+        for _k in ["pop_farm_chich", "pop_farm_cat", "pop_farm_xh", "pop_farm_trong", "pop_farm_size"]:
             if _k not in st.session_state:
                 st.session_state[_k] = available_farms[0]
 
@@ -4960,6 +5020,24 @@ def render_global_data_tab(c_farm):
                 plant_excel = generate_planting_excel(fl, f_seasons)
                 fn = f"Bao_cao_trong_moi_{sel_trong}_{report_stamp}.xlsx"
                 st.download_button("⬇️ Tải về", data=plant_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+
+        with col_t7:
+            with st.popover("Báo cáo Đo size", use_container_width=True, key="pop_size"):
+                sel_size = st.radio("Chọn Farm", available_farms, key="pop_farm_size", horizontal=True)
+                fl = _filter_by_farm(df_lots_all, sel_size)
+                fs = _filter_by_farm(df_stg_all, sel_size)
+                f_size = _filter_by_farm(df_size_all, sel_size)
+                f_ribbon = _filter_by_farm(df_ribbon_all, sel_size)
+                size_excel = generate_size_measure_excel(
+                    fl,
+                    f_size,
+                    fs,
+                    f_ribbon,
+                    farm_name=sel_size,
+                    today=report_generated_at.date(),
+                )
+                fn = f"Bao_cao_do_size_{sel_size}_{report_stamp}.xlsx"
+                st.download_button("⬇️ Tải về", data=size_excel, file_name=fn, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
     else:
         # ── User thường: download trực tiếp (giữ nguyên) ──
         with col_t2:
@@ -4990,6 +5068,19 @@ def render_global_data_tab(c_farm):
             plant_excel = generate_planting_excel(df_lots_all, df_seasons)
             fn = f"Bao_cao_trong_moi_{c_farm}_{report_stamp}.xlsx"
             href = _gen_dl_link(plant_excel, fn, "btn-trong", "Báo cáo Trồng mới")
+            st.markdown(href, unsafe_allow_html=True)
+
+        with col_t7:
+            size_excel = generate_size_measure_excel(
+                df_lots_all,
+                df_size_all,
+                df_stg_all,
+                df_ribbon_all,
+                farm_name=c_farm,
+                today=report_generated_at.date(),
+            )
+            fn = f"Bao_cao_do_size_{c_farm}_{report_stamp}.xlsx"
+            href = _gen_dl_link(size_excel, fn, "btn-size", "Báo cáo Đo size")
             st.markdown(href, unsafe_allow_html=True)
 
     st.divider()
@@ -9427,7 +9518,7 @@ def render_main_app():
                     with col_a:
                         lot_id = st.selectbox("🏷️ Chọn Lô", options=available_lots, key="add_sm_lot")
                         mau_day_color = build_color_selectbox("add_sm")
-                        lan_do = st.radio("📏 Lần đo", options=[1, 2], horizontal=True, key="add_sm_lando")
+                        lan_do = st.radio("📏 Lần đo", options=[1, 2, 3], horizontal=True, key="add_sm_lando")
                     with col_b:
                         col_b1, col_b2 = st.columns([2, 1])
                         with col_b1:
@@ -9452,15 +9543,38 @@ def render_main_app():
                             if err:
                                 st.error(err)
                                 st.stop()
-                            # Validation: Nếu chọn là Lần 2, phải kiểm tra xem Lần 1 đã có chưa.
-                            if lan_do == 2:
-                                _dim_id = get_dim_lo_id(c_farm, lot_id)
-                                if _dim_id:
-                                    res_lan1 = supabase.table("size_measure_logs") \
-                                        .select("id").eq("dim_lo_id", _dim_id).eq("mau_day", mau_day_color).eq("lan_do", 1).eq("is_deleted", False).execute()
-                                    if not res_lan1.data:
-                                        st.error(f"❌ Không thể đo Lần 2. Lô `{lot_id}` với màu dây `{mau_day_color}` chưa được đo Lần 1.")
-                                        st.stop()
+                            _dim_id = get_dim_lo_id(c_farm, lot_id)
+                            existing_rows = []
+                            if _dim_id:
+                                group_response = (
+                                    supabase.table("size_measure_logs")
+                                    .select("id,lan_do,hang_kiem_tra,is_deleted")
+                                    .eq("dim_lo_id", _dim_id)
+                                    .eq("mau_day", mau_day_color)
+                                    .eq("is_deleted", False)
+                                    .execute()
+                                )
+                                existing_rows.extend(group_response.data or [])
+                            for queued_item in st.session_state["queue_sm"]:
+                                if (
+                                    queued_item.get("Lô") == lot_id
+                                    and queued_item.get("Màu dây") == mau_day_color
+                                ):
+                                    existing_rows.append(
+                                        {
+                                            "lan_do": queued_item.get("Lần đo"),
+                                            "hang_kiem_tra": queued_item.get("Hàng KT"),
+                                            "is_deleted": False,
+                                        }
+                                    )
+                            validation_error = validate_size_measurement_sequence(
+                                pd.DataFrame(existing_rows),
+                                lan_do,
+                                hang_kiem_tra,
+                            )
+                            if validation_error:
+                                st.error(f"❌ {validation_error}")
+                                st.stop()
                                     
                             st.session_state["queue_sm"].append({
                                 "Lô": lot_id, "Màu dây": mau_day_color, "Lần đo": lan_do, "Số lượng": sl,
@@ -9471,6 +9585,43 @@ def render_main_app():
 
                 def process_sm_queue():
                     queue = st.session_state["queue_sm"]
+                    validation_groups = {}
+                    for item in queue:
+                        group_key = (item["Lô"], item["Màu dây"])
+                        if group_key not in validation_groups:
+                            dim_lo_id = get_dim_lo_id(c_farm, item["Lô"])
+                            existing_rows = []
+                            if dim_lo_id:
+                                response = (
+                                    supabase.table("size_measure_logs")
+                                    .select("id,lan_do,hang_kiem_tra,is_deleted")
+                                    .eq("dim_lo_id", dim_lo_id)
+                                    .eq("mau_day", item["Màu dây"])
+                                    .eq("is_deleted", False)
+                                    .execute()
+                                )
+                                existing_rows = response.data or []
+                            validation_groups[group_key] = list(existing_rows)
+
+                        validation_error = validate_size_measurement_sequence(
+                            pd.DataFrame(validation_groups[group_key]),
+                            item["Lần đo"],
+                            item["Hàng KT"],
+                        )
+                        if validation_error:
+                            st.error(
+                                f"❌ Lô {item['Lô']} - {item['Màu dây']}: "
+                                f"{validation_error}"
+                            )
+                            return
+                        validation_groups[group_key].append(
+                            {
+                                "lan_do": item["Lần đo"],
+                                "hang_kiem_tra": item["Hàng KT"],
+                                "is_deleted": False,
+                            }
+                        )
+
                     success_count = 0
                     for item in queue:
                         data = {

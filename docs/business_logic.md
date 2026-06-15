@@ -439,6 +439,19 @@ Hệ thống phân biệt **2 loại diện tích**:
 - **`loai_trong`**: Ưu tiên lấy trực tiếp từ `base_lots.loai_trong` (không cần join `seasons`). Fallback join nếu cột không tồn tại.
 - **Layout**: Danh sách đợt trồng kèm ngày, farm, lô, số lượng, loại trồng.
 
+### 9.7 Báo cáo Đo size (`generate_size_measure_excel`)
+- **Phạm vi**: Mỗi dòng là một nhóm `Lô + Màu dây`. Nhóm chưa đủ 3 lần đo luôn xuất hiện; nhóm đã đủ 3 lần đo tiếp tục xuất hiện trong 30 ngày tính từ ngày đo Lần 3.
+- **Trình tự đo**: Cho phép `Lần đo 1`, `Lần đo 2`, `Lần đo 3`. Lần 2 cần có Lần 1; Lần 3 cần có Lần 2 trong cùng `Farm + Lô + Màu dây`. Các lần đo trong cùng nhóm phải dùng cùng `Hàng kiểm tra`.
+- **Size mục tiêu**: `36/37 cal`, đo ở nải thứ hai từ dưới lên.
+- **Mức tăng size TB**: Trung bình các chênh lệch liên tiếp giữa những lần đo hiện có. Ví dụ `32 -> 34` cho mức tăng trung bình `2 cal`.
+- **Cảnh báo chuẩn bị thu hoạch**:
+  - Size mới nhất `>= 36`: `Đã đạt size thu hoạch`.
+  - Size mới nhất từ `35` đến dưới `36`: `Gần đạt size, tuần sau có thể thu`.
+  - Nếu có ít nhất 2 lần đo và `size mới nhất + mức tăng size TB >= 36`: `Dự kiến lần/tuần tới đạt size thu hoạch`.
+  - Các dòng đạt điều kiện cảnh báo được highlight trong file Excel.
+- **Tuần thu hoạch dự kiến**: Suy ra từ tuần Cắt bắp cùng lô/màu dây. Farm 126 dùng `+8` tuần inclusive; Farm 157 dùng `+9` tuần inclusive.
+- **UI tải file**: Admin/Phòng Kinh doanh chọn một farm trong popover. Account farm/đội tải trực tiếp farm đang được phân quyền; báo cáo này không gộp nhiều farm.
+
 ---
 
 ## 10. Chi Phí
