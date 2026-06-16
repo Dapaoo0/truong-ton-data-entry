@@ -9440,7 +9440,6 @@ def render_main_app():
 
         # TAB 1: KHỞI TẠO LÔ
         elif active_tab == "🌱 Khởi tạo Lô trồng":
-            st.markdown("#### Đăng ký đợt xuống giống mới")
             df_lots = fetch_table_data("base_lots", c_farm)
             df_lots_team = df_lots[df_lots["team"] == c_team] if not df_lots.empty else pd.DataFrame()
             editing_row, is_within_48h = get_editing_row("base_lots", df_lots_team)
@@ -9503,7 +9502,6 @@ def render_main_app():
 
         # TAB: ĐO SIZE (DÀNH CHO NT1/NT2)
         elif active_tab == "📏 Đo Size":
-            st.markdown("#### Đo kích thước buồng mẫu")
             available_lots = get_lots_by_farm(c_farm)
             if not available_lots:
                 st.warning("⚠️ Chưa có Lô trồng nào.")
@@ -9660,7 +9658,6 @@ def render_main_app():
 
         # TAB: CẬP NHẬT KIỂM KÊ CÂY
         elif active_tab == "🌳 Kiểm kê cây":
-            st.markdown("#### Báo cáo số lượng cây thực tế (Ngẫu nhiên / Tháng)")
             available_lots = get_lots_by_farm(c_farm)
             if not available_lots:
                 st.warning("⚠️ Chưa có Lô trồng nào.")
@@ -9729,7 +9726,6 @@ def render_main_app():
 
         # TAB: ĐO PH ĐẤT
         elif active_tab == "🧪 Đo pH Đất":
-            st.markdown("#### Ghi nhận kết quả Đo pH Đất")
             available_lots = get_lots_by_farm(c_farm)
             
             if not available_lots:
@@ -9820,7 +9816,6 @@ def render_main_app():
 
         # TAB 2: CẬP NHẬT TIẾN ĐỘ NT
         elif active_tab == "📈 Cập nhật Tiến độ":
-            st.markdown("#### Ghi nhận: Chích bắp / Cắt bắp")
             available_lots = get_lots_by_farm(c_farm)
             if not available_lots:
                 st.warning("⚠️ Chưa có Lô trồng nào. Hãy tạo ở Tab 1.")
@@ -9922,7 +9917,6 @@ def render_main_app():
 
         # TAB 3: XUẤT HỦY
         elif active_tab == "🗑️ Cập nhật Xuất hủy":
-            st.markdown("#### Ghi nhận số lượng cây chết / hư hỏng")
             available_lots = get_lots_by_farm(c_farm)
             if not available_lots:
                 st.warning("⚠️ Chưa có Lô trồng nào.")
@@ -10067,7 +10061,6 @@ def render_main_app():
 
         # TAB 8: KIỂM TRA FUSARIUM
         elif active_tab == "🦠 Kiểm tra Fusarium":
-            st.markdown("#### Ghi nhận số lượng cây bị bệnh Fusarium")
             available_lots = get_lots_by_farm(c_farm)
             if not available_lots:
                 st.warning("⚠️ Chưa có Lô trồng nào. Hãy tạo ở Tab 1.")
@@ -10154,7 +10147,6 @@ def render_main_app():
         if active_tab is None: active_tab = tab_opts[0]
         
         if active_tab == tab_opts[2]:
-            st.markdown("#### Ghi nhận Sản lượng Thu hoạch hàng ngày")
             available_lots = get_lots_by_farm(c_farm)
             if not available_lots:
                 st.warning("⚠️ Chưa có Lô trồng nào trên hệ thống.")
@@ -10270,7 +10262,6 @@ def render_main_app():
         if active_tab is None: active_tab = tab_opts[0]
         
         if active_tab == tab_opts[2]:
-            st.markdown("#### Ghi nhận Tỷ lệ BSR thành phẩm")
             available_lots = get_lots_by_farm(c_farm)
             if not available_lots:
                 st.warning("⚠️ Chưa có Lô trồng nào trên hệ thống.")
