@@ -454,19 +454,32 @@ Hệ thống phân biệt **2 loại diện tích**:
 
 ---
 
-## 10. Chi Phí
+## 10. Chi Phí & Định Mức
 
 ### 10.1 Dashboard Chi phí raw
 
-Tab `Chi phí` trong app input là dashboard đọc số liệu raw để phân tích tổng chi phí vận hành.
+Tab `Chi phí & định mức` trong app input có phần `Chi phí` đọc số liệu raw để phân tích tổng chi phí vận hành.
 
 - **Nguồn chi phí**: cộng trực tiếp `fact_nhat_ky_san_xuat.thanh_tien` và `fact_vat_tu.thanh_tien`.
 - **Không clean theo lifecycle**: dashboard này không loại chi phí cây cũ, không cap theo cắt bắp, không chia lại chi phí/cây. Mục tiêu là xem tổng chi phí ghi nhận theo farm/lô/đội/tháng/hạng mục.
 - **Phân quyền farm**: Admin và Phòng Kinh doanh xem được nhiều farm; account farm/đội chỉ xem farm đang đăng nhập.
 - **Data access**: dùng Supabase REST client hiện tại, cache 5 phút, join dimension bằng pandas trong app.
-- **Tách biệt với popup chi phí/cây**: popup trên bản đồ dùng logic clean/lifecycle ở mục 10.2, nên số tổng có thể khác dashboard raw.
+- **Tách biệt với popup chi phí/cây**: popup trên bản đồ dùng logic clean/lifecycle ở mục 10.3, nên số tổng có thể khác dashboard raw.
 
-### 10.2 Chi Phí/Cây Trên Bản Đồ
+### 10.2 Dashboard Định mức raw
+
+Phần `Định mức` nằm trong cùng tab `Chi phí & định mức`, port từ dashboard farm cũ để theo dõi mức độ hoàn thành công việc so với định mức.
+
+- **Nguồn dữ liệu**: chỉ dùng `fact_nhat_ky_san_xuat`; không dùng vật tư.
+- **Dòng hợp lệ**: giữ các dòng có `dinh_muc > 0`, `klcv` có dữ liệu, `so_cong > 0` và `dim_lo.lo_type` là `Lô thực`.
+- **Công thức năng suất**:
+  - `nang_suat_thuc_te = klcv / so_cong`
+  - `ti_le_hoan_thanh = nang_suat_thuc_te / dinh_muc * 100`
+- **Ưu tiên số đã ETL**: nếu `fact_nhat_ky_san_xuat.ti_le_display` có dữ liệu thì UI dùng giá trị này; nếu thiếu thì tính lại theo công thức trên.
+- **Bộ lọc**: dùng chung bộ lọc Farm/Khoảng thời gian/Loại lô/Vụ/Đội/Lô/Bao gồm công hỗ trợ với dashboard chi phí. Khi chọn Vụ, khoảng ngày tự đi theo vụ; khi chọn Đội/Lô, các lựa chọn còn lại được ràng buộc theo lô thuộc đội đó.
+- **Ý nghĩa**: đây là dashboard năng suất raw để xem công việc nào, đội nào, lô nào đang đạt hoặc thấp hơn định mức. Nó không clean theo vòng đời đợt trồng và không thay thế logic chi phí/cây trên bản đồ.
+
+### 10.3 Chi Phí/Cây Trên Bản Đồ
 
 Dashboard chi phí/cây được mở từ tooltip của bản đồ Farm 126/157/195.
 

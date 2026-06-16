@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from typing import Any, Iterable
+import unicodedata
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -15,6 +16,9 @@ COLOR_LABOR = "#3b82f6"
 COLOR_MATERIAL = "#f59e0b"
 COLOR_TOTAL = "#2f855a"
 COLOR_MUTED = "#64748b"
+COLOR_GOOD = "#16a34a"
+COLOR_WARN = "#f59e0b"
+COLOR_BAD = "#dc2626"
 
 
 def _money(value: Any) -> float:
@@ -54,6 +58,17 @@ def _first_present(row: dict, fields: Iterable[str], default: str = "") -> str:
         if value is not None and str(value).strip():
             return str(value).strip()
     return default
+
+
+def _normalize_text(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    text = unicodedata.normalize("NFD", text)
+    return "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+
+
+def _is_real_lot_type(value: Any) -> bool:
+    normalized = _normalize_text(value)
+    return normalized in {"lo thuc", "lo that"}
 
 
 def _month_start(series: pd.Series) -> pd.Series:
@@ -160,7 +175,10 @@ def _load_cost_labor_rows(_supabase, farm_ids: tuple[int, ...]) -> list[dict]:
     return _select_rows(
         _supabase,
         "fact_nhat_ky_san_xuat",
-        "nhat_ky_id, farm_id, lo_id, doi_id, cong_viec_id, ngay, so_cong, thanh_tien, is_ho_tro",
+        (
+            "nhat_ky_id, farm_id, lo_id, doi_id, cong_viec_id, ngay, "
+            "so_cong, klcv, dinh_muc, ti_le_display, thanh_tien, is_ho_tro"
+        ),
         in_filter=("farm_id", farm_ids),
         order_col="nhat_ky_id",
     )
@@ -224,7 +242,8 @@ def _build_labor_frame(rows: list[dict], maps: dict[str, dict]) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame(columns=[
             "farm_code", "lo_code", "lo_type", "owner_doi_code", "doi_code", "cong_doan",
-            "ten_cong_viec", "ngay_dt", "thang", "so_cong", "thanh_tien", "is_ho_tro",
+            "ten_cong_viec", "ngay_dt", "thang", "so_cong", "klcv", "dinh_muc",
+            "ti_le", "ns_thuc", "thanh_tien", "is_ho_tro",
         ])
 
     df = pd.DataFrame(rows)
@@ -239,6 +258,14 @@ def _build_labor_frame(rows: list[dict], maps: dict[str, dict]) -> pd.DataFrame:
     df["ngay_dt"] = pd.to_datetime(df["ngay"], errors="coerce")
     df["thang"] = _month_start(df["ngay_dt"])
     df["so_cong"] = _to_number_series(df.get("so_cong", pd.Series(dtype=float)))
+    df["klcv"] = _to_number_series(df.get("klcv", pd.Series(dtype=float)))
+    df["dinh_muc"] = _to_number_series(df.get("dinh_muc", pd.Series(dtype=float)))
+    stored_rate = pd.to_numeric(df.get("ti_le_display", pd.Series(index=df.index, dtype=float)), errors="coerce")
+    computed_rate = (df["klcv"] / df["so_cong"].replace(0, pd.NA) / df["dinh_muc"].replace(0, pd.NA) * 100)
+    df["ti_le"] = stored_rate.where(stored_rate.notna(), computed_rate).replace([float("inf"), -float("inf")], pd.NA)
+    df["ti_le"] = _to_number_series(df["ti_le"])
+    df["ns_thuc"] = (df["klcv"] / df["so_cong"].replace(0, pd.NA)).replace([float("inf"), -float("inf")], pd.NA)
+    df["ns_thuc"] = _to_number_series(df["ns_thuc"])
     df["thanh_tien"] = _to_number_series(df.get("thanh_tien", pd.Series(dtype=float)))
     df["is_ho_tro"] = df.get("is_ho_tro", False).fillna(False).astype(bool)
     return df
@@ -742,10 +769,245 @@ def _render_detail_tables(labor: pd.DataFrame, material: pd.DataFrame) -> None:
             _render_paginated_dataframe(display, key="cost_dash_material_detail")
 
 
+def _build_norm_frame(labor: pd.DataFrame) -> pd.DataFrame:
+    """Return labor rows that can be used for the dinh muc productivity dashboard."""
+    columns = [
+        "farm_code", "lo_code", "lo_type", "owner_doi_code", "doi_code", "cong_doan",
+        "ten_cong_viec", "ngay_dt", "thang", "so_cong", "klcv", "dinh_muc", "ns_thuc", "ti_le",
+    ]
+    if labor.empty:
+        return pd.DataFrame(columns=columns)
+
+    out = labor.copy()
+    for col in columns:
+        if col not in out.columns:
+            out[col] = ""
+    for col in ["so_cong", "klcv", "dinh_muc", "ti_le"]:
+        out[col] = _to_number_series(out.get(col, pd.Series(index=out.index, dtype=float)))
+    out["ngay_dt"] = pd.to_datetime(out.get("ngay_dt"), errors="coerce")
+    out["thang"] = _month_start(out["ngay_dt"])
+    out["ns_thuc"] = (out["klcv"] / out["so_cong"].replace(0, pd.NA)).replace([float("inf"), -float("inf")], pd.NA)
+    out["ns_thuc"] = _to_number_series(out["ns_thuc"])
+
+    mask = (
+        out["lo_type"].map(_is_real_lot_type)
+        & (out["dinh_muc"] > 0)
+        & (out["so_cong"] > 0)
+        & (out["klcv"] > 0)
+        & out["ngay_dt"].notna()
+    )
+    return out.loc[mask, columns].reset_index(drop=True)
+
+
+def _summarize_norm_frame(norm: pd.DataFrame) -> dict[str, float]:
+    if norm.empty:
+        return {
+            "record_count": 0,
+            "avg_rate": 0.0,
+            "median_rate": 0.0,
+            "over_100_count": 0,
+            "total_work": 0.0,
+        }
+    rates = _to_number_series(norm["ti_le"])
+    return {
+        "record_count": int(len(norm)),
+        "avg_rate": float(rates.mean()),
+        "median_rate": float(rates.median()),
+        "over_100_count": int((rates >= 100).sum()),
+        "total_work": float(_to_number_series(norm["so_cong"]).sum()),
+    }
+
+
+def _norm_color(value: Any) -> str:
+    rate = _money(value)
+    if rate >= 100:
+        return COLOR_GOOD
+    if rate >= 80:
+        return COLOR_WARN
+    return COLOR_BAD
+
+
+def _render_norm_kpis(norm: pd.DataFrame) -> None:
+    summary = _summarize_norm_frame(norm)
+    cols = st.columns(4)
+    cols[0].metric("Số lượt định mức", f"{summary['record_count']:,.0f}")
+    cols[1].metric("Tỷ lệ HT trung bình", f"{summary['avg_rate']:,.1f}%")
+    cols[2].metric("Tỷ lệ HT trung vị", f"{summary['median_rate']:,.1f}%")
+    cols[3].metric("Vượt/đạt 100%", f"{summary['over_100_count']:,.0f}", f"{summary['total_work']:,.1f} công")
+
+
+def _render_norm_percent_bar(
+    df: pd.DataFrame,
+    *,
+    label_col: str,
+    value_col: str,
+    title: str,
+    key: str,
+    height: int = 340,
+) -> None:
+    if df.empty:
+        st.info("Không có dữ liệu cho biểu đồ này.")
+        return
+    fig = go.Figure(go.Bar(
+        x=df[value_col],
+        y=df[label_col],
+        orientation="h",
+        marker_color=[_norm_color(v) for v in df[value_col]],
+        text=[f"{v:,.1f}%" for v in df[value_col]],
+        textposition="auto",
+        hovertemplate=f"<b>%{{y}}</b><br>{title}: %{{x:,.1f}}%<extra></extra>",
+    ))
+    fig.add_vline(x=100, line_dash="dash", line_color=COLOR_MUTED)
+    fig.add_vline(x=80, line_dash="dot", line_color=COLOR_WARN)
+    fig.update_layout(title=title, xaxis_ticksuffix="%", yaxis=dict(automargin=True))
+    _apply_plot_style(fig, height)
+    st.plotly_chart(fig, use_container_width=True, key=key)
+
+
+def _render_norm_trend(norm: pd.DataFrame) -> None:
+    _render_section_title("Xu hướng hoàn thành định mức theo tháng")
+    monthly = (
+        norm.groupby("thang")
+        .agg(trung_binh=("ti_le", "mean"), trung_vi=("ti_le", "median"), so_luot=("ti_le", "count"))
+        .reset_index()
+        .sort_values("thang")
+    )
+    if monthly.empty:
+        st.info("Không có dữ liệu định mức theo tháng.")
+        return
+    monthly["Tháng"] = pd.to_datetime(monthly["thang"]).dt.strftime("%m/%Y")
+    fig = go.Figure()
+    fig.add_scatter(
+        x=monthly["Tháng"],
+        y=monthly["trung_binh"],
+        name="Trung bình",
+        mode="lines+markers",
+        line=dict(color=COLOR_GOOD, width=2.5),
+        hovertemplate="<b>%{x}</b><br>Trung bình: %{y:,.1f}%<extra></extra>",
+    )
+    fig.add_scatter(
+        x=monthly["Tháng"],
+        y=monthly["trung_vi"],
+        name="Trung vị",
+        mode="lines+markers",
+        line=dict(color=COLOR_WARN, width=1.8, dash="dot"),
+        hovertemplate="<b>%{x}</b><br>Trung vị: %{y:,.1f}%<extra></extra>",
+    )
+    fig.add_hline(y=100, line_dash="dash", line_color=COLOR_MUTED)
+    fig.add_hline(y=80, line_dash="dot", line_color=COLOR_WARN)
+    fig.update_layout(yaxis_ticksuffix="%")
+    _apply_plot_style(fig, 340)
+    st.plotly_chart(fig, use_container_width=True, key="cost_dash_norm_monthly")
+
+
+def _render_norm_overview(norm: pd.DataFrame) -> None:
+    _render_section_title("Định mức theo farm, đội và lô")
+    col1, col2 = st.columns(2)
+    with col1:
+        by_farm = (
+            norm.groupby("farm_code")
+            .agg(ti_le=("ti_le", "mean"), so_luot=("ti_le", "count"))
+            .reset_index()
+            .sort_values("ti_le", ascending=True)
+        )
+        _render_norm_percent_bar(
+            by_farm.tail(12),
+            label_col="farm_code",
+            value_col="ti_le",
+            title="Tỷ lệ HT theo farm",
+            key="cost_dash_norm_farm",
+            height=max(300, len(by_farm.tail(12)) * 42),
+        )
+    with col2:
+        by_team = (
+            norm.groupby("owner_doi_code")
+            .agg(ti_le=("ti_le", "mean"), so_luot=("ti_le", "count"))
+            .reset_index()
+            .sort_values("ti_le", ascending=True)
+        )
+        _render_norm_percent_bar(
+            by_team.tail(15),
+            label_col="owner_doi_code",
+            value_col="ti_le",
+            title="Tỷ lệ HT theo đội sở hữu lô",
+            key="cost_dash_norm_team",
+            height=max(300, len(by_team.tail(15)) * 30),
+        )
+
+    by_lot = (
+        norm.groupby(["farm_code", "lo_code"])
+        .agg(ti_le=("ti_le", "mean"), so_luot=("ti_le", "count"))
+        .reset_index()
+    )
+    by_lot["label"] = by_lot["farm_code"] + " · " + by_lot["lo_code"]
+    low_lots = by_lot[by_lot["so_luot"] >= 2].sort_values("ti_le", ascending=False).tail(20)
+    _render_norm_percent_bar(
+        low_lots.sort_values("ti_le", ascending=True),
+        label_col="label",
+        value_col="ti_le",
+        title="Các lô có tỷ lệ HT thấp",
+        key="cost_dash_norm_lot",
+        height=max(420, len(low_lots) * 28),
+    )
+
+
+def _render_norm_job_breakdown(norm: pd.DataFrame) -> None:
+    _render_section_title("Định mức theo công việc")
+    by_job = (
+        norm.groupby("ten_cong_viec")
+        .agg(
+            so_luot=("ti_le", "count"),
+            ti_le_tb=("ti_le", "mean"),
+            ti_le_trung_vi=("ti_le", "median"),
+            ns_thuc_tb=("ns_thuc", "mean"),
+            dinh_muc_tb=("dinh_muc", "mean"),
+            tong_cong=("so_cong", "sum"),
+        )
+        .reset_index()
+        .sort_values("ti_le_tb", ascending=True)
+    )
+    chart_rows = by_job[by_job["so_luot"] >= 2].tail(20)
+    _render_norm_percent_bar(
+        chart_rows,
+        label_col="ten_cong_viec",
+        value_col="ti_le_tb",
+        title="Tỷ lệ HT theo công việc",
+        key="cost_dash_norm_job",
+        height=max(420, len(chart_rows) * 28),
+    )
+
+    display = by_job.rename(columns={
+        "ten_cong_viec": "Công việc",
+        "so_luot": "Lượt",
+        "ti_le_tb": "TB %",
+        "ti_le_trung_vi": "Trung vị %",
+        "ns_thuc_tb": "Năng suất/công TB",
+        "dinh_muc_tb": "Định mức TB",
+        "tong_cong": "Tổng công",
+    })
+    for col in ["TB %", "Trung vị %", "Năng suất/công TB", "Định mức TB", "Tổng công"]:
+        display[col] = display[col].map(lambda value: f"{value:,.1f}")
+    _render_paginated_dataframe(display, key="cost_dash_norm_job_detail", page_size=300)
+
+
+def _render_norm_dashboard(norm: pd.DataFrame) -> None:
+    st.caption("Định mức dùng các dòng nhật ký công có `dinh_muc > 0`; tỷ lệ HT = năng suất thực tế / định mức.")
+    if norm.empty:
+        st.info("Không có dữ liệu định mức trong phạm vi bộ lọc hiện tại.")
+        return
+    _render_norm_kpis(norm)
+    st.divider()
+    _render_norm_trend(norm)
+    st.divider()
+    _render_norm_overview(norm)
+    st.divider()
+    _render_norm_job_breakdown(norm)
+
+
 def render_cost_dashboard(_supabase, current_farm: str, current_team: str) -> None:
-    """Render dashboard chi phí raw từ công + vật tư, scoped theo account hiện tại."""
-    st.markdown("### Dashboard chi phí")
-    st.caption("Số liệu raw từ nhật ký công và vật tư. Popup chi phí/cây trên bản đồ dùng logic clean riêng.")
+    """Render raw cost and productivity norm dashboards, scoped by the current account."""
+    st.markdown("### Dashboard chi phí & định mức")
+    st.caption("Chi phí là số liệu raw từ nhật ký công/vật tư. Định mức dùng năng suất công việc từ nhật ký công.")
 
     farm_rows = _load_dim_farms(_supabase)
     allowed_farms = _resolve_allowed_farms(current_farm, farm_rows)
@@ -929,12 +1191,16 @@ def render_cost_dashboard(_supabase, current_farm: str, current_team: str) -> No
         st.warning("Không có dữ liệu chi phí sau khi áp dụng bộ lọc.")
         return
 
-    _render_kpis(labor, material)
-    st.divider()
-    _render_monthly_trend(labor, material)
-    st.divider()
-    _render_overview_charts(labor, material)
-    st.divider()
-    _render_cost_structure(labor, material)
-    st.divider()
-    _render_detail_tables(labor, material)
+    cost_tab, norm_tab = st.tabs(["Chi phí", "Định mức"])
+    with cost_tab:
+        _render_kpis(labor, material)
+        st.divider()
+        _render_monthly_trend(labor, material)
+        st.divider()
+        _render_overview_charts(labor, material)
+        st.divider()
+        _render_cost_structure(labor, material)
+        st.divider()
+        _render_detail_tables(labor, material)
+    with norm_tab:
+        _render_norm_dashboard(_build_norm_frame(labor))

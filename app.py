@@ -38,6 +38,8 @@ import inspect
 
 from cost_dashboard import render_cost_dashboard
 
+COST_DASH_TAB_LABEL = "💰 Chi phí & định mức"
+
 try:
     import cost_lifecycle as _cost_lifecycle
 except Exception:
@@ -9257,12 +9259,12 @@ def get_nt_tab_options(team: str) -> list:
     if team == "Đội BVTV":
         return [
             "🌐 Dữ liệu toàn cục",
-            "💰 Chi phí",
+            COST_DASH_TAB_LABEL,
             "📈 Cập nhật Tiến độ",
         ]
     return [
         "🌐 Dữ liệu toàn cục",
-        "💰 Chi phí",
+        COST_DASH_TAB_LABEL,
         "📈 Cập nhật Tiến độ",
         "📏 Đo Size",
         "🗑️ Cập nhật Xuất hủy",
@@ -9302,7 +9304,7 @@ def render_main_app():
     # MODULE ADMIN
     # =================================================
     if c_farm == "Admin" and c_team == "Quản trị viên":
-        tab_opts = ["🌐 Dữ liệu toàn cục", "💰 Chi phí", "👑 Quản trị Mùa Vụ"]
+        tab_opts = ["🌐 Dữ liệu toàn cục", COST_DASH_TAB_LABEL, "👑 Quản trị Mùa Vụ"]
         active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_admin_menu", default=tab_opts[0])
         if active_tab is None: active_tab = tab_opts[0]
         
@@ -9386,7 +9388,7 @@ def render_main_app():
     # MODULE KINH DOANH
     # =================================================
     if c_farm == "Phòng Kinh doanh" and c_team == "Kinh doanh":
-        tab_opts = ["🌐 Dữ liệu toàn cục", "💰 Chi phí", "📦 Máy tính phân bổ cont"]
+        tab_opts = ["🌐 Dữ liệu toàn cục", COST_DASH_TAB_LABEL, "📦 Máy tính phân bổ cont"]
         active_tab = _persisted_segmented_control(
             "Chức năng",
             tab_opts,
@@ -9412,7 +9414,7 @@ def render_main_app():
     # =================================================
     if c_team == "Quản lý farm":
         st.info("👋 Chế độ chỉ xem (Read-only). Tương tác với các biểu đồ bên dưới để phân tích dữ liệu.")
-        tab_opts = ["🌐 Dữ liệu toàn cục", "💰 Chi phí"]
+        tab_opts = ["🌐 Dữ liệu toàn cục", COST_DASH_TAB_LABEL]
         active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_farm_manager_menu", default=tab_opts[0])
         if active_tab is None: active_tab = tab_opts[0]
         if active_tab == tab_opts[1]:
@@ -9435,7 +9437,7 @@ def render_main_app():
         if active_tab is None: active_tab = tab_opts[0] # Prevent empty state
 
         # TAB 1: KHỞI TẠO LÔ
-        if active_tab == "💰 Chi phí":
+        if active_tab == COST_DASH_TAB_LABEL:
             render_cost_dashboard(supabase, c_farm, c_team)
 
         # TAB 1: KHỞI TẠO LÔ
@@ -10142,7 +10144,7 @@ def render_main_app():
     # MODULE 2: ĐỘI THU HOẠCH
     # =================================================
     elif c_team == "Đội Thu Hoạch":
-        tab_opts = ["🌐 Dữ liệu toàn cục", "💰 Chi phí", "🍌 Nhật ký Thu Hoạch"]
+        tab_opts = ["🌐 Dữ liệu toàn cục", COST_DASH_TAB_LABEL, "🍌 Nhật ký Thu Hoạch"]
         active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_har_menu", default=tab_opts[0])
         if active_tab is None: active_tab = tab_opts[0]
         
@@ -10257,7 +10259,7 @@ def render_main_app():
     # MODULE 3: XƯỞNG ĐÓNG GÓI
     # =================================================
     elif c_team == "Xưởng Đóng Gói":
-        tab_opts = ["🌐 Dữ liệu toàn cục", "💰 Chi phí", "📦 Cập nhật BSR"]
+        tab_opts = ["🌐 Dữ liệu toàn cục", COST_DASH_TAB_LABEL, "📦 Cập nhật BSR"]
         active_tab = st.segmented_control("Chức năng", tab_opts, label_visibility="collapsed", key="tab_bsr_menu", default=tab_opts[0])
         if active_tab is None: active_tab = tab_opts[0]
         

@@ -4,10 +4,13 @@ import pandas as pd
 
 from cost_dashboard import (
     _apply_cost_filters,
+    _build_labor_frame,
+    _build_norm_frame,
     _classify_material_type,
     _compute_linked_filter_state,
     _date_range_for_selected_seasons,
     _resolve_allowed_farms,
+    _summarize_norm_frame,
 )
 
 
@@ -82,6 +85,37 @@ def test_apply_cost_filters_date_lot_team_support():
 def test_material_type_fallback_classifier():
     assert _classify_material_type(pd.Series({"loai_vat_tu": "", "ten_vat_tu": "Phân hữu cơ"})) == "Phân bón"
     assert _classify_material_type(pd.Series({"loai_vat_tu": "", "ten_vat_tu": "Dây chống ngã"})) == "Vật tư tiêu hao"
+
+
+def test_build_labor_frame_computes_norm_rate_when_display_rate_missing():
+    rows = [
+        {
+            "nhat_ky_id": 1,
+            "farm_id": 1,
+            "lo_id": 10,
+            "doi_id": 100,
+            "cong_viec_id": 1000,
+            "ngay": "2026-05-01",
+            "so_cong": 2,
+            "klcv": 120,
+            "dinh_muc": 50,
+            "ti_le_display": None,
+            "thanh_tien": 200000,
+            "is_ho_tro": False,
+        }
+    ]
+    maps = {
+        "farms": {1: {"farm_code": "Farm 157"}},
+        "lots": {10: {"lo_code": "A1", "lo_type": "Lô thực", "doi_id": 100}},
+        "teams": {100: {"doi_code": "NT1"}},
+        "jobs": {1000: {"ten_cong_viec": "Bao buồng", "cong_doan": "Chăm sóc buồng"}},
+        "materials": {},
+    }
+
+    frame = _build_labor_frame(rows, maps)
+
+    assert frame.iloc[0]["ns_thuc"] == 60
+    assert frame.iloc[0]["ti_le"] == 120
 
 
 def test_selected_season_controls_date_range():
@@ -160,3 +194,75 @@ def test_linked_filters_can_scope_by_selected_season_lots():
 
     assert state["team_options"] == ["NT2"]
     assert state["lot_options"] == ["A2"]
+
+
+def test_build_norm_frame_keeps_only_valid_real_lot_rows():
+    labor = pd.DataFrame(
+        [
+            {
+                "farm_code": "Farm 157",
+                "lo_code": "A1",
+                "lo_type": "Lô thực",
+                "owner_doi_code": "NT1",
+                "doi_code": "NT1",
+                "ten_cong_viec": "Bao buồng",
+                "ngay_dt": pd.Timestamp("2026-05-01"),
+                "thang": pd.Timestamp("2026-05-01"),
+                "so_cong": 2,
+                "klcv": 120,
+                "dinh_muc": 50,
+                "ti_le": 120,
+            },
+            {
+                "farm_code": "Farm 157",
+                "lo_code": "Farm 157",
+                "lo_type": "Farm",
+                "owner_doi_code": "NT1",
+                "doi_code": "NT1",
+                "ten_cong_viec": "Chăm sóc vườn",
+                "ngay_dt": pd.Timestamp("2026-05-02"),
+                "thang": pd.Timestamp("2026-05-01"),
+                "so_cong": 1,
+                "klcv": 10,
+                "dinh_muc": 10,
+                "ti_le": 100,
+            },
+            {
+                "farm_code": "Farm 157",
+                "lo_code": "A2",
+                "lo_type": "Lô thực",
+                "owner_doi_code": "NT2",
+                "doi_code": "NT2",
+                "ten_cong_viec": "Làm cỏ",
+                "ngay_dt": pd.Timestamp("2026-05-03"),
+                "thang": pd.Timestamp("2026-05-01"),
+                "so_cong": 1,
+                "klcv": 10,
+                "dinh_muc": 0,
+                "ti_le": 0,
+            },
+        ]
+    )
+
+    out = _build_norm_frame(labor)
+
+    assert out["lo_code"].tolist() == ["A1"]
+    assert out.iloc[0]["ns_thuc"] == 60
+
+
+def test_summarize_norm_frame_calculates_completion_kpis():
+    norm = pd.DataFrame(
+        [
+            {"ti_le": 80, "so_cong": 1.5},
+            {"ti_le": 120, "so_cong": 2.0},
+            {"ti_le": 100, "so_cong": 1.0},
+        ]
+    )
+
+    summary = _summarize_norm_frame(norm)
+
+    assert summary["record_count"] == 3
+    assert summary["avg_rate"] == 100
+    assert summary["median_rate"] == 100
+    assert summary["over_100_count"] == 2
+    assert summary["total_work"] == 4.5

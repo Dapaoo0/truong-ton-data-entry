@@ -13,6 +13,6 @@ def test_nt_input_menu_hides_planting_and_fusarium():
 def test_bvtv_menu_remains_read_and_progress_only():
     assert app.get_nt_tab_options("Đội BVTV") == [
         "🌐 Dữ liệu toàn cục",
-        "💰 Chi phí",
+        app.COST_DASH_TAB_LABEL,
         "📈 Cập nhật Tiến độ",
     ]
