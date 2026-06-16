@@ -223,7 +223,7 @@ def _classify_material_type(row: pd.Series) -> str:
 def _build_labor_frame(rows: list[dict], maps: dict[str, dict]) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame(columns=[
-            "farm_code", "lo_code", "lo_type", "doi_code", "cong_doan",
+            "farm_code", "lo_code", "lo_type", "owner_doi_code", "doi_code", "cong_doan",
             "ten_cong_viec", "ngay_dt", "thang", "so_cong", "thanh_tien", "is_ho_tro",
         ])
 
@@ -232,6 +232,7 @@ def _build_labor_frame(rows: list[dict], maps: dict[str, dict]) -> pd.DataFrame:
     df["farm_code"] = df["farm_id"].map(lambda value: _farm_label(farm_map.get(value, {})))
     df["lo_code"] = df["lo_id"].map(lambda value: _first_present(lot_map.get(value, {}), ("lo_code", "lo_name"), "Khác"))
     df["lo_type"] = df["lo_id"].map(lambda value: _first_present(lot_map.get(value, {}), ("lo_type",), "Không ghi"))
+    df["owner_doi_code"] = df["lo_id"].map(lambda value: _first_present(team_map.get(lot_map.get(value, {}).get("doi_id"), {}), ("doi_code", "doi_name"), "Không ghi"))
     df["doi_code"] = df["doi_id"].map(lambda value: _first_present(team_map.get(value, {}), ("doi_code", "doi_name"), "Không ghi"))
     df["cong_doan"] = df["cong_viec_id"].map(lambda value: _first_present(job_map.get(value, {}), ("cong_doan",), "Không ghi"))
     df["ten_cong_viec"] = df["cong_viec_id"].map(lambda value: _first_present(job_map.get(value, {}), ("ten_cong_viec", "ma_cv"), "Không ghi"))
@@ -246,15 +247,16 @@ def _build_labor_frame(rows: list[dict], maps: dict[str, dict]) -> pd.DataFrame:
 def _build_material_frame(rows: list[dict], maps: dict[str, dict]) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame(columns=[
-            "farm_code", "lo_code", "lo_type", "loai_vat_tu", "ten_vat_tu",
+            "farm_code", "lo_code", "lo_type", "owner_doi_code", "loai_vat_tu", "ten_vat_tu",
             "ngay_dt", "thang", "so_luong", "thanh_tien", "is_ho_tro",
         ])
 
     df = pd.DataFrame(rows)
-    farm_map, lot_map, material_map = maps["farms"], maps["lots"], maps["materials"]
+    farm_map, lot_map, team_map, material_map = maps["farms"], maps["lots"], maps["teams"], maps["materials"]
     df["farm_code"] = df["farm_id"].map(lambda value: _farm_label(farm_map.get(value, {})))
     df["lo_code"] = df["lo_id"].map(lambda value: _first_present(lot_map.get(value, {}), ("lo_code", "lo_name"), "Khác"))
     df["lo_type"] = df["lo_id"].map(lambda value: _first_present(lot_map.get(value, {}), ("lo_type",), "Không ghi"))
+    df["owner_doi_code"] = df["lo_id"].map(lambda value: _first_present(team_map.get(lot_map.get(value, {}).get("doi_id"), {}), ("doi_code", "doi_name"), "Không ghi"))
     df["ten_vat_tu"] = df["vat_tu_id"].map(lambda value: _first_present(material_map.get(value, {}), ("ten_vat_tu", "ma_vat_tu"), "Không xác định"))
     df["loai_vat_tu"] = df["vat_tu_id"].map(lambda value: _first_present(material_map.get(value, {}), ("loai_vat_tu",), "Không xác định"))
     df["loai_vat_tu"] = df.apply(_classify_material_type, axis=1)
@@ -299,6 +301,96 @@ def _build_season_frame(dims: dict[str, list[dict]], maps: dict[str, dict]) -> p
     return pd.DataFrame(data)
 
 
+def _build_lot_meta_frame(dims: dict[str, list[dict]], maps: dict[str, dict]) -> pd.DataFrame:
+    rows = []
+    farm_map = maps["farms"]
+    team_map = maps["teams"]
+    for lot in dims.get("lots", []):
+        if lot.get("is_active") is False:
+            continue
+        team = team_map.get(lot.get("doi_id"), {})
+        farm = farm_map.get(lot.get("farm_id"), {})
+        lo_code = _first_present(lot, ("lo_code", "lo_name"), "")
+        if not lo_code:
+            continue
+        rows.append({
+            "lo_id": lot.get("lo_id"),
+            "farm_code": _farm_label(farm),
+            "lo_code": lo_code,
+            "lo_type": _first_present(lot, ("lo_type",), "Không ghi"),
+            "owner_doi_code": _first_present(team, ("doi_code", "doi_name"), "Không ghi"),
+        })
+    return pd.DataFrame(rows, columns=["lo_id", "farm_code", "lo_code", "lo_type", "owner_doi_code"])
+
+
+def _date_range_for_selected_seasons(season_df: pd.DataFrame, selected_labels: list[str]) -> tuple[date, date] | None:
+    if season_df.empty or not selected_labels:
+        return None
+    selected = season_df[season_df["label"].isin(selected_labels)].copy()
+    if selected.empty:
+        return None
+    start = pd.to_datetime(selected["vu_start"], errors="coerce").min()
+    end = pd.to_datetime(selected["vu_end"], errors="coerce").max()
+    if pd.isna(start) or pd.isna(end):
+        return None
+    return start.date(), end.date()
+
+
+def _list_nonempty(values: pd.Series) -> list[str]:
+    if values.empty:
+        return []
+    return sorted({
+        str(value).strip()
+        for value in values.dropna().tolist()
+        if str(value).strip()
+    })
+
+
+def _compute_linked_filter_state(
+    lot_meta: pd.DataFrame,
+    *,
+    selected_lo_types: list[str],
+    selected_los: list[str],
+    selected_dois: list[str],
+    selected_season_lo_ids: set[int] | None = None,
+) -> dict[str, list[str]]:
+    if lot_meta.empty:
+        return {
+            "team_options": [],
+            "lot_options": [],
+            "selected_dois": [],
+            "selected_los": [],
+        }
+
+    scoped = lot_meta.copy()
+    if selected_lo_types:
+        scoped = scoped[scoped["lo_type"].isin(selected_lo_types)]
+    if selected_season_lo_ids:
+        scoped = scoped[scoped["lo_id"].isin(selected_season_lo_ids)]
+
+    base_lot_options = _list_nonempty(scoped["lo_code"])
+    sanitized_los = [lo for lo in selected_los if lo in base_lot_options]
+
+    if sanitized_los:
+        selected_lot_rows = scoped[scoped["lo_code"].isin(sanitized_los)]
+        team_options = _list_nonempty(selected_lot_rows["owner_doi_code"])
+        sanitized_dois = team_options
+        lot_scope = scoped[scoped["owner_doi_code"].isin(sanitized_dois)] if sanitized_dois else selected_lot_rows
+    else:
+        team_options = _list_nonempty(scoped["owner_doi_code"])
+        sanitized_dois = [doi for doi in selected_dois if doi in team_options]
+        lot_scope = scoped[scoped["owner_doi_code"].isin(sanitized_dois)] if sanitized_dois else scoped
+
+    lot_options = _list_nonempty(lot_scope["lo_code"])
+    sanitized_los = [lo for lo in sanitized_los if lo in lot_options]
+    return {
+        "team_options": team_options,
+        "lot_options": lot_options,
+        "selected_dois": sanitized_dois,
+        "selected_los": sanitized_los,
+    }
+
+
 def _apply_season_filter(df: pd.DataFrame, selected_seasons: pd.DataFrame) -> pd.DataFrame:
     if df.empty or selected_seasons.empty:
         return df
@@ -341,9 +433,12 @@ def _apply_cost_filters(
     material = base_filter(material_df)
     if not labor.empty:
         if selected_dois:
-            labor = labor[labor["doi_code"].isin(selected_dois)]
+            team_col = "owner_doi_code" if "owner_doi_code" in labor.columns else "doi_code"
+            labor = labor[labor[team_col].isin(selected_dois)]
         if not include_support:
             labor = labor[~labor["is_ho_tro"]]
+    if not material.empty and selected_dois and "owner_doi_code" in material.columns:
+        material = material[material["owner_doi_code"].isin(selected_dois)]
     return labor, material
 
 
@@ -687,6 +782,7 @@ def render_cost_dashboard(_supabase, current_farm: str, current_team: str) -> No
         labor_all = _build_labor_frame(_load_cost_labor_rows(_supabase, selected_farm_ids), maps)
         material_all = _build_material_frame(_load_cost_material_rows(_supabase, selected_farm_ids), maps)
         season_df = _build_season_frame(dims, maps)
+        lot_meta = _build_lot_meta_frame(dims, maps)
 
         all_dates = pd.concat([
             labor_all["ngay_dt"].dropna() if "ngay_dt" in labor_all else pd.Series(dtype="datetime64[ns]"),
@@ -696,10 +792,61 @@ def render_cost_dashboard(_supabase, current_farm: str, current_team: str) -> No
             st.info("Chưa có dữ liệu chi phí cho phạm vi này.")
             return
 
-        min_date = all_dates.min().date()
-        max_date = all_dates.max().date()
-        _sanitize_date_range_state("cost_dash_date_range", min_date, max_date)
+        date_bounds = [all_dates]
+        if not season_df.empty:
+            date_bounds.extend([
+                pd.to_datetime(season_df["vu_start"], errors="coerce").dropna(),
+                pd.to_datetime(season_df["vu_end"], errors="coerce").dropna(),
+            ])
+        bounded_dates = pd.concat(date_bounds, ignore_index=True)
+        min_date = bounded_dates.min().date()
+        max_date = bounded_dates.max().date()
+
         with filter_cols[1]:
+            lo_type_opts = _list_nonempty(lot_meta["lo_type"]) if not lot_meta.empty else []
+            _sanitize_multiselect_state("cost_dash_lo_types", lo_type_opts)
+            selected_lo_types = st.multiselect(
+                "Loại lô",
+                options=lo_type_opts,
+                default=lo_type_opts,
+                key="cost_dash_lo_types",
+                placeholder="Tất cả",
+            )
+
+        pre_linked_state = _compute_linked_filter_state(
+            lot_meta,
+            selected_lo_types=selected_lo_types,
+            selected_los=st.session_state.get("cost_dash_los") or [],
+            selected_dois=st.session_state.get("cost_dash_teams") or [],
+        )
+        st.session_state["cost_dash_teams"] = pre_linked_state["selected_dois"]
+        st.session_state["cost_dash_los"] = pre_linked_state["selected_los"]
+
+        season_scope = lot_meta.copy()
+        if selected_lo_types and not season_scope.empty:
+            season_scope = season_scope[season_scope["lo_type"].isin(selected_lo_types)]
+        if pre_linked_state["selected_los"] and not season_scope.empty:
+            season_scope = season_scope[season_scope["lo_code"].isin(pre_linked_state["selected_los"])]
+        elif pre_linked_state["selected_dois"] and not season_scope.empty:
+            season_scope = season_scope[season_scope["owner_doi_code"].isin(pre_linked_state["selected_dois"])]
+        scoped_season_df = season_df
+        if not season_scope.empty and not season_df.empty:
+            scoped_season_df = season_df[season_df["lo_id"].isin(set(season_scope["lo_id"].dropna().astype(int)))]
+        season_labels = scoped_season_df["label"].tolist() if not scoped_season_df.empty else []
+        with filter_cols[2]:
+            _sanitize_multiselect_state("cost_dash_seasons", season_labels)
+            selected_season_labels = st.multiselect("Vụ", options=season_labels, default=[], key="cost_dash_seasons", placeholder="Tất cả")
+        selected_seasons = scoped_season_df[scoped_season_df["label"].isin(selected_season_labels)] if selected_season_labels and not scoped_season_df.empty else pd.DataFrame()
+        season_date_range = _date_range_for_selected_seasons(scoped_season_df, selected_season_labels)
+        season_signature = tuple(selected_season_labels)
+        if season_date_range and st.session_state.get("cost_dash_last_season_signature") != season_signature:
+            st.session_state["cost_dash_date_range"] = season_date_range
+            st.session_state["cost_dash_last_season_signature"] = season_signature
+        elif not season_signature:
+            st.session_state["cost_dash_last_season_signature"] = season_signature
+        _sanitize_date_range_state("cost_dash_date_range", min_date, max_date)
+
+        with filter_cols[3]:
             date_range = st.date_input(
                 "Khoảng thời gian",
                 value=(min_date, max_date),
@@ -715,37 +862,56 @@ def render_cost_dashboard(_supabase, current_farm: str, current_team: str) -> No
             st.error("Ngày bắt đầu phải nhỏ hơn hoặc bằng ngày kết thúc.")
             return
 
-        lots_df = pd.DataFrame(dims.get("lots", []))
-        with filter_cols[2]:
-            lo_type_opts = sorted([
-                str(value) for value in lots_df.get("lo_type", pd.Series(dtype=str)).dropna().unique()
-                if str(value).strip()
-            ])
-            _sanitize_multiselect_state("cost_dash_lo_types", lo_type_opts)
-            selected_lo_types = st.multiselect(
-                "Loại lô",
-                options=lo_type_opts,
-                default=lo_type_opts,
-                key="cost_dash_lo_types",
+        filter_cols2 = st.columns([2, 2, 2])
+        selected_season_lo_ids = set(selected_seasons["lo_id"].dropna().astype(int)) if not selected_seasons.empty else None
+        linked_state = _compute_linked_filter_state(
+            lot_meta,
+            selected_lo_types=selected_lo_types,
+            selected_los=st.session_state.get("cost_dash_los") or [],
+            selected_dois=st.session_state.get("cost_dash_teams") or [],
+            selected_season_lo_ids=selected_season_lo_ids,
+        )
+        st.session_state["cost_dash_teams"] = linked_state["selected_dois"]
+        st.session_state["cost_dash_los"] = linked_state["selected_los"]
+
+        with filter_cols2[0]:
+            selected_dois = st.multiselect(
+                "Đội",
+                options=linked_state["team_options"],
+                default=[],
+                key="cost_dash_teams",
                 placeholder="Tất cả",
             )
-        with filter_cols[3]:
-            show_support = st.checkbox("Bao gồm công hỗ trợ", value=True, key="cost_dash_show_support")
 
-        filter_cols2 = st.columns([2, 2, 2])
-        lot_opts = sorted(set(labor_all["lo_code"].dropna().astype(str)).union(set(material_all["lo_code"].dropna().astype(str))))
-        with filter_cols2[0]:
-            _sanitize_multiselect_state("cost_dash_los", lot_opts)
-            selected_los = st.multiselect("Lô", options=lot_opts, default=[], key="cost_dash_los", placeholder="Tất cả")
-        team_opts = sorted(labor_all["doi_code"].dropna().astype(str).unique()) if not labor_all.empty else []
+        lot_state = _compute_linked_filter_state(
+            lot_meta,
+            selected_lo_types=selected_lo_types,
+            selected_los=st.session_state.get("cost_dash_los") or [],
+            selected_dois=selected_dois,
+            selected_season_lo_ids=selected_season_lo_ids,
+        )
+        st.session_state["cost_dash_los"] = lot_state["selected_los"]
         with filter_cols2[1]:
-            _sanitize_multiselect_state("cost_dash_teams", team_opts)
-            selected_dois = st.multiselect("Đội", options=team_opts, default=[], key="cost_dash_teams", placeholder="Tất cả")
-        season_labels = season_df["label"].tolist() if not season_df.empty else []
+            selected_los = st.multiselect(
+                "Lô",
+                options=lot_state["lot_options"],
+                default=[],
+                key="cost_dash_los",
+                placeholder="Tất cả",
+            )
+
+        final_linked_state = _compute_linked_filter_state(
+            lot_meta,
+            selected_lo_types=selected_lo_types,
+            selected_los=selected_los,
+            selected_dois=selected_dois,
+            selected_season_lo_ids=selected_season_lo_ids,
+        )
+        selected_los = final_linked_state["selected_los"]
+        selected_dois = final_linked_state["selected_dois"]
+
         with filter_cols2[2]:
-            _sanitize_multiselect_state("cost_dash_seasons", season_labels)
-            selected_season_labels = st.multiselect("Vụ", options=season_labels, default=[], key="cost_dash_seasons", placeholder="Tất cả")
-        selected_seasons = season_df[season_df["label"].isin(selected_season_labels)] if selected_season_labels and not season_df.empty else pd.DataFrame()
+            show_support = st.checkbox("Bao gồm công hỗ trợ", value=True, key="cost_dash_show_support")
 
     labor, material = _apply_cost_filters(
         labor_all,
