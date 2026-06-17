@@ -721,6 +721,62 @@ def _render_paginated_dataframe(df: pd.DataFrame, *, key: str, page_size: int = 
     st.dataframe(df.iloc[start:end], use_container_width=True, hide_index=True)
 
 
+def _render_paginated_norm_percent_bar(
+    df: pd.DataFrame,
+    *,
+    label_col: str,
+    value_col: str,
+    title: str,
+    key: str,
+    page_size_options: tuple[int, ...] = (20, 40, 60, 100),
+) -> None:
+    if df.empty:
+        st.info("Không có dữ liệu cho biểu đồ này.")
+        return
+
+    size_key = f"{key}_page_size"
+    page_key = f"{key}_page"
+    if size_key not in st.session_state:
+        st.session_state[size_key] = page_size_options[0]
+    if page_key not in st.session_state:
+        st.session_state[page_key] = 0
+
+    col_info, col_size, col_prev, col_next = st.columns([4, 1.6, 1, 1])
+    with col_size:
+        page_size = st.selectbox(
+            "Số lô/trang",
+            options=list(page_size_options),
+            key=size_key,
+        )
+
+    total_pages = max(1, (len(df) + page_size - 1) // page_size)
+    st.session_state[page_key] = min(st.session_state[page_key], total_pages - 1)
+    page = st.session_state[page_key]
+    start = page * page_size
+    end = min(start + page_size, len(df))
+
+    with col_info:
+        st.caption(f"Hiển thị {start + 1:,}-{end:,} / {len(df):,} lô · Trang {page + 1}/{total_pages}")
+    with col_prev:
+        if st.button("Trước", key=f"{key}_prev", disabled=page == 0, use_container_width=True):
+            st.session_state[page_key] -= 1
+            st.rerun()
+    with col_next:
+        if st.button("Tiếp", key=f"{key}_next", disabled=page >= total_pages - 1, use_container_width=True):
+            st.session_state[page_key] += 1
+            st.rerun()
+
+    page_df = df.iloc[start:end].copy()
+    _render_norm_percent_bar(
+        page_df,
+        label_col=label_col,
+        value_col=value_col,
+        title=title,
+        key=f"{key}_chart",
+        height=max(420, len(page_df) * 28),
+    )
+
+
 def _render_detail_tables(labor: pd.DataFrame, material: pd.DataFrame) -> None:
     _render_section_title("Bảng chi tiết")
     with st.expander("Chi tiết công việc", expanded=False):
@@ -938,16 +994,15 @@ def _render_norm_overview(norm: pd.DataFrame) -> None:
         norm.groupby(["farm_code", "lo_code"])
         .agg(ti_le=("ti_le", "mean"), so_luot=("ti_le", "count"))
         .reset_index()
+        .sort_values(["ti_le", "farm_code", "lo_code"], ascending=[True, True, True])
     )
     by_lot["label"] = by_lot["farm_code"] + " · " + by_lot["lo_code"]
-    low_lots = by_lot[by_lot["so_luot"] >= 2].sort_values("ti_le", ascending=False).tail(20)
-    _render_norm_percent_bar(
-        low_lots.sort_values("ti_le", ascending=True),
+    _render_paginated_norm_percent_bar(
+        by_lot,
         label_col="label",
         value_col="ti_le",
-        title="Các lô có tỷ lệ HT thấp",
+        title="Tỷ lệ hoàn thành theo lô",
         key="cost_dash_norm_lot",
-        height=max(420, len(low_lots) * 28),
     )
 
 
