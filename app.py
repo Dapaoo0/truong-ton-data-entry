@@ -1553,6 +1553,8 @@ def _calculate_lot_cost_per_tree_direct_only(farm_name: str, lo_name: str) -> di
         season = seasons_by_batch.get(batch["base_lot_id"], {})
         batch["vu"] = season.get("vu", "")
         batch["total_cost"] = batch["labor_cost"] + batch["material_cost"]
+        batch["labor_cost_per_tree"] = batch["labor_cost"] / batch["so_cay"] if batch["so_cay"] > 0 else 0.0
+        batch["material_cost_per_tree"] = batch["material_cost"] / batch["so_cay"] if batch["so_cay"] > 0 else 0.0
         batch["cost_per_tree"] = batch["total_cost"] / batch["so_cay"] if batch["so_cay"] > 0 else 0.0
 
     allocation_df = pd.DataFrame(allocation_rows)
@@ -1590,6 +1592,8 @@ def _calculate_lot_cost_per_tree_direct_only(farm_name: str, lo_name: str) -> di
             "total_cost": total_labor + total_material,
             "allocated_cost": allocated_cost,
             "unallocated_cost": float(unallocated_df["amount"].sum()) if not unallocated_df.empty else 0.0,
+            "avg_labor_cost_per_tree": total_labor / allocated_tree_denominator if allocated_tree_denominator > 0 else 0.0,
+            "avg_material_cost_per_tree": total_material / allocated_tree_denominator if allocated_tree_denominator > 0 else 0.0,
             "avg_cost_per_tree": allocated_cost / allocated_tree_denominator if allocated_tree_denominator > 0 else 0.0,
             "tree_denominator": allocated_tree_denominator,
         },
@@ -2208,6 +2212,8 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
         season = seasons_by_batch.get(batch["base_lot_id"], {})
         batch["vu"] = season.get("vu", "")
         batch["total_cost"] = batch["labor_cost"] + batch["material_cost"]
+        batch["labor_cost_per_tree"] = batch["labor_cost"] / batch["so_cay"] if batch["so_cay"] > 0 else 0.0
+        batch["material_cost_per_tree"] = batch["material_cost"] / batch["so_cay"] if batch["so_cay"] > 0 else 0.0
         batch["cost_per_tree"] = batch["total_cost"] / batch["so_cay"] if batch["so_cay"] > 0 else 0.0
 
     allocation_df = pd.DataFrame(allocation_rows)
@@ -2249,6 +2255,8 @@ def calculate_lot_cost_per_tree(farm_name: str, lo_name: str) -> dict:
             "total_cost": total_labor + total_material,
             "allocated_cost": allocated_cost,
             "unallocated_cost": float(unallocated_df["amount"].sum()) if not unallocated_df.empty else 0.0,
+            "avg_labor_cost_per_tree": total_labor / allocated_tree_denominator if allocated_tree_denominator > 0 else 0.0,
+            "avg_material_cost_per_tree": total_material / allocated_tree_denominator if allocated_tree_denominator > 0 else 0.0,
             "avg_cost_per_tree": allocated_cost / allocated_tree_denominator if allocated_tree_denominator > 0 else 0.0,
             "tree_denominator": allocated_tree_denominator,
         },
@@ -2285,10 +2293,13 @@ def _render_lot_cost_dialog(farm_name: str, lo_name: str):
         st.caption(f"Số đợt trồng: {len(batch_df) if isinstance(batch_df, pd.DataFrame) else 0}")
 
     summary = result.get("summary", {})
-    m1, m2, m3 = st.columns([1.4, 1, 1])
-    m1.metric("Chi phí/cây TB", _format_money_compact(summary.get("avg_cost_per_tree", 0)))
-    m2.metric("Tổng chi phí tính vào cây", _format_money_compact(summary.get("allocated_cost", 0)))
-    m3.metric("Tổng cây tính", _format_int_commas(summary.get("tree_denominator", 0)))
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Nhân công/cây", _format_money_compact(summary.get("avg_labor_cost_per_tree", 0)))
+    m2.metric("Vật tư/cây", _format_money_compact(summary.get("avg_material_cost_per_tree", 0)))
+    m3.metric("Tổng/cây", _format_money_compact(summary.get("avg_cost_per_tree", 0)))
+    m4, m5 = st.columns(2)
+    m4.metric("Tổng chi phí tính vào cây", _format_money_compact(summary.get("allocated_cost", 0)))
+    m5.metric("Tổng cây tính", _format_int_commas(summary.get("tree_denominator", 0)))
     st.caption("Chỉ tính các khoản chi phí phù hợp với vòng đời đợt trồng và mốc sinh trưởng của lô.")
 
     if not isinstance(batch_df, pd.DataFrame) or batch_df.empty:
@@ -2299,7 +2310,11 @@ def _render_lot_cost_dialog(farm_name: str, lo_name: str):
             "Đợt": batch_view["dot"].apply(lambda x: f"Đợt {int(x)}"),
             "Ngày trồng": batch_view["ngay_trong"].astype(str),
             "Số cây": batch_view["so_cay"].apply(_format_int_commas),
-            "Chi phí/cây": batch_view["cost_per_tree"].apply(_format_int_commas),
+            "Nhân công/cây": batch_view["labor_cost_per_tree"].apply(_format_int_commas),
+            "Vật tư/cây": batch_view["material_cost_per_tree"].apply(_format_int_commas),
+            "Tổng/cây": batch_view["cost_per_tree"].apply(_format_int_commas),
+            "Chi phí nhân công": batch_view["labor_cost"].apply(_format_int_commas),
+            "Chi phí vật tư": batch_view["material_cost"].apply(_format_int_commas),
             "Tổng chi phí": batch_view["total_cost"].apply(_format_int_commas),
         })
         st.markdown("##### Theo từng đợt trồng")
