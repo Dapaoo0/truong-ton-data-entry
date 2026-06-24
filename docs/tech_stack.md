@@ -10,6 +10,7 @@ Danh sách công cụ, framework và công nghệ đang được sử dụng tro
 ## Backend & Database
 - BaaS (Backend as a Service): **Supabase** (Postgres DB).
 - Data processing, ETL pipeline: **Pandas**, Python.
+- Backend tách dần: **FastAPI** trong `services/api`, chạy bằng Uvicorn/Docker, hiện mới read-only để phục vụ lộ trình web/mobile.
 
 ## Version Control & Management
 - Repo: GitHub.

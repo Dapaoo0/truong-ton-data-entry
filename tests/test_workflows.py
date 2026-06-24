@@ -41,6 +41,17 @@ def soft_delete(table_name, record_id, id_column="id"):
     supabase.table(table_name).update({"is_deleted": True}).eq(id_column, record_id).execute()
 
 
+def create_test_base_lot(dim_lo_id):
+    """Create a minimal active batch for workflow tests that need base_lot_id."""
+    return insert_and_cleanup("base_lots", {
+        "dim_lo_id": dim_lo_id,
+        "ngay_trong": (date.today() - timedelta(days=220)).isoformat(),
+        "so_luong": 10,
+        "so_luong_con_lai": 10,
+        "tuan": (date.today() - timedelta(days=220)).isocalendar()[1]
+    })
+
+
 # ============================================================
 # WORKFLOW TESTS
 # ============================================================
@@ -122,51 +133,63 @@ class TestWF2_StageLogging:
     def test_insert_stage_log_chich_bap(self, test_farm, test_lot):
         """Insert a Chích bắp stage log using dim_lo_id."""
         dim_id = test_lot["lo_id"]
+        base_lot = create_test_base_lot(dim_id)
         test_data = {
             "dim_lo_id": dim_id,
+            "base_lot_id": base_lot["id"],
             "giai_doan": "Chích bắp",
             "ngay_thuc_hien": date.today().isoformat(),
             "so_luong": 1,
-            "mau_day": "Test",
             "tuan": date.today().isocalendar()[1]
         }
-        record = insert_and_cleanup("stage_logs", test_data)
+        record = None
         try:
+            record = insert_and_cleanup("stage_logs", test_data)
             assert record["giai_doan"] == "Chích bắp"
             assert record["dim_lo_id"] == dim_id
+            assert record["base_lot_id"] == base_lot["id"]
         finally:
-            soft_delete("stage_logs", record["id"])
+            if record:
+                soft_delete("stage_logs", record["id"])
+            soft_delete("base_lots", base_lot["id"])
 
     def test_insert_stage_log_cat_bap(self, test_farm, test_lot):
         """Insert a Cắt bắp stage log using dim_lo_id."""
         dim_id = test_lot["lo_id"]
+        base_lot = create_test_base_lot(dim_id)
         test_data = {
             "dim_lo_id": dim_id,
+            "base_lot_id": base_lot["id"],
             "giai_doan": "Cắt bắp",
             "ngay_thuc_hien": date.today().isoformat(),
             "so_luong": 1,
-            "mau_day": "Test",
             "tuan": date.today().isocalendar()[1]
         }
-        record = insert_and_cleanup("stage_logs", test_data)
+        record = None
         try:
+            record = insert_and_cleanup("stage_logs", test_data)
             assert record["giai_doan"] == "Cắt bắp"
+            assert record["base_lot_id"] == base_lot["id"]
         finally:
-            soft_delete("stage_logs", record["id"])
+            if record:
+                soft_delete("stage_logs", record["id"])
+            soft_delete("base_lots", base_lot["id"])
 
     def test_stage_log_join_returns_lot_info(self, test_farm, test_lot):
         """Querying stage_logs with dim_lo join should return farm/lot info."""
         dim_id = test_lot["lo_id"]
+        base_lot = create_test_base_lot(dim_id)
         test_data = {
             "dim_lo_id": dim_id,
+            "base_lot_id": base_lot["id"],
             "giai_doan": "Chích bắp",
             "ngay_thuc_hien": date.today().isoformat(),
             "so_luong": 1,
-            "mau_day": "TestJoin",
             "tuan": 1
         }
-        record = insert_and_cleanup("stage_logs", test_data)
+        record = None
         try:
+            record = insert_and_cleanup("stage_logs", test_data)
             # Query with join like app does
             res = supabase.table("stage_logs") \
                 .select("*, dim_lo!inner(lo_name, dim_farm!inner(farm_name))") \
@@ -176,7 +199,9 @@ class TestWF2_StageLogging:
             assert row["dim_lo"]["lo_name"] == test_lot["lo_name"]
             assert row["dim_lo"]["dim_farm"]["farm_name"] == test_farm
         finally:
-            soft_delete("stage_logs", record["id"])
+            if record:
+                soft_delete("stage_logs", record["id"])
+            soft_delete("base_lots", base_lot["id"])
 
 
 class TestWF4_Harvest:

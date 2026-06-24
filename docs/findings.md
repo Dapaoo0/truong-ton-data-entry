@@ -60,6 +60,7 @@ Những khám phá, cấu hình cứng và lưu ý kinh nghiệm tìm được t
   - **3B** = Lô 3B, **đợt 2** (batch 7, trồng 13/10/2025) — đang là **chuối F0** (vụ đầu tiên).
   - Hậu tố "F" ám chỉ "F1" (vụ tái sinh), không phải lô riêng biệt. Tất cả đều lưu vào `dim_lo_id` của lô 3B.
   - **Khi insert**: Phải set `base_lot_id` **thủ công** thay vì dựa vào FIFO trigger (vì FIFO sẽ dồn hết vào batch cũ nhất trước).
+  - **Khi verify/query**: Không join `stage_logs` trực tiếp với toàn bộ `seasons` rồi cộng số lượng nếu chưa lọc `vu` hoặc chưa dedupe theo `stage_logs.id`. `base_lot_id=25` có cả season F0 và F1, nên join theo `base_lot_id` đơn thuần sẽ làm một record `3BF` xuất hiện 2 lần.
 - **7A trong báo cáo chích bắp là vụ cũ** (24/04/2026): Lô 7A xuất hiện trong Excel (827 cây) nhưng **không có base_lots** trong database → thuộc vụ cũ trước khi hệ thống tracking được triển khai. Bỏ qua, không insert vào `stage_logs`.
 - **Quy tắc phân bổ batch cho chích bắp/cắt bắp** (24/04/2026): Hai chế độ:
   1. **User chỉ định đợt trồng**: Khi người dùng biết rõ data thuộc đợt nào (VD: "3BF = đợt 1 F1") → set `base_lot_id` **thủ công** khi insert. Trigger FIFO sẽ skip (`IF NEW.base_lot_id IS NOT NULL THEN RETURN NEW`).

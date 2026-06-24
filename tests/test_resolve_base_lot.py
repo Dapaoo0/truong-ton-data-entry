@@ -10,6 +10,17 @@ import pandas as pd
 # ── Import từ app.py (chỉ cần constants + function, bypass Streamlit) ──
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
+if "pytest" in sys.modules:
+    import pytest
+
+    pytest.skip(
+        "Standalone script-style regression suite; run with python tests/test_resolve_base_lot.py",
+        allow_module_level=True,
+    )
+
 # Mock streamlit before importing app
 sys.modules['streamlit'] = MagicMock()
 

@@ -26,6 +26,17 @@ from destruction_documents import (
     persist_destruction_batch,
     validate_destruction_pdf,
 )
+from domain.forecast import (
+    CAT_FORECAST_WEEK_OPTIONS as DOMAIN_CAT_FORECAST_WEEK_OPTIONS,
+    build_weekly_cat_forecast as domain_build_weekly_cat_forecast,
+)
+from domain.lifecycle import (
+    build_batch_label_map as domain_build_batch_label_map,
+    build_next_season_maps as domain_build_next_season_maps,
+    get_estimated_rate as domain_get_estimated_rate,
+    get_kg_per_tree as domain_get_kg_per_tree,
+    safe_int_id as domain_safe_int_id,
+)
 from size_report import (
     generate_size_measure_excel,
     validate_size_measurement_sequence,
@@ -757,21 +768,10 @@ LOSS_RATE_TO_CHICH = 0.05   # 5% hao hụt từ trồng → chích bắp
 LOSS_RATE_TO_THU   = 0.10   # 10% tổng hao hụt từ trồng → thu hoạch
 
 def get_estimated_rate(stage: str) -> float:
-    """
-    Trả về tỉ lệ còn lại (1 - loss) theo giai đoạn.
-    - Chích bắp: 0.95 (5% hao hụt)
-    - Cắt bắp:  0.95 (cắt bắp chỉ cách chích 14 ngày, chưa chênh đáng kể)
-    - Thu hoạch: 0.90 (10% hao hụt tổng cộng)
-    """
-    if stage in ("chich_bap", "cat_bap"):
-        return 1 - LOSS_RATE_TO_CHICH  # 0.95
-    elif stage == "thu_hoach":
-        return 1 - LOSS_RATE_TO_THU    # 0.90
-    return 1.0  # Trồng: không hao hụt
+    return domain_get_estimated_rate(stage)
 
 def get_kg_per_tree(vu: str) -> int:
-    """Trả về kg/buồng tương ứng theo vụ. F0 = 15kg, Fn = 18kg."""
-    return KG_PER_TREE_F0 if vu == "F0" else KG_PER_TREE_FN
+    return domain_get_kg_per_tree(vu)
 
 # Stage offsets cho thuật toán matching
 _STAGE_OFFSETS = {
@@ -790,85 +790,15 @@ _DESTRUCTION_STAGE_MAP = {
 
 
 def _safe_int_id(value):
-    """Return an integer id when possible; otherwise None."""
-    if value is None:
-        return None
-    try:
-        if pd.isna(value):
-            return None
-    except (TypeError, ValueError):
-        pass
-    try:
-        if isinstance(value, str):
-            value = value.strip()
-            if not value:
-                return None
-            return int(float(value))
-        return int(value)
-    except (TypeError, ValueError, OverflowError):
-        return None
+    return domain_safe_int_id(value)
 
 
 def build_next_season_maps(df_seasons: pd.DataFrame, df_stg_all: pd.DataFrame):
-    """Return next producing season boundaries keyed by (base_lot_id, vu)."""
-    next_season = {}
-    next_producing = set()
-    if df_seasons.empty or "base_lot_id" not in df_seasons.columns:
-        return next_season, next_producing
-
-    season_rows = df_seasons[df_seasons["base_lot_id"].notna()].copy()
-    season_rows["_base_lot_id_int"] = season_rows["base_lot_id"].apply(_safe_int_id)
-    season_rows = season_rows[season_rows["_base_lot_id_int"].notna()]
-    if (
-        not df_stg_all.empty
-        and "base_lot_id" in df_stg_all.columns
-        and "giai_doan" in df_stg_all.columns
-    ):
-        stg_chich_all = df_stg_all[df_stg_all["giai_doan"] == "Chích bắp"]
-        stg_chich_ids = pd.to_numeric(stg_chich_all["base_lot_id"], errors="coerce")
-        for _, s_row in season_rows.iterrows():
-            s_blid = int(s_row["_base_lot_id_int"])
-            s_vu = s_row["vu"]
-            s_start = pd.to_datetime(s_row["ngay_bat_dau"])
-            chich_batch = stg_chich_all[stg_chich_ids == s_blid]
-            if not chich_batch.empty and "ngay_thuc_hien" in chich_batch.columns:
-                chich_in = chich_batch[
-                    pd.to_datetime(chich_batch["ngay_thuc_hien"], errors="coerce") >= s_start
-                ]
-                if not chich_in.empty:
-                    next_producing.add((s_blid, s_vu))
-
-    for blid, blid_grp in season_rows.groupby("_base_lot_id_int"):
-        blid_int = int(blid)
-        sorted_s = blid_grp.sort_values("ngay_bat_dau").drop_duplicates("vu")
-        vu_list = sorted_s[["vu", "ngay_bat_dau"]].values.tolist()
-        for i, (vu_val, _start_dt) in enumerate(vu_list):
-            if i + 1 < len(vu_list):
-                next_vu = vu_list[i + 1][0]
-                if (blid_int, next_vu) in next_producing:
-                    next_season[(blid_int, vu_val)] = pd.to_datetime(vu_list[i + 1][1])
-                else:
-                    next_season[(blid_int, vu_val)] = None
-            else:
-                next_season[(blid_int, vu_val)] = None
-    return next_season, next_producing
+    return domain_build_next_season_maps(df_seasons, df_stg_all)
 
 
 def build_batch_label_map(df_lots_trong_moi: pd.DataFrame):
-    """Build display labels for lots with multiple planting batches."""
-    labels = {}
-    if df_lots_trong_moi.empty or "id" not in df_lots_trong_moi.columns or "lo" not in df_lots_trong_moi.columns:
-        return labels
-
-    for lo_name_grp, grp_df in df_lots_trong_moi.groupby("lo"):
-        if len(grp_df) > 1:
-            sorted_grp = grp_df.sort_values("ngay_trong") if "ngay_trong" in grp_df.columns else grp_df
-            for i, (_, b_row) in enumerate(sorted_grp.iterrows(), 1):
-                labels[b_row["id"]] = f"{lo_name_grp} (đợt {i})"
-        else:
-            for _, b_row in grp_df.iterrows():
-                labels[b_row["id"]] = lo_name_grp
-    return labels
+    return domain_build_batch_label_map(df_lots_trong_moi)
 
 def get_current_season_destruction(bid: int, giai_doan: str = None) -> int:
     """Tổng xuất hủy thuộc vụ hiện tại (season mới nhất) cho một base_lot.
@@ -2338,12 +2268,23 @@ def _maybe_render_lot_cost_dialog(current_farm: str):
     return True
 
 
+def _supabase_response_data(response):
+    if response is None:
+        return None
+    if isinstance(response, dict):
+        return response.get("data")
+    return getattr(response, "data", None)
+
+
 def lookup_ribbon(farm_id, year, week):
     """Lookup ribbon color for (farm, year, week). Returns color_name or None."""
     res = supabase.table("ribbon_schedule").select("color_name") \
         .eq("farm_id", farm_id).eq("year", year).eq("week_number", week) \
         .eq("is_deleted", False).maybe_single().execute()
-    return res.data["color_name"] if res.data else None
+    data = _supabase_response_data(res)
+    if isinstance(data, list):
+        data = data[0] if data else None
+    return data.get("color_name") if isinstance(data, dict) else None
 
 def get_or_create_ribbon(farm_id, year, week, color_name):
     """Lookup or create ribbon. Returns (color, None) or (None, error_msg)."""
@@ -7458,69 +7399,11 @@ def render_global_data_tab(c_farm):
 # =====================================================
 # MÁY TÍNH PHÂN BỔ CONTAINER (KINH DOANH)
 # =====================================================
-CAT_FORECAST_WEEK_OPTIONS = [8, 9]
+CAT_FORECAST_WEEK_OPTIONS = DOMAIN_CAT_FORECAST_WEEK_OPTIONS
 
 
 def build_weekly_cat_forecast(df_stg: pd.DataFrame, forecast_weeks_inclusive: int = 8) -> pd.DataFrame:
-    """Gom dự báo thu hoạch từ cắt bắp theo ISO year/week."""
-    if df_stg is None or df_stg.empty or "giai_doan" not in df_stg.columns:
-        return pd.DataFrame(columns=["farm", "year", "week", "forecast_bunches"])
-
-    df_cat = df_stg[df_stg["giai_doan"] == "Cắt bắp"].copy()
-    if df_cat.empty:
-        return pd.DataFrame(columns=["farm", "year", "week", "forecast_bunches"])
-
-    try:
-        forecast_weeks_inclusive = int(forecast_weeks_inclusive)
-    except (TypeError, ValueError):
-        forecast_weeks_inclusive = 8
-    if forecast_weeks_inclusive not in CAT_FORECAST_WEEK_OPTIONS:
-        forecast_weeks_inclusive = 8
-    forecast_days_from_cut = (forecast_weeks_inclusive - 1) * 7
-
-    micro_offsets = list(range(-MICRO_WINDOW_HALF, MICRO_WINDOW_HALF + 1))
-    raw_weights = [pow(2.718281828459045, -0.5 * pow(offset / MICRO_SIGMA, 2)) for offset in micro_offsets]
-    total_weight = sum(raw_weights) or 1
-    micro_weights = [w / total_weight for w in raw_weights]
-
-    rows = []
-    for _, row in df_cat.iterrows():
-        ngay_cat = pd.to_datetime(row.get("ngay_thuc_hien"), errors="coerce")
-        if pd.isna(ngay_cat):
-            continue
-        try:
-            qty = int(row.get("so_luong", 0) or 0)
-        except (TypeError, ValueError):
-            qty = 0
-        if qty <= 0:
-            continue
-
-        farm_name = row.get("farm") or "Không rõ farm"
-        midpoint = ngay_cat + timedelta(days=forecast_days_from_cut)
-        for offset, weight in zip(micro_offsets, micro_weights):
-            harvest_day = midpoint + timedelta(days=offset)
-            iso = harvest_day.isocalendar()
-            rows.append({
-                "farm": farm_name,
-                "year": int(iso.year),
-                "week": int(iso.week),
-                "_qty_float": qty * weight,
-            })
-
-    if not rows:
-        return pd.DataFrame(columns=["farm", "year", "week", "forecast_bunches"])
-
-    weekly = pd.DataFrame(rows).groupby(["farm", "year", "week"], as_index=False)["_qty_float"].sum()
-    total_target = int(round(weekly["_qty_float"].sum()))
-    weekly["_floor"] = weekly["_qty_float"].apply(lambda x: int(x))
-    weekly["_remainder"] = weekly["_qty_float"] - weekly["_floor"]
-    deficit = total_target - int(weekly["_floor"].sum())
-    weekly["forecast_bunches"] = weekly["_floor"]
-    if deficit > 0:
-        idx = weekly.sort_values("_remainder", ascending=False).head(deficit).index
-        weekly.loc[idx, "forecast_bunches"] += 1
-
-    return weekly[["farm", "year", "week", "forecast_bunches"]].sort_values(["year", "week", "farm"])
+    return domain_build_weekly_cat_forecast(df_stg, forecast_weeks_inclusive)
 
 
 CONTAINER_SKU_DEFINITIONS = OPTIMIZER_SKU_RULES
