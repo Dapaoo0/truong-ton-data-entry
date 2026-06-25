@@ -5522,7 +5522,20 @@ def render_global_data_tab(c_farm):
             for lo_name in df_lots_farm[df_lots_farm["lo"].isin(polygon_lots)]["lo"].dropna().unique():
                 lo_seasons = df_seasons_farm[
                     (df_seasons_farm["lo"] == lo_name) & (df_seasons_farm["loai_trong"] != "Trồng dặm")
-                ].sort_values("ngay_bat_dau", ascending=False)
+                ]
+                if "base_lot_id" in lo_seasons.columns and "id" in df_lots_farm.columns:
+                    valid_base_lot_ids = set(
+                        pd.to_numeric(df_lots_farm["id"], errors="coerce")
+                        .dropna()
+                        .astype(int)
+                        .tolist()
+                    )
+                    lo_seasons = lo_seasons[
+                        pd.to_numeric(lo_seasons["base_lot_id"], errors="coerce").isin(valid_base_lot_ids)
+                    ]
+                else:
+                    lo_seasons = lo_seasons.iloc[0:0]
+                lo_seasons = lo_seasons.sort_values("ngay_bat_dau", ascending=False)
                 if lo_seasons.empty:
                     continue
 
