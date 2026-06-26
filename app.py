@@ -3949,15 +3949,78 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None, df_har=None) -> bytes:
                 return get_mau_day_fill(colors[0])
             return None
 
+        color_to_weeks_by_farm = {}
+        for farm_name, farm_week_color in week_color_by_farm.items():
+            farm_color_to_weeks = {}
+            for wk, color in farm_week_color.items():
+                if color:
+                    farm_color_to_weeks.setdefault(str(color).strip(), []).append(int(wk))
+            for color, week_list in farm_color_to_weeks.items():
+                farm_color_to_weeks[color] = sorted(set(week_list))
+            color_to_weeks_by_farm[farm_name] = farm_color_to_weeks
+
+        cut_weeks_by_blid = {}
+        if not df_cut_yr.empty and {"base_lot_id", "tuan"}.issubset(df_cut_yr.columns):
+            for blid, grp in df_cut_yr.dropna(subset=["base_lot_id"]).groupby("base_lot_id"):
+                cut_weeks_by_blid[int(blid)] = {int(t) for t in grp["tuan"].dropna().unique()}
+
+        def _target_cut_week_from_color(row, date_col):
+            blid = row.get("base_lot_id")
+            mau_day = str(row.get("mau_day") or "").strip()
+            if pd.isna(blid) or not mau_day:
+                return None
+
+            farm_name = _clean_farm_name(row.get("farm")) if "farm" in row.index else ""
+            if not farm_name:
+                farm_name = base_lot_farm.get(int(blid), "")
+
+            candidate_weeks = list(color_to_weeks_by_farm.get(farm_name, {}).get(mau_day, []))
+            if not candidate_weeks:
+                return None
+
+            lot_cut_weeks = cut_weeks_by_blid.get(int(blid))
+            if lot_cut_weeks:
+                candidate_weeks = [wk for wk in candidate_weeks if wk in lot_cut_weeks]
+                if not candidate_weeks:
+                    return None
+
+            event_date = row.get(date_col)
+            if pd.isna(event_date):
+                return candidate_weeks[0] if len(candidate_weeks) == 1 else None
+
+            event_year, event_week = _iso_year_week(event_date)
+            prior_weeks = [
+                wk for wk in candidate_weeks
+                if int(year) < int(event_year) or (int(year) == int(event_year) and wk <= int(event_week))
+            ]
+            if prior_weeks:
+                return max(prior_weeks)
+            return candidate_weeks[0] if len(candidate_weeks) == 1 else None
+
+        def _destruction_by_blid_week(frame):
+            values = {}
+            if frame.empty or "base_lot_id" not in frame.columns:
+                return values
+            for _, d_row in frame.iterrows():
+                blid = d_row.get("base_lot_id")
+                if pd.isna(blid):
+                    continue
+                target_week = _target_cut_week_from_color(d_row, "ngay_xuat_huy")
+                if target_week is None:
+                    raw_week = d_row.get("tuan")
+                    if pd.isna(raw_week):
+                        continue
+                    target_week = int(raw_week)
+                qty = int(pd.to_numeric(pd.Series([d_row.get("so_luong")]), errors="coerce").fillna(0).iloc[0])
+                key = (int(blid), int(target_week))
+                values[key] = values.get(key, 0) + qty
+            return values
+
+        destruction_before_by_blid_week = _destruction_by_blid_week(df_xh_before_yr)
+        destruction_after_by_blid_week = _destruction_by_blid_week(df_xh_after_yr)
+
         harvest_by_blid_week = {}
         if not df_hv_yr.empty and {"base_lot_id", "mau_day", "ngay_thu_hoach", "so_luong"}.issubset(df_hv_yr.columns):
-            color_to_weeks_by_farm = {}
-            for farm_name, farm_week_color in week_color_by_farm.items():
-                farm_color_to_weeks = {}
-                for wk, color in farm_week_color.items():
-                    if color:
-                        farm_color_to_weeks.setdefault(str(color).strip(), []).append(int(wk))
-                color_to_weeks_by_farm[farm_name] = farm_color_to_weeks
             for _, h_row in df_hv_yr.iterrows():
                 blid = h_row.get("base_lot_id")
                 mau_day = str(h_row.get("mau_day") or "").strip()
@@ -4149,24 +4212,8 @@ def generate_cut_bap_excel(df_lots, df_stg, df_des=None, df_har=None) -> bytes:
                 cell_c.border = thin_border; cell_c.alignment = center_align
                 lot_cut_total += val_cut
                 # XUẤT HỦY — filter by base_lot_id
-                val_des_before = 0
-                val_des_after = 0
-                if not df_xh_before_yr.empty and "base_lot_id" in df_xh_before_yr.columns:
-                    des_mask = (df_xh_before_yr["base_lot_id"] == blid) & (df_xh_before_yr["tuan"] == week)
-                    val_des_before = int(df_xh_before_yr[des_mask]["so_luong"].sum())
-                elif not df_xh_before_yr.empty:
-                    des_mask = (df_xh_before_yr["lo"] == lo_name) & (df_xh_before_yr["tuan"] == week)
-                    if "farm" in df_xh_before_yr.columns:
-                        des_mask = des_mask & (df_xh_before_yr["farm"] == farm_name)
-                    val_des_before = int(df_xh_before_yr[des_mask]["so_luong"].sum())
-                if not df_xh_after_yr.empty and "base_lot_id" in df_xh_after_yr.columns:
-                    des_after_mask = (df_xh_after_yr["base_lot_id"] == blid) & (df_xh_after_yr["tuan"] == week)
-                    val_des_after = int(df_xh_after_yr[des_after_mask]["so_luong"].sum())
-                elif not df_xh_after_yr.empty:
-                    des_after_mask = (df_xh_after_yr["lo"] == lo_name) & (df_xh_after_yr["tuan"] == week)
-                    if "farm" in df_xh_after_yr.columns:
-                        des_after_mask = des_after_mask & (df_xh_after_yr["farm"] == farm_name)
-                    val_des_after = int(df_xh_after_yr[des_after_mask]["so_luong"].sum())
+                val_des_before = int(destruction_before_by_blid_week.get((int(blid), int(week)), 0))
+                val_des_after = int(destruction_after_by_blid_week.get((int(blid), int(week)), 0))
                 val_des = val_des_before + val_des_after
                 cell_d = ws.cell(row=row_idx, column=week_des_col[week], value=val_des if val_des > 0 else "")
                 cell_d.border = thin_border; cell_d.alignment = center_align

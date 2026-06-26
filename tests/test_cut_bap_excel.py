@@ -35,7 +35,7 @@ class _FakeSupabase:
         return _FakeTableQuery(self._ribbon_rows)
 
 
-def _load_cut_report(monkeypatch, df_lots, df_stg):
+def _load_cut_report(monkeypatch, df_lots, df_stg, df_des=None, df_har=None, ribbon_rows=None):
     monkeypatch.setattr(
         app,
         "get_farm_id_from_name",
@@ -45,7 +45,9 @@ def _load_cut_report(monkeypatch, df_lots, df_stg):
         app,
         "supabase",
         _FakeSupabase(
-            [
+            ribbon_rows
+            if ribbon_rows is not None
+            else [
                 {
                     "farm_id": 1,
                     "year": 2026,
@@ -53,21 +55,21 @@ def _load_cut_report(monkeypatch, df_lots, df_stg):
                     "color_name": "Cam",
                     "is_deleted": False,
                 },
-            {
-                "farm_id": 2,
-                "year": 2026,
-                "week_number": 24,
-                "color_name": "Trắng",
-                "is_deleted": False,
-            },
+                {
+                    "farm_id": 2,
+                    "year": 2026,
+                    "week_number": 24,
+                    "color_name": "Trắng",
+                    "is_deleted": False,
+                },
             ]
         ),
     )
     excel_bytes = app.generate_cut_bap_excel(
         df_lots,
         df_stg,
-        pd.DataFrame(),
-        pd.DataFrame(),
+        df_des if df_des is not None else pd.DataFrame(),
+        df_har if df_har is not None else pd.DataFrame(),
     )
     return openpyxl.load_workbook(io.BytesIO(excel_bytes), data_only=True)
 
@@ -154,6 +156,71 @@ def test_cut_report_multi_farm_adds_farm_column_and_specific_forecasts(monkeypat
     assert ws.cell(row=4, column=3).value == "126: Cam\n157: Trắng"
     assert ws.cell(row=5, column=1).value == "Farm 126"
     assert ws.cell(row=6, column=1).value == "Farm 157"
+
+
+def test_cut_report_maps_destruction_by_ribbon_color_to_cut_week(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "get_farm_id_from_name",
+        lambda farm_name: {"Farm 157": 2}.get(farm_name),
+    )
+    df_lots = pd.DataFrame(
+        [
+            {
+                "id": 1,
+                "farm": "Farm 157",
+                "lo": "1A",
+                "ngay_trong": "2025-10-15",
+            }
+        ]
+    )
+    df_stg = pd.DataFrame(
+        [
+            {
+                "giai_doan": "\u0043\u1eaft b\u1eafp",
+                "ngay_thuc_hien": "2026-05-13",
+                "tuan": 20,
+                "base_lot_id": 1,
+                "farm": "Farm 157",
+                "lo": "1A",
+                "so_luong": 787,
+            }
+        ]
+    )
+    df_des = pd.DataFrame(
+        [
+            {
+                "giai_doan": "\u0054r\u01b0\u1edbc thu ho\u1ea1ch",
+                "ngay_xuat_huy": "2026-06-24",
+                "tuan": 26,
+                "base_lot_id": 1,
+                "farm": "Farm 157",
+                "lo": "1A",
+                "mau_day": "\u0110en - Xanh l\u00e1",
+                "so_luong": 496,
+            }
+        ]
+    )
+
+    wb = _load_cut_report(
+        monkeypatch,
+        df_lots,
+        df_stg,
+        df_des=df_des,
+        ribbon_rows=[
+            {
+                "farm_id": 2,
+                "year": 2026,
+                "week_number": 20,
+                "color_name": "\u0110en - Xanh l\u00e1",
+                "is_deleted": False,
+            },
+        ],
+    )
+    ws = wb["2026"]
+
+    assert ws.cell(row=2, column=2).value == "\u0054u\u1ea7n 20"
+    assert ws.cell(row=5, column=3).value == 496
 
 
 def test_harvest_forecast_report_groups_cut_bap_by_farm_specific_harvest_week(monkeypatch):
